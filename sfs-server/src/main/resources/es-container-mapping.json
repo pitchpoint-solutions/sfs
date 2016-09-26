@@ -1,0 +1,54 @@
+{
+  "dynamic": "strict",
+  "_all": {
+    "enabled": false
+  },
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "index": "not_analyzed"
+    },
+    "create_ts": {
+      "type": "date",
+      "index": "not_analyzed"
+    },
+    "update_ts": {
+      "type": "date",
+      "index": "not_analyzed"
+    },
+    "owner_guid": {
+      "type": "string",
+      "index": "not_analyzed"
+    },
+    "account_id": {
+      "type": "string",
+      "index": "not_analyzed"
+    },
+    "max_object_revisions": {
+      "type": "integer",
+      "index": "not_analyzed"
+    },
+    "server_side_encryption": {
+      "type": "boolean",
+      "index": "not_analyzed"
+    },
+    "object_replicas": {
+      "type": "integer",
+      "index": "not_analyzed"
+    },
+    "metadata": {
+      "dynamic": "strict",
+      "type": "nested",
+      "properties": {
+        "name": {
+          "type": "string",
+          "index": "not_analyzed"
+        },
+        "values": {
+          "type": "string",
+          "index": "not_analyzed"
+        }
+      }
+    }
+  }
+}

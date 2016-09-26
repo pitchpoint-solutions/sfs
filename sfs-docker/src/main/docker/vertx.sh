@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+
+java -server -Xms1m -Xmx${HEAP_SIZE} -XX:+UseConcMarkSweepGC -XX:+CMSParallelRemarkEnabled -XX:+ScavengeBeforeFullGC -XX:+UseCMSInitiatingOccupancyOnly -XX:CMSInitiatingOccupancyFraction=70 -XX:+CMSScavengeBeforeRemark -XX:+CMSClassUnloadingEnabled -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/data -Dsun.net.inetaddr.ttl=30 -Dvertx.logger-delegate-factory-class-name=io.vertx.core.logging.SLF4JLogDelegateFactory -Dlogback.configurationFile=/etc/vertx-logback.xml -Dvertx.cacheDirBase=/data/vertxCacheDir -Dvertx.httpServiceFactory.cacheDir=/data/httpServiceFactoryCacheDir -jar /opt/sfs/main.jar -conf /etc/vertx-conf.json -instances ${INSTANCES}

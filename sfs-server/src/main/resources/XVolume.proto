@@ -1,0 +1,104 @@
+syntax = "proto3";
+package org.sfs.protobuf;
+
+message XSuperBlock {
+    enum Type {
+        UNKNOWN = 0;
+        PRIMARY = 1;
+        REPLICA = 2;
+    }
+    Type type = 1;
+    string volumeId = 2;
+    uint32 indexBlockSize = 3;
+    uint32 dataBlockSize = 4;
+}
+
+message XIndexBlock {
+    bool deleted = 1;
+    bool acknowledged = 2;
+    bool garbageCollected = 3;
+    sint64 updatedTs = 4;
+    uint64 dataLength = 6;
+    uint64 dataPosition = 7;
+}
+
+message XJournal {
+
+    message Super {
+        uint32 blockSize = 1;
+    }
+
+    message Header {
+        uint64 metaDataPosition = 1;
+        uint64 metaDataLength = 2;
+        uint64 dataPosition = 3;
+        uint64 dataLength = 4;
+        uint64 nextHeaderPosition = 5;
+        uint64 previousHeaderPositon = 6;
+    }
+
+}
+
+message XDumpFile {
+
+    enum CompressionType {
+        NONE = 0;
+        DEFLATE = 1;
+    }
+
+    message FirstHeader {
+
+        bool encrypted = 1;
+        string cipherName = 2;
+    }
+
+    message Header {
+
+        enum Type {
+            VERSION_01 = 0;
+        }
+
+        XDumpFile.Header.Type type = 1;
+        bytes cipherMetadataSalt = 2;
+        bytes cipherDataSalt = 3;
+        CompressionType metadataCompressionType = 4;
+        CompressionType dataCompressionType = 5;
+        bytes data = 6;
+    }
+
+    message Metadata {
+
+        repeated XDumpFile.Metadata.Entry entries = 1;
+
+        message Entry {
+
+            string name = 1;
+            repeated string values = 2;
+        }
+    }
+
+    message Version01 {
+
+        string objectId = 1;
+        bool deleteMarker = 2;
+        bytes etag = 3;
+        bytes contentMd5 = 4;
+        bytes contentSha512 = 5;
+        string contentType = 6;
+        string contentEncoding = 7;
+        string contentDisposition = 8;
+        sint64 contentLength = 9;
+        bool serverSideEncryption = 10;
+        string objectManifest = 11;
+        bool staticLargeObject = 12;
+        sint64 deleteAt = 13;
+        sint64 createTs = 14;
+        sint64 updateTs = 15;
+        XDumpFile.Metadata metadata = 16;
+        string ownerGuid = 17;
+        bool deleted = 18;
+    }
+}
+
+
+

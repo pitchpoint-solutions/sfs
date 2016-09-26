@@ -1,0 +1,25 @@
+{
+  "test_mode": true,
+  "http.listen.addresses": "127.0.0.1",
+  "http.publish.addresses": "127.0.0.1",
+  "http.maxheadersize": "40960",
+  "remotenode.secret": "YWJjMTIzCg==",
+  "elasticsearch.shards": 1,
+  "elasticsearch.replicas": 0,
+  "auth": {
+    "admin": [
+      {
+        "id": "1",
+        "username": "admin",
+        "password": "admin"
+      }
+    ],
+    "user": [
+      {
+        "id": "2",
+        "username": "user",
+        "password": "user"
+      }
+    ]
+  }
+}

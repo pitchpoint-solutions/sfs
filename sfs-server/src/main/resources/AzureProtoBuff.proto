@@ -1,0 +1,9 @@
+syntax = "proto3";
+package org.sfs.protobuf;
+
+message CipherText {
+    bytes data = 1;
+    string keyIdentifier = 2;
+    string algorithm = 3;
+}
+
