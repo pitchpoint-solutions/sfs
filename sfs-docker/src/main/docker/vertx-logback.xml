@@ -39,11 +39,7 @@
         <appender-ref ref="STDOUT"/> d d
     </logger>
 
-    <logger name="com.pps" level="DEBUG" additivity="false">
-        <appender-ref ref="STDOUT"/>
-    </logger>
-
-    <logger name="pps.common" level="DEBUG" additivity="false">
+    <logger name="org.sfs" level="DEBUG" additivity="false">
         <appender-ref ref="STDOUT"/>
     </logger>
 
