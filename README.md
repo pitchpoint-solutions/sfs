@@ -1,5 +1,6 @@
 # Simple File Server
 
+[![Build Status]
 
 ## Overview
 * Sfs aims to be a file server that can serve and securely store billions of large and small files using minimal resources. 
