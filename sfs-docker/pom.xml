@@ -79,7 +79,7 @@
                             <useConfigFile>true</useConfigFile>
                             <buildDirectory>${project.build.directory}</buildDirectory>
                             <forceTags>true</forceTags>
-                            <imageName>pps-sfs</imageName>
+                            <imageName>simple-file-server</imageName>
                             <imageTags>
                                 <imageTag>${project.version}</imageTag>
                             </imageTags>
