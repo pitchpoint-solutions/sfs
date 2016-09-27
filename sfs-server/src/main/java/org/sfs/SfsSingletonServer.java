@@ -164,6 +164,8 @@ public class SfsSingletonServer extends Server implements Shareable {
 
         FileSystemLock fileSystemLock = new FileSystemLock(Paths.get(fileSystem.toString(), ".lock"), 60, TimeUnit.SECONDS);
 
+
+
         String[] listenAddresses =
                 Iterables.toArray(Splitter.on(',')
                                 .omitEmptyStrings()

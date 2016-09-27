@@ -39,6 +39,7 @@ import rx.Observable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -57,7 +58,6 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.sfs.rx.Defer.empty;
-import static org.sfs.util.UUIDGen.getTimeUUID;
 import static rx.Observable.defer;
 import static rx.Observable.just;
 
@@ -204,7 +204,7 @@ public class Nodes {
                     try {
                         createFile(nodeIdPath);
                         // the write will be skipped if the file already exists
-                        write(nodeIdPath, getTimeUUID().toString().getBytes(UTF_8));
+                        write(nodeIdPath, UUID.randomUUID().toString().getBytes(UTF_8));
                     } catch (IOException e) {
                         // do nothing
                     }

@@ -48,6 +48,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.util.Set;
+import java.util.UUID;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
@@ -94,7 +95,7 @@ public class BaseTestVerticle {
         empty()
                 .flatMap(aVoid -> {
                     VERTX = rule.vertx();
-                    String clusteruuid = getTimeUUID().toString();
+                    String clusteruuid = UUID.randomUUID().toString();
                     try {
                         ROOT_TMP_DIR = createTempDirectory("");
                         ES_TMP_DIR = createTempDirectory(ROOT_TMP_DIR, format("test-cluster-%s", clusteruuid));

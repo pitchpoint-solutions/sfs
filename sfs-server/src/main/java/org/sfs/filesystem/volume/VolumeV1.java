@@ -56,6 +56,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -413,7 +414,7 @@ public class VolumeV1 implements Volume {
                         metaFile.size(vertx)
                                 .flatMap(size -> {
                                     if (size <= 0) {
-                                        _this.volumeId = UUIDGen.getTimeUUID().toString();
+                                        _this.volumeId = UUID.randomUUID().toString();
                                         _this.type = XVolume.XSuperBlock.Type.REPLICA;
                                         _this.dataBlockSize = DATA_BLOCK_SIZE;
                                         _this.indexBlockSize = INDEX_BLOCK_SIZE;
