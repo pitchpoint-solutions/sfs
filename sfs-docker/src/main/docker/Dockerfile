@@ -16,13 +16,10 @@ ENV INSTANCES 1
 
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-RUN groupadd -r sfs && useradd -r -g sfs sfs
 RUN mkdir -p /data && mkdir -p /opt/sfs
 
 COPY libs/ /opt/sfs
 COPY vertx-logback.xml /etc/vertx-logback.xml
-
-RUN chown -R sfs:sfs /data && chown -R sfs:sfs /opt/sfs && chown sfs:sfs /etc/vertx-logback.xml
 
 CMD ["/sbin/my_init"]
 
