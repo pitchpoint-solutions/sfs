@@ -1,0 +1,5 @@
+Simple File Server
+Copyright 2016 The Simple File Server Authors
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
