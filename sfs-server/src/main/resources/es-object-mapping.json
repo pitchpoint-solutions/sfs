@@ -194,14 +194,6 @@
                   "type": "string",
                   "index": "not_analyzed"
                 },
-                "volume_primary": {
-                  "type": "boolean",
-                  "index": "not_analyzed"
-                },
-                "volume_replica": {
-                  "type": "boolean",
-                  "index": "not_analyzed"
-                },
                 "position": {
                   "type": "long"
                 },

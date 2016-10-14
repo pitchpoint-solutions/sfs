@@ -46,8 +46,6 @@ public class WriteHeaderBlobAsHttpResponseHeaders<A extends HeaderBlob> implemen
             httpServerResponse
                     .putHeader(X_CONTENT_LENGTH, valueOf(length))
                     .putHeader(X_CONTENT_VOLUME, valueOf(volume))
-                    .putHeader(X_CONTENT_VOLUME_PRIMARY, valueOf(blob.isPrimary()))
-                    .putHeader(X_CONTENT_VOLUME_REPLICA, valueOf(blob.isReplica()))
                     .putHeader(X_CONTENT_POSITION, valueOf(position));
         }
 

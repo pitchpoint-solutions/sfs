@@ -52,6 +52,7 @@ import org.sfs.vo.ObjectPath;
 import org.sfs.vo.PersistentObject;
 import org.sfs.vo.TransientObject;
 import org.sfs.vo.TransientSegment;
+import org.sfs.vo.TransientServiceDef;
 import org.sfs.vo.XObject;
 import org.sfs.vo.XVersion;
 import rx.Observable;
@@ -191,17 +192,16 @@ public class PutObject implements Handler<SfsRequest> {
                                         .map(persistentObject -> persistentObject.getVersion(versionId).get());
                             } else {
                                 return just((TransientObject) xObject)
-                                        .flatMap(transientObject ->
-                                                vertxContext
-                                                        .verticle()
-                                                        .nodes()
-                                                        .getMaintainerNode(vertxContext)
-                                                        .map(persistentServiceDefOptional -> {
-                                                            if (persistentServiceDefOptional.isPresent()) {
-                                                                transientObject.setNodeId(persistentServiceDefOptional.get().getId());
-                                                            }
-                                                            return transientObject;
-                                                        }))
+                                        .doOnNext(transientObject -> {
+                                            Optional<TransientServiceDef> currentMaintainerNode =
+                                                    vertxContext
+                                                            .verticle()
+                                                            .getClusterInfo()
+                                                            .getCurrentMaintainerNode();
+                                            if (currentMaintainerNode.isPresent()) {
+                                                transientObject.setNodeId(currentMaintainerNode.get().getId());
+                                            }
+                                        })
                                         .flatMap(new PersistObject(httpServerRequest.vertxContext()))
                                         .map(new ValidateOptimisticObjectLock())
                                         .map(persistentObject -> persistentObject.getVersion(versionId).get());

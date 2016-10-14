@@ -20,6 +20,7 @@ import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.nodes.Nodes;
+import org.sfs.nodes.VolumeReplicaGroup;
 import org.sfs.vo.TransientSegment;
 import rx.Observable;
 import rx.functions.Func1;
@@ -50,11 +51,14 @@ public class VerifySegmentQuick implements Func1<TransientSegment, Observable<Bo
             }
             return just(true);
         } else {
-            int primaries = nodes.getNumberOfPrimaries();
-            int replicas = nodes.getNumberOfReplicas();
-            boolean verified =
-                    size(transientSegment.verifiedAckdPrimaryBlobs()) >= primaries
-                            && size(transientSegment.verifiedAckdReplicaBlobs()) >= replicas;
+            int replicas = nodes.getNumberOfObjectReplicasReplicas();
+            boolean allowSameNode = nodes.isAllowSameNode();
+
+            VolumeReplicaGroup volumeReplicaGroup =
+                    new VolumeReplicaGroup(vertxContext, replicas)
+                            .setAllowSameNode(allowSameNode);
+
+            boolean verified = size(transientSegment.verifiedAckdBlobs()) >= volumeReplicaGroup.getQuorumMinNumberOfReplicas();
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("end verifysegmentquick object=" + transientSegment.getParent().getParent().getId() + ", version=" + transientSegment.getParent().getId() + ", segment=" + transientSegment.getId() + ", verified=" + verified);
             }

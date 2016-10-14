@@ -27,7 +27,7 @@ import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.CountingReadStream;
 import org.sfs.io.DigestReadStream;
 import org.sfs.nodes.Nodes;
-import org.sfs.nodes.ReplicaGroup;
+import org.sfs.nodes.VolumeReplicaGroup;
 import org.sfs.nodes.XNode;
 import org.sfs.rx.Holder2;
 import org.sfs.util.MessageDigestFactory;
@@ -73,7 +73,8 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
             return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                     .flatMap(keyResponse -> {
 
-                        ReplicaGroup replicaGroup = new ReplicaGroup(vertxContext, nodes.getNumberOfPrimaries(), nodes.getNumberOfReplicas(), nodes.isAllowSameNode());
+                        VolumeReplicaGroup volumeReplicaGroup = new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectReplicasReplicas())
+                                .setAllowSameNode(nodes.isAllowSameNode());
 
                         long encryptedLength = keyResponse.getData().encryptOutputSize(contentLength);
 
@@ -89,7 +90,7 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
 
                         if (encryptedLength > TINY_DATA_THRESHOLD) {
 
-                            return replicaGroup.consume(nodes.getDataNodes(vertxContext), encryptedLength, sha512Digest, blobDigestReadStream)
+                            return volumeReplicaGroup.consume(encryptedLength, sha512Digest, blobDigestReadStream)
                                     .map(holders -> {
                                         SegmentCipher segmentCipher = new SegmentCipher(keyResponse.getKeyId(), keyResponse.getSalt());
 
@@ -103,12 +104,10 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
                                                 .setReadLength(clearByteCount.count())
                                                 .setIsTinyData(false);
 
-                                        for (Holder2<XNode<?>, DigestBlob> response : holders) {
+                                        for (Holder2<XNode, DigestBlob> response : holders) {
                                             DigestBlob digestBlob = response.value1();
                                             newSegment.newBlob()
                                                     .setVolumeId(digestBlob.getVolume())
-                                                    .setVolumePrimary(digestBlob.isPrimary())
-                                                    .setVolumeReplica(digestBlob.isReplica())
                                                     .setPosition(digestBlob.getPosition())
                                                     .setReadLength(digestBlob.getLength())
                                                     .setReadSha512(digestBlob.getDigest(sha512Digest).get());
@@ -141,14 +140,16 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
                     });
         } else {
 
-            ReplicaGroup replicaGroup = new ReplicaGroup(vertxContext, nodes.getNumberOfPrimaries(), nodes.getNumberOfReplicas(), nodes.isAllowSameNode());
+            VolumeReplicaGroup volumeReplicaGroup =
+                    new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectReplicasReplicas())
+                            .setAllowSameNode(nodes.isAllowSameNode());
 
             final CountingReadStream clearByteCount = new CountingReadStream(readStream);
             final DigestReadStream digestReadStream = new DigestReadStream(clearByteCount, md5Digest, sha512Digest);
 
             if (contentLength > TINY_DATA_THRESHOLD) {
 
-                return replicaGroup.consume(nodes.getDataNodes(vertxContext), contentLength, sha512Digest, digestReadStream)
+                return volumeReplicaGroup.consume(contentLength, sha512Digest, digestReadStream)
                         .map(holders -> {
 
                             final TransientSegment newSegment = transientVersion.newSegment();
@@ -161,12 +162,10 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
                                     .setReadLength(clearByteCount.count())
                                     .setIsTinyData(false);
 
-                            for (Holder2<XNode<?>, DigestBlob> response : holders) {
+                            for (Holder2<XNode, DigestBlob> response : holders) {
                                 DigestBlob digestBlob = response.value1();
                                 newSegment.newBlob()
                                         .setVolumeId(digestBlob.getVolume())
-                                        .setVolumePrimary(digestBlob.isPrimary())
-                                        .setVolumeReplica(digestBlob.isReplica())
                                         .setPosition(digestBlob.getPosition())
                                         .setReadLength(digestBlob.getLength())
                                         .setReadSha512(digestBlob.getDigest(sha512Digest).get());

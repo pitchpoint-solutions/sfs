@@ -20,7 +20,7 @@ import io.vertx.core.json.JsonObject;
 import org.sfs.Server;
 import org.sfs.SfsRequest;
 import org.sfs.VertxContext;
-import org.sfs.nodes.Nodes;
+import org.sfs.nodes.ClusterInfo;
 import org.sfs.util.HttpRequestValidationException;
 import rx.Observable;
 import rx.functions.Func1;
@@ -39,10 +39,10 @@ public class ValidateReplicateGroupIsPresent implements Func1<SfsRequest, Observ
 
     @Override
     public Observable<SfsRequest> call(final SfsRequest httpServerRequest) {
-        Nodes nodes = httpServerRequest.vertxContext().verticle().nodes();
-        int count = size(nodes.getDataNodes(vertxContext));
+        ClusterInfo clusterInfo = httpServerRequest.vertxContext().verticle().getClusterInfo();
+        int count = size(clusterInfo.getDataNodes());
 
-        int expectedCount = nodes.getNumberOfPrimaries() + nodes.getNumberOfReplicas();
+        int expectedCount = clusterInfo.getNumberOfObjectReplicas();
         if (count < expectedCount) {
             JsonObject jsonObject = new JsonObject()
                     .put("message", "Replication Group Offline");

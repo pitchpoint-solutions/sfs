@@ -31,6 +31,7 @@ import org.sfs.validate.ValidateActionAdmin;
 import org.sfs.validate.ValidateOptimisticAccountLock;
 import org.sfs.vo.PersistentAccount;
 import org.sfs.vo.TransientAccount;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -62,18 +63,16 @@ public class PostAccount implements Handler<SfsRequest> {
                                     .map(new ValidateOptimisticAccountLock());
                         } else {
                             return just(TransientAccount.fromSfsRequest(httpServerRequest))
-                                    .flatMap(transientAccount -> {
+                                    .doOnNext(transientAccount -> {
                                         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
-                                        return vertxContext
-                                                .verticle()
-                                                .nodes()
-                                                .getMaintainerNode(vertxContext)
-                                                .map(persistentServiceDefOptional -> {
-                                                    if (persistentServiceDefOptional.isPresent()) {
-                                                        transientAccount.setNodeId(persistentServiceDefOptional.get().getId());
-                                                    }
-                                                    return transientAccount;
-                                                });
+                                        Optional<TransientServiceDef> currentMaintainerNode =
+                                                vertxContext
+                                                        .verticle()
+                                                        .getClusterInfo()
+                                                        .getCurrentMaintainerNode();
+                                        if (currentMaintainerNode.isPresent()) {
+                                            transientAccount.setNodeId(currentMaintainerNode.get().getId());
+                                        }
                                     })
                                     .flatMap(new PersistAccount(httpServerRequest.vertxContext()))
                                     .map(new ValidateOptimisticAccountLock());

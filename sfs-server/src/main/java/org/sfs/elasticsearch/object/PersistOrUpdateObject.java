@@ -16,11 +16,13 @@
 
 package org.sfs.elasticsearch.object;
 
+import com.google.common.base.Optional;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.validate.ValidateOptimisticObjectLock;
 import org.sfs.vo.PersistentObject;
 import org.sfs.vo.TransientObject;
+import org.sfs.vo.TransientServiceDef;
 import org.sfs.vo.XObject;
 import rx.Observable;
 import rx.functions.Func1;
@@ -45,17 +47,12 @@ public class PersistOrUpdateObject implements Func1<XObject, Observable<Persiste
                     .map(new ValidateOptimisticObjectLock());
         } else {
             return just((TransientObject) xObject)
-                    .flatMap(transientObject ->
-                            vertxContext
-                                    .verticle()
-                                    .nodes()
-                                    .getMaintainerNode(vertxContext)
-                                    .map(persistentServiceDefOptional -> {
-                                        if (persistentServiceDefOptional.isPresent()) {
-                                            transientObject.setNodeId(persistentServiceDefOptional.get().getId());
-                                        }
-                                        return transientObject;
-                                    }))
+                    .doOnNext(transientObject -> {
+                        Optional<TransientServiceDef> currentMaintainerNode = vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode();
+                        if (currentMaintainerNode.isPresent()) {
+                            transientObject.setNodeId(currentMaintainerNode.get().getId());
+                        }
+                    })
                     .flatMap(new PersistObject(vertxContext))
                     .map(new ValidateOptimisticObjectLock());
         }

@@ -63,13 +63,4 @@ public interface Volume {
     Observable<Optional<HeaderBlob>> acknowledge(SfsVertx vertx, long position);
 
     Observable<Optional<HeaderBlob>> delete(SfsVertx vertx, final long position);
-
-    boolean isPrimary();
-
-    boolean isReplica();
-
-    Observable<Void> setPrimary(SfsVertx vertx);
-
-    Observable<Void> setReplica(SfsVertx vertx);
-
 }

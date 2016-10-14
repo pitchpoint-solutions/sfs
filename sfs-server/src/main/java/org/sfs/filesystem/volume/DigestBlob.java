@@ -38,8 +38,8 @@ public class DigestBlob extends HeaderBlob {
 
     private final Map<MessageDigestFactory, byte[]> digests;
 
-    public DigestBlob(String volume, boolean primary, boolean replica, long position, long length) {
-        super(volume, primary, replica, position, length);
+    public DigestBlob(String volume, long position, long length) {
+        super(volume, position, length);
         this.digests = new EnumMap<>(MessageDigestFactory.class);
     }
 
@@ -118,38 +118,4 @@ public class DigestBlob extends HeaderBlob {
     public Optional<byte[]> getDigest(MessageDigestFactory messageDigestFactory) {
         return fromNullable(digests.get(messageDigestFactory));
     }
-
-    public QuorumIdentity quorumIdentity() {
-        return new QuorumIdentity(this);
-    }
-
-    public static class QuorumIdentity extends HeaderBlob.QuorumIdentity {
-
-        private final Map<MessageDigestFactory, byte[]> digests;
-
-        public QuorumIdentity(DigestBlob digestBlob) {
-            super(digestBlob);
-            this.digests = digestBlob.getDigests();
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof QuorumIdentity)) return false;
-            if (!super.equals(o)) return false;
-
-            QuorumIdentity that = (QuorumIdentity) o;
-
-            return digests != null ? digests.equals(that.digests) : that.digests == null;
-
-        }
-
-        @Override
-        public int hashCode() {
-            int result = super.hashCode();
-            result = 31 * result + (digests != null ? digests.hashCode() : 0);
-            return result;
-        }
-    }
-
 }

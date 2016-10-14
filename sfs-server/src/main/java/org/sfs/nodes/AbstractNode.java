@@ -16,27 +16,7 @@
 
 package org.sfs.nodes;
 
-public abstract class AbstractNode<T extends AbstractNode> implements XNode<T> {
+public abstract class AbstractNode implements XNode {
 
-    private final String groupId;
-
-    public AbstractNode() {
-        this.groupId = "default";
-    }
-
-    @Override
-    public String getGroupId() {
-        return groupId;
-    }
-
-    @Override
-    public boolean isSameGroup(XNode xNode) {
-        if (xNode == null) {
-            return false;
-        }
-        String oThisGroupId = getGroupId();
-        String oOtherGroupId = xNode.getGroupId();
-        return oOtherGroupId.equals(oThisGroupId);
-    }
 
 }

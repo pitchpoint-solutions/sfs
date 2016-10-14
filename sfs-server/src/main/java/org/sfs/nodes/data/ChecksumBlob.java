@@ -73,13 +73,11 @@ public class ChecksumBlob implements Handler<SfsRequest> {
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
                 .map(aVoid -> httpServerRequest)
-                .map(new ValidateParamExists(NODE))
                 .map(new ValidateParamExists(VOLUME))
                 .map(new ValidateParamExists(POSITION))
                 .map(new ValidateParamBetweenLong(POSITION, 0, MAX_VALUE))
                 .map(new ValidateParamBetweenLong(LENGTH, 0, MAX_VALUE))
                 .map(new ValidateParamBetweenLong(OFFSET, 0, MAX_VALUE))
-                .map(new ValidateNodeIdMatchesLocalNodeId<>(vertxContext, httpServerRequest.params().get(NODE)))
                 .map(new ValidateParamComputedDigest())
                 .flatMap(httpServerRequest1 -> {
                     MultiMap params = httpServerRequest1.params();

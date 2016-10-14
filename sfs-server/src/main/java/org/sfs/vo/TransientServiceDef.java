@@ -22,6 +22,9 @@ public class TransientServiceDef extends ServiceDef<TransientServiceDef> {
         super(id);
     }
 
+    public TransientServiceDef() {
+    }
+
     @Override
     public TransientServiceDef copy() {
         return new TransientServiceDef(getId())

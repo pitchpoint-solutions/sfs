@@ -16,6 +16,7 @@
 
 package org.sfs.integration.java;
 
+import com.google.common.net.HostAndPort;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
@@ -51,7 +52,6 @@ import java.util.UUID;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static java.lang.Integer.parseInt;
 import static java.lang.String.format;
 import static java.lang.String.valueOf;
 import static java.lang.System.currentTimeMillis;
@@ -62,7 +62,6 @@ import static org.elasticsearch.common.settings.Settings.Builder;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.node.NodeBuilder.nodeBuilder;
 import static org.sfs.rx.Defer.empty;
-import static org.sfs.util.UUIDGen.getTimeUUID;
 import static rx.Observable.create;
 import static rx.Observable.from;
 import static rx.Observable.just;
@@ -143,21 +142,24 @@ public class BaseTestVerticle {
                         verticleConfig.put("elasticsearch.discovery.zen.ping.unicast.hosts", new JsonArray().add(ES_HOST));
                     }
 
-                    if (!verticleConfig.containsKey("http.listen.port")) {
-                        verticleConfig.put("http.listen.port", valueOf(findFreePort(6677, 7777)));
+                    if (!verticleConfig.containsKey("http.listen.addresses")) {
+                        int freePort = findFreePort(6677, 7777);
+                        verticleConfig.put("http.listen.addresses", new JsonArray().add(HostAndPort.fromParts("127.0.0.1", freePort).toString()));
                     }
 
+                    HostAndPort hostAndPort = HostAndPort.fromString(verticleConfig.getJsonArray("http.listen.addresses").getString(0));
+
                     HttpClientOptions httpClientOptions = new HttpClientOptions();
-                    httpClientOptions.setDefaultPort(parseInt(verticleConfig.getString("http.listen.port")))
-                            .setDefaultHost("127.0.0.1")
+                    httpClientOptions.setDefaultPort(hostAndPort.getPort())
+                            .setDefaultHost(hostAndPort.getHostText())
                             .setMaxPoolSize(25)
                             .setConnectTimeout(1000)
                             .setKeepAlive(false)
                             .setLogActivity(true);
 
                     HttpClientOptions httpsClientOptions = new HttpClientOptions();
-                    httpsClientOptions.setDefaultPort(parseInt(verticleConfig.getString("http.listen.port")))
-                            .setDefaultHost("127.0.0.1")
+                    httpsClientOptions.setDefaultPort(hostAndPort.getPort())
+                            .setDefaultHost(hostAndPort.getHostText())
                             .setMaxPoolSize(25)
                             .setConnectTimeout(1000)
                             .setKeepAlive(false)

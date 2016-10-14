@@ -24,9 +24,10 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.FluentIterable;
 import com.google.common.io.CharStreams;
 import com.google.common.net.HostAndPort;
+import io.vertx.core.AsyncResultHandler;
 import io.vertx.core.Context;
+import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
@@ -35,6 +36,7 @@ import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.ActionWriteResponse;
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.Client;
@@ -49,13 +51,15 @@ import org.elasticsearch.index.engine.DocumentAlreadyExistsException;
 import org.elasticsearch.index.engine.VersionConflictEngineException;
 import org.sfs.Server;
 import org.sfs.VertxContext;
+import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.Defer;
 import org.sfs.rx.ResultMemoizeHandler;
 import org.sfs.rx.ToVoid;
+import org.sfs.util.ConfigHelper;
 import org.sfs.util.ExceptionHelper;
-import org.sfs.util.JsonHelper;
 import org.sfs.util.Limits;
 import rx.Observable;
+import rx.Subscriber;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -64,6 +68,8 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static org.elasticsearch.common.unit.TimeValue.timeValueSeconds;
 
 public class Elasticsearch {
 
@@ -89,7 +95,7 @@ public class Elasticsearch {
     public Elasticsearch() {
     }
 
-    public Observable<Void> start(final VertxContext<Server> vertxContext, final JsonObject config) {
+    public Observable<Void> start(final VertxContext<Server> vertxContext, final JsonObject config, boolean isMasterNode) {
         return Defer.empty()
                 .filter(aVoid -> status.compareAndSet(Status.STOPPED, Status.STARTING))
                 .flatMap(aVoid -> vertxContext.executeBlocking(
@@ -99,33 +105,32 @@ public class Elasticsearch {
                                 try {
                                     ESLoggerFactory.setDefaultFactory(new Slf4jESLoggerFactory());
 
-                                    defaultScrollTimeout = Long.parseLong(JsonHelper.getField(config, "elasticsearch.defaultscrolltimeout", String.valueOf(TimeUnit.MINUTES.toMillis(2))));
-                                    defaultIndexTimeout = Long.parseLong(JsonHelper.getField(config, "elasticsearch.defaultindextimeout", "500"));
-                                    defaultGetTimeout = Long.parseLong(JsonHelper.getField(config, "elasticsearch.defaultgettimeout", "500"));
-                                    defaultSearchTimeout = Long.parseLong(JsonHelper.getField(config, "elasticsearch.defaultsearchtimeout", String.valueOf(TimeUnit.SECONDS.toMillis(5))));
-                                    defaultDeleteTimeout = Long.parseLong(JsonHelper.getField(config, "elasticsearch.defaultdeletetimeout", "500"));
-                                    defaultAdminTimeout = Long.parseLong(JsonHelper.getField(config, "elasticsearch.defaultadmintimeout", String.valueOf(TimeUnit.SECONDS.toMillis(30))));
-                                    shards = Integer.parseInt(JsonHelper.getField(config, "elasticsearch.shards", String.valueOf(1)));
-                                    replicas = Integer.parseInt(JsonHelper.getField(config, "elasticsearch.replicas", String.valueOf(0)));
+                                    defaultScrollTimeout = Long.parseLong(ConfigHelper.getFieldOrEnv(config, "elasticsearch.defaultscrolltimeout", String.valueOf(TimeUnit.MINUTES.toMillis(2))));
+                                    defaultIndexTimeout = Long.parseLong(ConfigHelper.getFieldOrEnv(config, "elasticsearch.defaultindextimeout", "500"));
+                                    defaultGetTimeout = Long.parseLong(ConfigHelper.getFieldOrEnv(config, "elasticsearch.defaultgettimeout", "500"));
+                                    defaultSearchTimeout = Long.parseLong(ConfigHelper.getFieldOrEnv(config, "elasticsearch.defaultsearchtimeout", String.valueOf(TimeUnit.SECONDS.toMillis(5))));
+                                    defaultDeleteTimeout = Long.parseLong(ConfigHelper.getFieldOrEnv(config, "elasticsearch.defaultdeletetimeout", "500"));
+                                    defaultAdminTimeout = Long.parseLong(ConfigHelper.getFieldOrEnv(config, "elasticsearch.defaultadmintimeout", String.valueOf(TimeUnit.SECONDS.toMillis(30))));
+                                    shards = Integer.parseInt(ConfigHelper.getFieldOrEnv(config, "elasticsearch.shards", String.valueOf(1)));
+                                    replicas = Integer.parseInt(ConfigHelper.getFieldOrEnv(config, "elasticsearch.replicas", String.valueOf(0)));
 
                                     Settings.Builder settings = Settings.settingsBuilder();
                                     settings.put("node.client", true);
-                                    String clusterName = JsonHelper.getField(config, "elasticsearch.cluster.name");
+                                    String clusterName = ConfigHelper.getFieldOrEnv(config, "elasticsearch.cluster.name");
                                     if (clusterName != null) {
                                         settings.put("cluster.name", clusterName);
                                     }
-                                    String nodeName = JsonHelper.getField(config, "elasticsearch.node.name");
+                                    String nodeName = ConfigHelper.getFieldOrEnv(config, "elasticsearch.node.name");
                                     if (nodeName != null) {
                                         settings.put("node.name", nodeName);
                                     }
-                                    JsonArray unicastHosts = config.getJsonArray("elasticsearch.discovery.zen.ping.unicast.hosts", new JsonArray());
-                                    settings.put("discovery.zen.ping.multicast.enabled", JsonHelper.getField(config, "elasticsearch.discovery.zen.ping.multicast.enabled", "true"));
-                                    settings.put("discovery.zen.ping.unicast.enabled", JsonHelper.getField(config, "elasticsearch.discovery.zen.ping.unicast.enabled", "false"));
-                                    settings.put("discovery.zen.ping.unicast.hosts", Joiner.on(',').join(config.getJsonArray("elasticsearch.discovery.zen.ping.unicast.hosts", new JsonArray())));
+                                    Iterable<String> unicastHosts = ConfigHelper.getArrayFieldOrEnv(config, "elasticsearch.discovery.zen.ping.unicast.hosts", new String[]{});
+                                    settings.put("discovery.zen.ping.multicast.enabled", ConfigHelper.getFieldOrEnv(config, "elasticsearch.discovery.zen.ping.multicast.enabled", "true"));
+                                    settings.put("discovery.zen.ping.unicast.enabled", ConfigHelper.getFieldOrEnv(config, "elasticsearch.discovery.zen.ping.unicast.enabled", "false"));
+                                    settings.put("discovery.zen.ping.unicast.hosts", Joiner.on(',').join(unicastHosts));
                                     settings.put("client.transport.sniff", "true");
                                     Iterable<InetSocketTransportAddress> transports =
                                             FluentIterable.from(unicastHosts)
-                                                    .transform(input -> (String) input)
                                                     .filter(Predicates.notNull())
                                                     .transform(HostAndPort::fromString)
                                                     .transform(input -> {
@@ -148,7 +153,8 @@ public class Elasticsearch {
                             }
                             return null;
                         }))
-                .flatMap(aVoid -> prepareCommonIndex(vertxContext))
+                .flatMap(aVoid -> waitForGreen(vertxContext))
+                .flatMap(aVoid -> prepareCommonIndex(vertxContext, isMasterNode))
                 .doOnNext(aVoid -> Preconditions.checkState(status.compareAndSet(Status.STARTING, Status.STARTED)))
                 .doOnNext(aVoid -> LOGGER.debug("Started Elasticsearch"));
     }
@@ -185,12 +191,62 @@ public class Elasticsearch {
         return "sfs_v0_";
     }
 
-    public Observable<Void> prepareCommonIndex(VertxContext<Server> vertxContext) {
-        return createUpdateIndex(vertxContext, serviceDefTypeIndex(), "es-service-def-mapping.json", Limits.NOT_SET, Limits.NOT_SET)
-                .flatMap(aVoid -> createUpdateIndex(vertxContext, accountIndex(), "es-account-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
-                .flatMap(aVoid -> createUpdateIndex(vertxContext, containerIndex(), "es-container-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
-                .flatMap(aVoid -> createUpdateIndex(vertxContext, containerKeyIndex(), "es-container-key-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
-                .flatMap(aVoid -> createUpdateIndex(vertxContext, masterKeyTypeIndex(), "es-master-key-mapping.json", Limits.NOT_SET, Limits.NOT_SET));
+    private Observable<Void> waitForGreen(VertxContext<Server> vertxContext) {
+        int maxRetries = 10;
+        AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+        waitForGreen0(vertxContext, 0, maxRetries, handler);
+        return Observable.create(handler.subscribe);
+    }
+
+    private void waitForGreen0(VertxContext<Server> vertxContext, int retryCount, int maxRetries, AsyncResultHandler<Void> handler) {
+        String indexPrefix = indexPrefix();
+        ClusterHealthRequestBuilder request =
+                elasticSearchClient
+                        .admin()
+                        .cluster()
+                        .prepareHealth(indexPrefix)
+                        .setWaitForStatus(ClusterHealthStatus.GREEN)
+                        .setTimeout(timeValueSeconds(2));
+
+        execute(vertxContext, request, getDefaultAdminTimeout())
+                .map(Optional::get)
+                .map(new ToVoid<>())
+                .subscribe(new Subscriber<Void>() {
+
+                    @Override
+                    public void onCompleted() {
+                        handler.handle(Future.succeededFuture());
+                    }
+
+                    @Override
+                    public void onError(Throwable e) {
+                        int nextRetryCount = retryCount + 1;
+                        long delayMs = ((long) Math.pow(2, nextRetryCount) * 100L);
+                        if (retryCount < maxRetries) {
+                            LOGGER.warn("Handling connect error. Retrying after " + delayMs + "ms", e);
+                            vertxContext.vertx().setTimer(delayMs, event -> waitForGreen0(vertxContext, nextRetryCount, maxRetries, handler));
+                        } else {
+                            handler.handle(Future.failedFuture(e));
+                        }
+                    }
+
+                    @Override
+                    public void onNext(Void aVoid) {
+
+                    }
+                });
+    }
+
+    public Observable<Void> prepareCommonIndex(VertxContext<Server> vertxContext, boolean isMasterNode) {
+        if (isMasterNode) {
+            return createUpdateIndex(vertxContext, serviceDefTypeIndex(), "es-service-def-mapping.json", Limits.NOT_SET, Limits.NOT_SET)
+                    .flatMap(aVoid -> createUpdateIndex(vertxContext, accountIndex(), "es-account-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
+                    .flatMap(aVoid -> createUpdateIndex(vertxContext, containerIndex(), "es-container-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
+                    .flatMap(aVoid -> createUpdateIndex(vertxContext, containerKeyIndex(), "es-container-key-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
+                    .flatMap(aVoid -> createUpdateIndex(vertxContext, masterKeyTypeIndex(), "es-master-key-mapping.json", Limits.NOT_SET, Limits.NOT_SET));
+        } else {
+            return Defer.empty();
+        }
     }
 
     public Observable<Void> prepareObjectIndex(VertxContext<Server> vertxContext, String containerName, int shards, int replicas) {
@@ -330,19 +386,22 @@ public class Elasticsearch {
 
     public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> Observable<Optional<Response>> execute(Vertx vertx, final RequestBuilder actionRequestBuilder, long timeoutMs) {
         Context context = vertx.getOrCreateContext();
-        ResultMemoizeHandler<Response> handler = new ResultMemoizeHandler<>();
-        actionRequestBuilder.execute(new ActionListener<Response>() {
-            @Override
-            public void onResponse(Response response) {
-                context.runOnContext(event -> handler.complete(response));
-            }
+        return Defer.empty()
+                .flatMap(aVoid -> {
+                    ResultMemoizeHandler<Response> handler = new ResultMemoizeHandler<>();
+                    actionRequestBuilder.execute(new ActionListener<Response>() {
+                        @Override
+                        public void onResponse(Response response) {
+                            context.runOnContext(event -> handler.complete(response));
+                        }
 
-            @Override
-            public void onFailure(Throwable e) {
-                context.runOnContext(event -> handler.fail(e));
-            }
-        });
-        return Observable.create(handler.subscribe)
+                        @Override
+                        public void onFailure(Throwable e) {
+                            context.runOnContext(event -> handler.fail(e));
+                        }
+                    });
+                    return Observable.create(handler.subscribe);
+                })
                 .doOnNext(response -> {
                     if (response instanceof SearchResponse) {
                         SearchResponse searchResponse = (SearchResponse) response;

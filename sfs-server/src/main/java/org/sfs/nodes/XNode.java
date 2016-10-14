@@ -22,17 +22,18 @@ import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.filesystem.volume.HeaderBlob;
 import org.sfs.filesystem.volume.ReadStreamBlob;
 import org.sfs.util.MessageDigestFactory;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 
-public interface XNode<T extends XNode> {
+import java.util.List;
 
-    HostAndPort getHostAndPort();
-
-    String getGroupId();
+public interface XNode {
 
     boolean isLocal();
 
-    boolean isSameGroup(XNode xNode);
+    HostAndPort getHostAndPort();
+
+    Observable<Optional<TransientServiceDef>> getNodeStats();
 
     Observable<Optional<DigestBlob>> checksum(String volumeId, long position, Optional<Long> oOffset, Optional<Long> oLength, MessageDigestFactory... messageDigestFactories);
 
@@ -42,7 +43,9 @@ public interface XNode<T extends XNode> {
 
     Observable<Optional<ReadStreamBlob>> createReadStream(String volumeId, long position, Optional<Long> offset, Optional<Long> length);
 
-    Observable<Boolean> canPut(String volumeId);
+    Observable<Boolean> canWriteVolume(String volumeId);
+
+    Observable<Boolean> canReadVolume(String volumeId);
 
     Observable<NodeWriteStreamBlob> createWriteStream(String volumeId, long length, MessageDigestFactory... messageDigestFactories);
 }

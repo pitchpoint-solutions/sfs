@@ -18,7 +18,6 @@ package org.sfs;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Splitter;
 import com.google.common.collect.Iterables;
 import com.google.common.io.BaseEncoding;
 import com.google.common.net.HostAndPort;
@@ -43,11 +42,13 @@ import org.sfs.encryption.ContainerKeys;
 import org.sfs.encryption.MasterKeys;
 import org.sfs.filesystem.temp.TempDirectoryCleaner;
 import org.sfs.jobs.Jobs;
+import org.sfs.nodes.ClusterInfo;
+import org.sfs.nodes.NodeStats;
 import org.sfs.nodes.Nodes;
-import org.sfs.nodes.all.DumpNode;
 import org.sfs.nodes.all.elasticsearch.RefreshIndex;
 import org.sfs.nodes.all.masterkey.MasterKeysCheck;
 import org.sfs.nodes.all.stats.GetClusterStats;
+import org.sfs.nodes.all.stats.GetNodeStats;
 import org.sfs.nodes.compute.account.DeleteAccount;
 import org.sfs.nodes.compute.account.GetAccount;
 import org.sfs.nodes.compute.account.HeadAccount;
@@ -68,7 +69,8 @@ import org.sfs.nodes.compute.object.PostObject;
 import org.sfs.nodes.compute.object.PutObject;
 import org.sfs.nodes.compute.object.RepairObject;
 import org.sfs.nodes.data.AckBlob;
-import org.sfs.nodes.data.CanPutBlob;
+import org.sfs.nodes.data.CanReadVolume;
+import org.sfs.nodes.data.CanWriteVolume;
 import org.sfs.nodes.data.ChecksumBlob;
 import org.sfs.nodes.data.DeleteBlob;
 import org.sfs.nodes.data.GetBlob;
@@ -78,11 +80,11 @@ import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.Defer;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.Terminus;
+import org.sfs.rx.ToVoid;
 import org.sfs.rx.WaitForEmptyQueue;
 import org.sfs.thread.NamedThreadFactory;
+import org.sfs.util.ConfigHelper;
 import org.sfs.util.FileSystemLock;
-import org.sfs.util.JsonHelper;
-import org.sfs.vo.TransientXListener;
 import rx.Observable;
 
 import java.net.HttpURLConnection;
@@ -90,6 +92,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
@@ -98,7 +101,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class SfsSingletonServer extends Server implements Shareable {
 
@@ -110,19 +112,22 @@ public class SfsSingletonServer extends Server implements Shareable {
     private ExecutorService ioPool;
     private ExecutorService backgroundPool;
 
-    private AtomicReference<Router> activeRouter = new AtomicReference<>();
     private TempDirectoryCleaner tempDirectoryCleaner = new TempDirectoryCleaner();
     private AwsKms awsKms = new AwsKms();
     private AzureKms azureKms = new AzureKms();
     private MasterKeys masterKeys = new MasterKeys();
     private ContainerKeys containerKeys = new ContainerKeys();
     private Elasticsearch elasticsearch = new Elasticsearch();
+    private ClusterInfo clusterInfo = new ClusterInfo();
+    private NodeStats nodeStats = new NodeStats();
     private Nodes nodes;
     private Jobs jobs = new Jobs();
     private SfsFileSystem sfsFileSystem = new SfsFileSystem();
     private JsonFactory jsonFactory = new JsonFactory();
-    private List<HostAndPort> parsedListenAddresses;
-    private List<HostAndPort> parsedPublishAddresses;
+    private Set<HostAndPort> parsedListenAddresses = new LinkedHashSet<>();
+    private Set<HostAndPort> parsedPublishAddresses = new LinkedHashSet<>();
+    private Set<HostAndPort> clusterHosts = new LinkedHashSet<>();
+    private List<HttpServer> httpServers = new ArrayList<>();
     private int verticleMaxHeaderSize;
     private boolean started = false;
     private Throwable startException = null;
@@ -145,7 +150,7 @@ public class SfsSingletonServer extends Server implements Shareable {
 
         JsonObject config = config();
 
-        String fsHome = config.getString("fs.home");
+        String fsHome = ConfigHelper.getFieldOrEnv(config, "fs.home");
         if (fsHome == null) {
             fsHome = System.getProperty("user.home");
             if (fsHome != null) {
@@ -156,81 +161,40 @@ public class SfsSingletonServer extends Server implements Shareable {
         LOGGER.info(String.format("Config: %s", config.encodePrettily()));
 
         Path fileSystem = Paths.get(fsHome);
-        LOGGER.info(String.format("File System Root: %s", fileSystem));
 
-        testMode = Boolean.valueOf(JsonHelper.getField(config, "test_mode", "false"));
-        LOGGER.info(String.format("test_mode: %b", testMode));
+        testMode = Boolean.valueOf(ConfigHelper.getFieldOrEnv(config, "test_mode", "false"));
 
         FileSystemLock fileSystemLock = new FileSystemLock(Paths.get(fileSystem.toString(), ".lock"), 60, TimeUnit.SECONDS);
 
-
-
-        String[] listenAddresses =
-                Iterables.toArray(Splitter.on(',')
-                                .omitEmptyStrings()
-                                .trimResults()
-                                .split(JsonHelper.getField(config, "http.listen.addresses", "0.0.0.0")),
-                        String.class);
-
-        String[] publishAddresses =
-                Iterables.toArray(Splitter.on(',')
-                                .omitEmptyStrings()
-                                .trimResults()
-                                .split(JsonHelper.getField(config, "http.publish.addresses", "0.0.0.0")),
-                        String.class);
-
-        if (publishAddresses.length <= 0) {
-            publishAddresses = listenAddresses;
+        for (String jsonListenAddress : ConfigHelper.getArrayFieldOrEnv(config, "http.listen.addresses", new String[]{})) {
+            parsedListenAddresses.add(HostAndPort.fromString(jsonListenAddress));
         }
 
-        String listenPorts = JsonHelper.getField(config, "http.listen.port", "8090-9090");
-        String[] ports =
-                Iterables.toArray(Splitter.on('-')
-                        .omitEmptyStrings()
-                        .trimResults()
-                        .split(listenPorts), String.class);
-
-        parsedListenAddresses = new ArrayList<>();
-        parsedPublishAddresses = new ArrayList<>();
-        if (ports.length == 1) {
-            int parsed = Integer.parseInt(ports[0]);
-            for (String listenAddress : listenAddresses) {
-                parsedListenAddresses.add(HostAndPort.fromParts(listenAddress, parsed));
-            }
-            for (String publishAddress : publishAddresses) {
-                parsedPublishAddresses.add(HostAndPort.fromParts(publishAddress, parsed));
-            }
-        } else if (ports.length == 2) {
-            int first = Integer.parseInt(ports[0]);
-            int last = Integer.parseInt(ports[1]);
-            for (String listenAddress : listenAddresses) {
-                for (int i = first; i <= last; i++) {
-                    HostAndPort hostAndPort = HostAndPort.fromParts(listenAddress, i);
-                    parsedListenAddresses.add(hostAndPort);
-                }
-            }
-            for (String publishAddress : publishAddresses) {
-                for (int i = first; i <= last; i++) {
-                    HostAndPort hostAndPort = HostAndPort.fromParts(publishAddress, i);
-                    parsedPublishAddresses.add(hostAndPort);
-                }
-            }
+        for (String jsonPublishAddress : ConfigHelper.getArrayFieldOrEnv(config, "http.publish.addresses", Iterables.transform(parsedListenAddresses, input -> input.toString()))) {
+            parsedPublishAddresses.add(HostAndPort.fromString(jsonPublishAddress));
         }
 
-        int threadPoolIoQueueSize = new Integer(JsonHelper.getField(config, "threadpool.io.queuesize", "10000"));
-        LOGGER.info(String.format("threadpool.io.queuesize: %d", threadPoolIoQueueSize));
+        if (parsedPublishAddresses.isEmpty()) {
+            parsedPublishAddresses.addAll(parsedListenAddresses);
+        }
+
+        for (String jsonClusterHost : ConfigHelper.getArrayFieldOrEnv(config, "cluster.hosts", Iterables.transform(parsedPublishAddresses, input -> input.toString()))) {
+            clusterHosts.add(HostAndPort.fromString(jsonClusterHost));
+        }
+
+        // adds itself to the list if it wasn't added
+        clusterHosts.addAll(parsedPublishAddresses);
+
+        int threadPoolIoQueueSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.io.queuesize", "10000"));
         Preconditions.checkArgument(threadPoolIoQueueSize > 0, "threadpool.io.queuesize must be greater than 0");
 
-        int threadPoolIoSize = new Integer(JsonHelper.getField(config, "threadpool.io.size", String.valueOf(Runtime.getRuntime().availableProcessors() * 2)));
-        LOGGER.info(String.format("threadpool.io.size: %d", threadPoolIoSize));
+        int threadPoolIoSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.io.size", String.valueOf(Runtime.getRuntime().availableProcessors() * 2)));
         Preconditions.checkArgument(threadPoolIoSize > 0, "threadpool.io.size must be greater than 0");
 
-        int threadPoolBackgroundQueueSize = new Integer(JsonHelper.getField(config, "threadpool.background.queuesize", "10000"));
-        LOGGER.info(String.format("threadpool.background.queuesize: %d", threadPoolBackgroundQueueSize));
+        int threadPoolBackgroundQueueSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.background.queuesize", "10000"));
         Preconditions.checkArgument(threadPoolBackgroundQueueSize > 0, "threadpool.background.queuesize must be greater than 0");
 
-        int threadPoolBackgroundSize = new Integer(JsonHelper.getField(config, "threadpool.background.size", "200"));
-        LOGGER.info(String.format("threadpool.background.size: %d", threadPoolBackgroundSize));
+        int threadPoolBackgroundSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.background.size", "200"));
         Preconditions.checkArgument(threadPoolBackgroundSize > 0, "threadpool.background.size must be greater than 0");
 
         ioQueue = new LinkedBlockingQueue<>(threadPoolIoQueueSize);
@@ -257,45 +221,33 @@ public class SfsSingletonServer extends Server implements Shareable {
 
         nodes = new Nodes(ioQueue, backgroundQueue);
 
-        verticleMaxHeaderSize = new Integer(JsonHelper.getField(config, "http.maxheadersize", "8192"));
-        LOGGER.info(String.format("http.maxheadersize: %d", verticleMaxHeaderSize));
+        verticleMaxHeaderSize = new Integer(ConfigHelper.getFieldOrEnv(config, "http.maxheadersize", "8192"));
         Preconditions.checkArgument(verticleMaxHeaderSize > 0, "http.maxheadersize must be greater than 0");
 
-        int localNodePingInterval = new Integer(JsonHelper.getField(config, "localnode.pinginterval", String.valueOf(TimeUnit.SECONDS.toMillis(1))));
-        LOGGER.info(String.format("localnode.pinginterval: %d", localNodePingInterval));
-        Preconditions.checkArgument(localNodePingInterval > 0, "localnode.pinginterval must be greater than 0");
+        int nodeStatsRefreshInterval = new Integer(ConfigHelper.getFieldOrEnv(config, "node_stats_refresh_interval", String.valueOf(TimeUnit.SECONDS.toMillis(1))));
+        Preconditions.checkArgument(nodeStatsRefreshInterval > 0, "node_stats_refresh_interval must be greater than 0");
 
-        int localNodePingTimeout = new Integer(JsonHelper.getField(config, "localnode.pingtimeout", String.valueOf(TimeUnit.SECONDS.toMillis(90))));
-        LOGGER.info(String.format("localnode.pingtimeout: %d", localNodePingTimeout));
-        Preconditions.checkArgument(localNodePingTimeout > 0, "localnode.pingtimeout must be greater than 0");
-
-        remoteNodeMaxPoolSize = new Integer(JsonHelper.getField(config, "remotenode.maxpoolsize", "25"));
-        LOGGER.info(String.format("remotenode.maxpoolsize: %d", remoteNodeMaxPoolSize));
+        remoteNodeMaxPoolSize = new Integer(ConfigHelper.getFieldOrEnv(config, "remotenode.maxpoolsize", "25"));
         Preconditions.checkArgument(remoteNodeMaxPoolSize > 0, "remotenode.maxpoolsize must be greater than 0");
 
-        remoteNodeConnectTimeout = new Integer(JsonHelper.getField(config, "remotenode.connectimeout", "30000"));
-        LOGGER.info(String.format("remotenode.connectimeout: %d", remoteNodeConnectTimeout));
+        remoteNodeConnectTimeout = new Integer(ConfigHelper.getFieldOrEnv(config, "remotenode.connectimeout", "30000"));
         Preconditions.checkArgument(remoteNodeConnectTimeout > 0, "remotenode.connectimeout must be greater than 0");
 
-        int remoteNodeResponseTimeout = new Integer(JsonHelper.getField(config, "remotenode.responsetimeout", "30000"));
-        LOGGER.info(String.format("remotenode.responsetimeout: %d", remoteNodeResponseTimeout));
+        int remoteNodeResponseTimeout = new Integer(ConfigHelper.getFieldOrEnv(config, "remotenode.responsetimeout", "30000"));
         Preconditions.checkArgument(remoteNodeResponseTimeout > 0, "remotenode.responsetimeout must be greater than 0");
 
-        String strRemoteNodeSecret = JsonHelper.getField(config, "remotenode.secret");
-        LOGGER.info(String.format("remotenode.secret: %s", strRemoteNodeSecret));
+        String strRemoteNodeSecret = ConfigHelper.getFieldOrEnv(config, "remotenode.secret");
         Preconditions.checkArgument(strRemoteNodeSecret != null, "remotenode.secret is required");
         remoteNodeSecret = BaseEncoding.base64().decode(strRemoteNodeSecret);
 
-        int numberOfReplicas = new Integer(JsonHelper.getField(config, "number_of_replicas", "0"));
-        LOGGER.info(String.format("number_of_replicas: %d", numberOfReplicas));
-        Preconditions.checkArgument(numberOfReplicas >= 0, "number_of_replicas must be greater or equal to 0");
+        int numberOfObjectReplicas = new Integer(ConfigHelper.getFieldOrEnv(config, "number_of_object_replicas", "1"));
+        Preconditions.checkArgument(numberOfObjectReplicas > 0, "number_of_object_replicas must be greater or equal to 1");
 
-        int tempFileTtl = new Integer(JsonHelper.getField(config, "temp_file_ttl", "86400000"));
-        LOGGER.info(String.format("temp_file_ttl: %d", tempFileTtl));
+        int tempFileTtl = new Integer(ConfigHelper.getFieldOrEnv(config, "temp_file_ttl", "86400000"));
         Preconditions.checkArgument(tempFileTtl >= 0, "tempFileTtl must be greater or equal to 0");
 
-        final boolean dataNode = Boolean.valueOf(JsonHelper.getField(config, "node.data", "true"));
-        final boolean masterNode = Boolean.valueOf(JsonHelper.getField(config, "node.master", "true"));
+        final boolean dataNode = Boolean.valueOf(ConfigHelper.getFieldOrEnv(config, "node.data", "true"));
+        final boolean masterNode = Boolean.valueOf(ConfigHelper.getFieldOrEnv(config, "node.master", "true"));
 
 
         this.httpsClient = createHttpClient(vertx, true);
@@ -308,97 +260,25 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .flatMap(aVoid -> awsKms.start(vertxContext, config))
                 .flatMap(aVoid -> azureKms.start(vertxContext, config))
                 .flatMap(aVoid -> tempDirectoryCleaner.start(vertxContext, tempFileTtl))
-                .flatMap(aVoid -> elasticsearch.start(vertxContext, config))
-                // Don't create an http listener on this verticle
-                // since the event loop gets hogged by singleton job type things
-                //
-                // WrapperServer creates the http listeners
-                .flatMap(aVoid -> initHttpListeners(vertxContext, true))
-                .flatMap(listenerList ->
+                .flatMap(aVoid -> elasticsearch.start(vertxContext, config, masterNode))
+                .flatMap(aVoid ->
                         nodes.open(vertxContext,
-                                listenerList,
+                                parsedPublishAddresses,
+                                clusterHosts,
                                 remoteNodeMaxPoolSize,
                                 remoteNodeConnectTimeout,
                                 remoteNodeResponseTimeout,
-                                numberOfReplicas,
-                                localNodePingInterval,
-                                localNodePingTimeout,
+                                numberOfObjectReplicas,
+                                nodeStatsRefreshInterval,
                                 dataNode,
                                 masterNode))
+                .flatMap(aVoid -> nodeStats.open(vertxContext))
+                .flatMap(aVoid -> clusterInfo.open(vertxContext))
                 .flatMap(aVoid -> masterKeys.start(vertxContext))
                 .flatMap(aVoid -> containerKeys.start(vertxContext))
                 .flatMap(aVoid -> jobs.start(vertxContext, config))
-                .map(aVoid -> {
-                    Router router = Router.router(vertx);
-
-                    router.get("/admin/001/healthcheck").handler(httpServerRequest -> httpServerRequest
-                            .response()
-                            .setStatusCode(HttpURLConnection.HTTP_OK)
-                            .end());
-                    // admin methods
-                    router.post("/admin/001/run_jobs").handler(new SfsRequestHandler(vertxContext, new RunNodeJobs()));
-                    router.post("/admin/001/dump_node").handler(new SfsRequestHandler(vertxContext, new DumpNode()));
-                    router.post("/admin/001/master_keys_check").handler(new SfsRequestHandler(vertxContext, new MasterKeysCheck()));
-
-                    // object admin method
-                    router.getWithRegex("\\/admin_objectmetadata\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new GetObjectMeta()));
-                    router.postWithRegex("\\/admin_objectrepair\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new RepairObject()));
-                    // container admin method
-                    router.postWithRegex("\\/admin_containerexport\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new ExportContainer()));
-                    router.postWithRegex("\\/admin_containerimport\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new ImportContainer()));
-                    // openstack keystone
-                    router.post("/v2.0/tokens").handler(new SfsRequestHandler(vertxContext, new PostTokens()));
-                    // cluster methods
-                    router.get("/cluster/stats").handler(new SfsRequestHandler(vertxContext, new GetClusterStats()));
-                    // blob store methods
-                    router.delete("/blob/001").handler(new SfsRequestHandler(vertxContext, new DeleteBlob()));
-                    router.get("/blob/001").handler(new SfsRequestHandler(vertxContext, new GetBlob()));
-                    router.put("/blob/001").handler(new SfsRequestHandler(vertxContext, new PutBlob()));
-                    router.put("/blob/001/canput").handler(new SfsRequestHandler(vertxContext, new CanPutBlob()));
-                    router.put("/blob/001/ack").handler(new SfsRequestHandler(vertxContext, new AckBlob()));
-                    router.get("/blob/001/checksum").handler(new SfsRequestHandler(vertxContext, new ChecksumBlob()));
-                    // openstack swift object methods
-                    router.getWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new GetObject()));
-                    router.headWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new HeadObject()));
-                    router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new DeleteObject()));
-                    router.putWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new PutObject()));
-                    router.postWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new PostObject()));
-                    // openstack swift container methods
-                    router.getWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new GetContainer()));
-                    router.headWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new HeadContainer()));
-                    router.putWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PutContainer()));
-                    router.postWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PostContainer()));
-                    router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new DeleteContainer()));
-                    // openstack swift account methods
-                    router.getWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new GetAccount()));
-                    router.headWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new HeadAccount()));
-                    router.postWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PostAccount()));
-                    router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new DeleteAccount()));
-
-                    if (testMode) {
-                        router.post("/admin/001/refresh_index").handler(new SfsRequestHandler(vertxContext, new RefreshIndex()));
-                        router.get("/admin/001/is_online").handler(new SfsRequestHandler(vertxContext,
-                                sfsRequest ->
-                                        Defer.empty()
-                                                .flatMap(aVoid1 -> sfsRequest.vertxContext().verticle().nodes().isOnline(vertxContext()))
-                                                .doOnNext(isOnline -> {
-                                                    if (Boolean.TRUE.equals(isOnline)) {
-                                                        sfsRequest.response().setStatusCode(HttpURLConnection.HTTP_OK);
-                                                    } else {
-                                                        sfsRequest.response().setStatusCode(HttpURLConnection.HTTP_NO_CONTENT);
-                                                    }
-                                                })
-                                                .subscribe(new Terminus<Boolean>(sfsRequest) {
-                                                    @Override
-                                                    public void onNext(Boolean aBoolean) {
-
-                                                    }
-                                                })));
-                    }
-
-                    activeRouter.set(router);
-                    return null;
-                })
+                .flatMap(aVoid -> initHttpListeners(vertxContext, true))
+                .doOnNext(httpServers1 -> httpServers.addAll(httpServers))
                 .subscribe(
                         o -> {
                             // do nothing
@@ -419,9 +299,18 @@ public class SfsSingletonServer extends Server implements Shareable {
         final Server _this = this;
         LOGGER.info("Stopping verticle " + _this);
 
-        activeRouter.set(null);
-
         Defer.empty()
+                .flatMap(aVoid ->
+                        RxHelper.iterate(httpServers, httpServer -> {
+                            AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+                            httpServer.close(handler);
+                            return Observable.create(handler.subscribe)
+                                    .onErrorResumeNext(throwable -> {
+                                        LOGGER.error("Unhandled Exception", throwable);
+                                        return Defer.empty();
+                                    })
+                                    .map(aVoid1 -> Boolean.TRUE);
+                        }).map(new ToVoid<>()))
                 .flatMap(aVoid -> {
                     if (jobs != null) {
                         return jobs
@@ -460,6 +349,28 @@ public class SfsSingletonServer extends Server implements Shareable {
                     if (masterKeys != null) {
                         return masterKeys
                                 .stop(vertxContext)
+                                .onErrorResumeNext(throwable -> {
+                                    LOGGER.error("Unhandled Exception", throwable);
+                                    return Defer.empty();
+                                });
+                    } else {
+                        return Defer.empty();
+                    }
+                })
+                .flatMap(aVoid -> {
+                    if (clusterInfo != null) {
+                        return clusterInfo.close(vertxContext)
+                                .onErrorResumeNext(throwable -> {
+                                    LOGGER.error("Unhandled Exception", throwable);
+                                    return Defer.empty();
+                                });
+                    } else {
+                        return Defer.empty();
+                    }
+                })
+                .flatMap(aVoid -> {
+                    if (nodeStats != null) {
+                        return nodeStats.close(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
                                     return Defer.empty();
@@ -545,6 +456,11 @@ public class SfsSingletonServer extends Server implements Shareable {
                 })
                 .flatMap(new WaitForEmptyQueue(vertxContext, ioQueue))
                 .flatMap(new WaitForEmptyQueue(vertxContext, backgroundQueue))
+                .doOnNext(aVoid -> {
+                    for (String envVar : ConfigHelper.getEnvVars()) {
+                        System.out.println("ENV " + envVar);
+                    }
+                })
                 .subscribe(
                         aVoid -> {
                             // do nothing
@@ -646,71 +562,67 @@ public class SfsSingletonServer extends Server implements Shareable {
     }
 
     @Override
+    public ClusterInfo getClusterInfo() {
+        return clusterInfo;
+    }
+
+    @Override
+    public NodeStats getNodeStats() {
+        return nodeStats;
+    }
+
+    @Override
     public byte[] getRemoteNodeSecret() {
         return remoteNodeSecret;
     }
 
-    public Observable<List<TransientXListener>> initHttpListeners(VertxContext<Server> vertxContext, boolean createHttpServer) {
+    public Observable<List<HttpServer>> initHttpListeners(VertxContext<Server> vertxContext, boolean createHttpServer) {
         // for each listen address attempt to listen on the supplied port range
         // and if successful add to the listener list which will be used
         // to initialize the rest of the application
-        Set<String> listeningHostAddresses = new HashSet<>();
+        Set<HostAndPort> listeningHostAddresses = new HashSet<>();
+        List<HttpServer> httpServers = new ArrayList<>();
         return RxHelper.iterate(parsedListenAddresses, hostAndPort -> {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("Parsed listen ports " + parsedListenAddresses);
             }
-            if (!listeningHostAddresses.contains(hostAndPort.getHostText())) {
+            if (!listeningHostAddresses.contains(hostAndPort)) {
                 if (createHttpServer) {
                     LOGGER.info("Creating http listener on " + hostAndPort);
-                    return createHttpServer(vertxContext, hostAndPort, verticleMaxHeaderSize)
+                    return createHttpServer(vertxContext, hostAndPort, verticleMaxHeaderSize, createRouter(vertxContext))
                             .onErrorResumeNext(throwable -> {
                                 LOGGER.warn("Failed to start listener " + hostAndPort.toString(), throwable);
                                 return Defer.just(null);
                             })
                             .map(httpServer -> {
                                 if (httpServer != null) {
-                                    listeningHostAddresses.add(hostAndPort.getHostText());
+                                    listeningHostAddresses.add(hostAndPort);
+                                    httpServers.add(httpServer);
                                 }
                                 return Boolean.TRUE;
                             });
                 } else {
                     LOGGER.debug("Skip creating http listener");
-                    listeningHostAddresses.add(hostAndPort.getHostText());
+                    listeningHostAddresses.add(hostAndPort);
                     return Observable.just(true);
                 }
             }
             return Defer.just(true);
         })
-                .map(aBoolean -> {
-                    List<TransientXListener> listenerList = new ArrayList<>();
-                    for (HostAndPort publishAddress : parsedPublishAddresses) {
-                        listenerList.add(new TransientXListener()
-                                .setHostAndPort(publishAddress));
-
-                    }
-                    return listenerList;
-                });
+                .map(_continue -> httpServers);
     }
 
-    protected Observable<HttpServer> createHttpServer(VertxContext<Server> vertxContext, HostAndPort hostAndPort, int verticleMaxHeaderSize) {
+    protected Observable<HttpServer> createHttpServer(VertxContext<Server> vertxContext, HostAndPort hostAndPort, int verticleMaxHeaderSize, Router router) {
         AsyncResultMemoizeHandler<HttpServer, HttpServer> handler = new AsyncResultMemoizeHandler<>();
         HttpServerOptions httpServerOptions = new HttpServerOptions()
                 .setMaxHeaderSize(verticleMaxHeaderSize)
                 .setCompressionSupported(false)
                 .setUsePooledBuffers(true)
                 .setAcceptBacklog(10000)
-                .setReuseAddress(true);
+                .setReuseAddress(true)
+                .setHandle100ContinueAutomatically(false);
         vertxContext.vertx().createHttpServer(httpServerOptions)
-                .requestHandler(httpServerRequest -> {
-                    Router router = activeRouter.get();
-                    if (router != null) {
-                        router.accept(httpServerRequest);
-                    } else {
-                        httpServerRequest.response()
-                                .setStatusCode(HttpURLConnection.HTTP_NOT_FOUND)
-                                .end();
-                    }
-                })
+                .requestHandler(router::accept)
                 .listen(hostAndPort.getPort(), hostAndPort.getHostText(), handler);
         return Observable.create(handler.subscribe);
     }
@@ -727,6 +639,81 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .setSsl(https);
 
         return v.createHttpClient(httpClientOptions);
+    }
+
+    protected Router createRouter(VertxContext<Server> vertxContext) {
+        Vertx vertx = vertxContext.vertx();
+
+        Router router = Router.router(vertx);
+
+        router.get("/admin/001/healthcheck").handler(httpServerRequest -> httpServerRequest
+                .response()
+                .setStatusCode(HttpURLConnection.HTTP_OK)
+                .end());
+        // admin methods
+        router.post("/admin/001/run_jobs").handler(new SfsRequestHandler(vertxContext, new RunNodeJobs()));
+        router.post("/admin/001/master_keys_check").handler(new SfsRequestHandler(vertxContext, new MasterKeysCheck()));
+
+        // object admin method
+        router.getWithRegex("\\/admin_objectmetadata\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new GetObjectMeta()));
+        router.postWithRegex("\\/admin_objectrepair\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new RepairObject()));
+        // container admin method
+        router.postWithRegex("\\/admin_containerexport\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new ExportContainer()));
+        router.postWithRegex("\\/admin_containerimport\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new ImportContainer()));
+        // openstack keystone
+        router.post("/v2.0/tokens").handler(new SfsRequestHandler(vertxContext, new PostTokens()));
+        // cluster methods
+        router.get("/cluster/stats").handler(new SfsRequestHandler(vertxContext, new GetClusterStats()));
+        // node methods
+        router.get("/node/stats").handler(new SfsRequestHandler(vertxContext, new GetNodeStats()));
+        // blob store methods
+        router.delete("/blob/001").handler(new SfsRequestHandler(vertxContext, new DeleteBlob()));
+        router.get("/blob/001").handler(new SfsRequestHandler(vertxContext, new GetBlob()));
+        router.put("/blob/001").handler(new SfsRequestHandler(vertxContext, new PutBlob()));
+        router.get("/blob/001/canwrite").handler(new SfsRequestHandler(vertxContext, new CanWriteVolume()));
+        router.get("/blob/001/canread").handler(new SfsRequestHandler(vertxContext, new CanReadVolume()));
+        router.put("/blob/001/ack").handler(new SfsRequestHandler(vertxContext, new AckBlob()));
+        router.get("/blob/001/checksum").handler(new SfsRequestHandler(vertxContext, new ChecksumBlob()));
+        // openstack swift object methods
+        router.getWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new GetObject()));
+        router.headWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new HeadObject()));
+        router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new DeleteObject()));
+        router.putWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new PutObject()));
+        router.postWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new PostObject()));
+        // openstack swift container methods
+        router.getWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new GetContainer()));
+        router.headWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new HeadContainer()));
+        router.putWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PutContainer()));
+        router.postWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PostContainer()));
+        router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new DeleteContainer()));
+        // openstack swift account methods
+        router.getWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new GetAccount()));
+        router.headWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new HeadAccount()));
+        router.postWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PostAccount()));
+        router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new DeleteAccount()));
+
+        if (testMode) {
+            router.post("/admin/001/refresh_index").handler(new SfsRequestHandler(vertxContext, new RefreshIndex()));
+            router.get("/admin/001/is_online").handler(new SfsRequestHandler(vertxContext,
+                    sfsRequest ->
+                            Defer.empty()
+                                    .flatMap(aVoid1 -> sfsRequest.vertxContext().verticle().getClusterInfo().isOnline())
+                                    .doOnNext(isOnline -> {
+                                        if (Boolean.TRUE.equals(isOnline)) {
+                                            sfsRequest.response().setStatusCode(HttpURLConnection.HTTP_OK);
+                                        } else {
+                                            sfsRequest.response().setStatusCode(HttpURLConnection.HTTP_NO_CONTENT);
+                                        }
+                                    })
+                                    .subscribe(new Terminus<Boolean>(sfsRequest) {
+                                        @Override
+                                        public void onNext(Boolean aBoolean) {
+
+                                        }
+                                    })));
+        }
+
+        return router;
     }
 
     protected static class SfsRequestHandler implements Handler<RoutingContext> {

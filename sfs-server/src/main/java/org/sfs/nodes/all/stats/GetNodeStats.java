@@ -16,20 +16,18 @@
 
 package org.sfs.nodes.all.stats;
 
+import com.google.common.base.Optional;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.SfsRequest;
 import org.sfs.VertxContext;
 import org.sfs.auth.Authenticate;
-import org.sfs.nodes.ClusterInfo;
+import org.sfs.nodes.NodeStats;
 import org.sfs.rx.Terminus;
-import org.sfs.rx.ToVoid;
 import org.sfs.validate.ValidateActionAdminOrSystem;
-import org.sfs.validate.ValidateNodeIdMatchesLocalNodeId;
-import org.sfs.validate.ValidateParamExists;
 import org.sfs.vo.TransientServiceDef;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -39,11 +37,10 @@ import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.String.valueOf;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static org.sfs.rx.Defer.empty;
-import static org.sfs.util.SfsHttpQueryParams.NODE;
 
-public class GetClusterStats implements Handler<SfsRequest> {
+public class GetNodeStats implements Handler<SfsRequest> {
 
-    private static final Logger LOGGER = getLogger(GetClusterStats.class);
+    private static final Logger LOGGER = getLogger(GetNodeStats.class);
 
     @Override
     public void handle(final SfsRequest httpServerRequest) {
@@ -53,22 +50,21 @@ public class GetClusterStats implements Handler<SfsRequest> {
         empty()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
-                .map(aVoid -> httpServerRequest)
-                .map(new ToVoid<>())
                 .map(aVoid -> {
-                    ClusterInfo clusterInfo = vertxContext.verticle().getClusterInfo();
-                    JsonArray jsonArray = new JsonArray();
-                    for (TransientServiceDef node : clusterInfo.getAllNodes()) {
-                        jsonArray.add(node.toJsonObject());
+                    NodeStats nodeStats = vertxContext.verticle().getNodeStats();
+                    Optional<TransientServiceDef> oNodeStats = nodeStats.getStats();
+                    if (oNodeStats.isPresent()) {
+                        return oNodeStats.get().toJsonObject();
+                    } else {
+                        return new JsonObject();
                     }
-                    return jsonArray;
                 })
                 .single()
-                .subscribe(new Terminus<JsonArray>(httpServerRequest) {
+                .subscribe(new Terminus<JsonObject>(httpServerRequest) {
 
                     @Override
-                    public void onNext(JsonArray jsonArray) {
-                        Buffer encoded = buffer(jsonArray.encode().getBytes(UTF_8));
+                    public void onNext(JsonObject jsonObject) {
+                        Buffer encoded = buffer(jsonObject.encode().getBytes(UTF_8));
                         httpServerRequest.response()
                                 .setStatusCode(HTTP_OK)
                                 .putHeader(CONTENT_LENGTH, valueOf(encoded.length()))

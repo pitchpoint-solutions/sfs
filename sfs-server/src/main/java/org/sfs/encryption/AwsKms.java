@@ -29,6 +29,7 @@ import io.vertx.core.logging.LoggerFactory;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.rx.Defer;
+import org.sfs.util.ConfigHelper;
 import rx.Observable;
 import rx.functions.Func0;
 
@@ -57,20 +58,16 @@ public class AwsKms implements Kms {
         return Defer.empty()
                 .filter(aVoid -> started.compareAndSet(false, true))
                 .flatMap(aVoid -> {
-                    String keyStoreAwsKmsEndpoint = config.getString("keystore.aws.kms.endpoint", System.getProperty("sfs.keystore.aws.kms.endpoint", System.getenv("SFS_KEYSTORE_AWS_KMS_ENDPOINT")));
-                    LOGGER.info(String.format("keystore.aws.kms.endpoint: %s", keyStoreAwsKmsEndpoint));
+                    String keyStoreAwsKmsEndpoint = ConfigHelper.getFieldOrEnv(config, "keystore.aws.kms.endpoint");
                     Preconditions.checkArgument(keyStoreAwsKmsEndpoint != null, "keystore.aws.kms.endpoint is required");
 
-                    _this.keyId = config.getString("keystore.aws.kms.key_id", System.getProperty("sfs.keystore.aws.kms.key_id", System.getenv("SFS_KEYSTORE_AWS_KMS_KEY_ID")));
-                    LOGGER.info(String.format("keystore.aws.kms.key_id: %s", _this.keyId));
+                    _this.keyId = ConfigHelper.getFieldOrEnv(config, "keystore.aws.kms.key_id");
                     Preconditions.checkArgument(_this.keyId != null, "keystore.aws.kms.key_id is required");
 
-                    _this.accessKeyId = config.getString("keystore.aws.kms.access_key_id", System.getProperty("sfs.keystore.aws.kms.access_key_id", System.getenv("SFS_KEYSTORE_AWS_KMS_ACCESS_KEY_ID")));
-                    LOGGER.info(String.format("keystore.aws.kms.access_key_id: %s", _this.accessKeyId));
+                    _this.accessKeyId = ConfigHelper.getFieldOrEnv(config, "keystore.aws.kms.access_key_id");
                     Preconditions.checkArgument(_this.accessKeyId != null, "keystore.aws.kms.access_key_id is required");
 
-                    _this.secretKey = config.getString("keystore.aws.kms.secret_key", System.getProperty("sfs.keystore.aws.kms.secret_key", System.getenv("SFS_KEYSTORE_AWS_KMS_SECRET_KEY")));
-                    LOGGER.info(String.format("keystore.aws.kms.secret_key: ****"));
+                    _this.secretKey = ConfigHelper.getFieldOrEnv(config, "keystore.aws.kms.secret_key");
                     Preconditions.checkArgument(_this.secretKey != null, "keystore.aws.kms.secret_key is required");
 
 

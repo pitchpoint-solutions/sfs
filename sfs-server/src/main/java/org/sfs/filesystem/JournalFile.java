@@ -25,6 +25,7 @@ import org.sfs.SfsVertx;
 import org.sfs.io.Block;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.BufferWriteEndableWriteStream;
+import org.sfs.rx.Defer;
 import org.sfs.rx.ToVoid;
 import rx.Observable;
 import rx.exceptions.CompositeException;
@@ -233,7 +234,7 @@ public class JournalFile {
         return blobFile.close(vertx);
     }
 
-    public Observable<Void> append(SfsVertx vertx, Buffer metadata, Buffer data) {
+    public Observable<Long> append(SfsVertx vertx, Buffer metadata, Buffer data) {
         int dataLength = data.length();
         return append0(vertx, metadata, dataLength)
                 .flatMap(writePosition -> {
@@ -246,14 +247,15 @@ public class JournalFile {
                                     if (LOGGER.isDebugEnabled()) {
                                         LOGGER.debug("Done writing data @ position " + writePosition.getDataPosition());
                                     }
-                                });
+                                })
+                                .map(aVoid -> writePosition.getHeaderPosition());
                     } else {
-                        return empty();
+                        return Defer.just(writePosition.getHeaderPosition());
                     }
                 });
     }
 
-    public Observable<Void> append(SfsVertx vertx, Buffer metadata, long dataLength, ReadStream<Buffer> data) {
+    public Observable<Long> append(SfsVertx vertx, Buffer metadata, long dataLength, ReadStream<Buffer> data) {
         return append0(vertx, metadata, dataLength)
                 .flatMap(writePosition -> {
                     if (dataLength > 0) {
@@ -265,9 +267,10 @@ public class JournalFile {
                                     if (LOGGER.isDebugEnabled()) {
                                         LOGGER.debug("Done writing data @ position " + writePosition.getDataPosition());
                                     }
-                                });
+                                })
+                                .map(aVoid -> writePosition.getHeaderPosition());
                     } else {
-                        return empty();
+                        return Defer.just(writePosition.getHeaderPosition());
                     }
                 });
     }

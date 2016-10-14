@@ -40,6 +40,7 @@ import org.sfs.rx.HttpClientResponseBodyBuffer;
 import org.sfs.rx.MemoizeHandler;
 import org.sfs.rx.ResultMemoizeHandler;
 import org.sfs.util.MessageDigestFactory;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 
 import static com.google.common.base.Optional.absent;
@@ -59,7 +60,6 @@ import static org.sfs.rx.RxHelper.combineSinglesDelayError;
 import static org.sfs.util.SfsHttpHeaders.X_SFS_REMOTE_NODE_TOKEN;
 import static org.sfs.util.SfsHttpQueryParams.KEEP_ALIVE_TIMEOUT;
 import static org.sfs.util.SfsHttpQueryParams.LENGTH;
-import static org.sfs.util.SfsHttpQueryParams.NODE;
 import static org.sfs.util.SfsHttpQueryParams.OFFSET;
 import static org.sfs.util.SfsHttpQueryParams.POSITION;
 import static org.sfs.util.SfsHttpQueryParams.VOLUME;
@@ -67,19 +67,16 @@ import static org.sfs.util.SfsHttpQueryParams.X_CONTENT_COMPUTED_DIGEST_PREFIX;
 import static rx.Observable.create;
 import static rx.Observable.just;
 
-public class RemoteNode extends AbstractNode<RemoteNode> {
+public class RemoteNode extends AbstractNode {
 
     private static final Logger LOGGER = getLogger(RemoteNode.class);
-    private static final Object MUTEX = new Object();
     private final VertxContext<Server> vertxContext;
-    private final String nodeId;
     private final HostAndPort hostAndPort;
     private final int responseTimeout;
     private final String remoteNodeSecret;
 
-    public RemoteNode(VertxContext<Server> vertxContext, String nodeId, int responseTimeout, HostAndPort hostAndPort) {
+    public RemoteNode(VertxContext<Server> vertxContext, int responseTimeout, HostAndPort hostAndPort) {
         this.vertxContext = vertxContext;
-        this.nodeId = nodeId;
         this.hostAndPort = hostAndPort;
         this.responseTimeout = responseTimeout;
         this.remoteNodeSecret = base64().encode(vertxContext.verticle().getRemoteNodeSecret());
@@ -104,6 +101,52 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
     }
 
     @Override
+    public Observable<Optional<TransientServiceDef>> getNodeStats() {
+        return getHttpClient()
+                .flatMap(httpClient -> {
+
+                    final String url =
+                            format("http://%s/node/stats", hostAndPort.toString());
+
+                    if (LOGGER.isDebugEnabled()) {
+                        LOGGER.debug("getNodeStats " + url);
+                    }
+
+                    ClusterInfo clusterInfo = vertxContext.verticle().getClusterInfo();
+                    long refreshInterval = clusterInfo.getRefreshInterval();
+
+                    ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
+
+                    HttpClientRequest httpClientRequest =
+                            httpClient
+                                    .getAbs(url, httpClientResponse -> {
+                                        httpClientResponse.pause();
+                                        handler.handle(httpClientResponse);
+                                    })
+                                    .exceptionHandler(handler::fail)
+                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                    .setTimeout(refreshInterval - 100);
+                    httpClientRequest.end();
+
+                    return create(handler.subscribe);
+                })
+                .flatMap(httpClientResponse ->
+                        Defer.just(httpClientResponse)
+                                .flatMap(new HttpClientResponseBodyBuffer(HTTP_OK))
+                                .map(new BufferToJsonObject())
+                                .filter(entries -> !entries.isEmpty())
+                                .map(jsonObject -> {
+                                    TransientServiceDef transientServiceDef = new TransientServiceDef();
+                                    transientServiceDef.merge(jsonObject);
+                                    return transientServiceDef;
+                                })
+                                .map(Optional::of)
+                )
+                .singleOrDefault(Optional.absent());
+    }
+
+
+    @Override
     public Observable<Optional<DigestBlob>> checksum(String volumeId, long position, Optional<Long> oOffset, Optional<Long> oLength, MessageDigestFactory... messageDigestFactories) {
         return getHttpClient()
                 .flatMap(httpClient -> {
@@ -116,10 +159,6 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                     urlBuilder = urlBuilder.append(KEEP_ALIVE_TIMEOUT);
                     urlBuilder = urlBuilder.append('=');
                     urlBuilder = urlBuilder.append(responseTimeout / 2);
-                    urlBuilder = urlBuilder.append('&');
-                    urlBuilder = urlBuilder.append(NODE);
-                    urlBuilder = urlBuilder.append('=');
-                    urlBuilder = urlBuilder.append(escaper.escape(nodeId));
                     urlBuilder = urlBuilder.append('&');
                     urlBuilder = urlBuilder.append(VOLUME);
                     urlBuilder = urlBuilder.append('=');
@@ -201,10 +240,8 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                     Escaper escaper = urlFragmentEscaper();
 
                     final String url =
-                            format("http://%s/blob/001?%s=%s&%s=%s&%s=%d",
+                            format("http://%s/blob/001?%s=%s&%s=%d",
                                     hostAndPort.toString(),
-                                    escaper.escape(NODE),
-                                    escaper.escape(nodeId),
                                     escaper.escape(VOLUME),
                                     escaper.escape(volumeId),
                                     escaper.escape(POSITION),
@@ -254,10 +291,8 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                 .flatMap(httpClient -> {
                     Escaper escaper = urlFragmentEscaper();
                     final String url =
-                            format("http://%s/blob/001/ack?%s=%s&%s=%s&%s=%d",
+                            format("http://%s/blob/001/ack?%s=%s&%s=%d",
                                     hostAndPort.toString(),
-                                    escaper.escape(NODE),
-                                    escaper.escape(nodeId),
                                     escaper.escape(VOLUME),
                                     escaper.escape(volumeId),
                                     escaper.escape(POSITION),
@@ -313,10 +348,6 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                                     .append(hostAndPort.toString())
                                     .append("/blob/001")
                                     .append('?')
-                                    .append(escaper.escape(NODE))
-                                    .append('=')
-                                    .append(escaper.escape(nodeId))
-                                    .append('&')
                                     .append(escaper.escape(VOLUME))
                                     .append('=')
                                     .append(escaper.escape(volumeId))
@@ -389,17 +420,16 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                 });
     }
 
+
     @Override
-    public Observable<Boolean> canPut(String volumeId) {
+    public Observable<Boolean> canReadVolume(String volumeId) {
         return getHttpClient()
                 .flatMap(httpClient -> {
 
                     Escaper escaper = urlFragmentEscaper();
 
-                    String canPutUrl = format("http://%s/blob/001/canput?%s=%s&%s=%s",
+                    String url = format("http://%s/blob/001/canread?%s=%s",
                             hostAndPort.toString(),
-                            escaper.escape(NODE),
-                            escaper.escape(escaper.escape(nodeId)),
                             escaper.escape(VOLUME),
                             escaper.escape(escaper.escape(volumeId)));
 
@@ -407,7 +437,48 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                     ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
 
                     HttpClientRequest httpClientRequest =
-                            httpClient.putAbs(canPutUrl,
+                            httpClient.getAbs(url,
+                                    httpClientResponse -> {
+                                        httpClientResponse.pause();
+                                        handler.handle(httpClientResponse);
+                                    })
+                                    .exceptionHandler(handler::fail)
+                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                    .setTimeout(responseTimeout);
+                    httpClientRequest.end();
+
+                    return create(handler.subscribe)
+                            .flatMap(httpClientResponse ->
+                                    just(httpClientResponse)
+                                            .flatMap(new HttpClientResponseBodyBuffer())
+                                            .map(buffer -> {
+                                                int status = httpClientResponse.statusCode();
+                                                if (status >= 400) {
+                                                    throw new HttpClientResponseException(httpClientResponse, buffer);
+                                                }
+                                                return true;
+                                            }));
+
+                });
+    }
+
+    @Override
+    public Observable<Boolean> canWriteVolume(String volumeId) {
+        return getHttpClient()
+                .flatMap(httpClient -> {
+
+                    Escaper escaper = urlFragmentEscaper();
+
+                    String url = format("http://%s/blob/001/canwrite?%s=%s",
+                            hostAndPort.toString(),
+                            escaper.escape(VOLUME),
+                            escaper.escape(escaper.escape(volumeId)));
+
+
+                    ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
+
+                    HttpClientRequest httpClientRequest =
+                            httpClient.getAbs(url,
                                     httpClientResponse -> {
                                         httpClientResponse.pause();
                                         handler.handle(httpClientResponse);
@@ -437,7 +508,7 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
         final XNode _this = this;
 
         return getHttpClient()
-                .map(httpClient -> {
+                .flatMap(httpClient -> {
 
                     Escaper escaper = urlFragmentEscaper();
 
@@ -448,10 +519,6 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                     urlBuilder = urlBuilder.append(KEEP_ALIVE_TIMEOUT);
                     urlBuilder = urlBuilder.append('=');
                     urlBuilder = urlBuilder.append(responseTimeout / 2);
-                    urlBuilder = urlBuilder.append('&');
-                    urlBuilder = urlBuilder.append(NODE);
-                    urlBuilder = urlBuilder.append('=');
-                    urlBuilder = urlBuilder.append(escaper.escape(nodeId));
                     urlBuilder = urlBuilder.append('&');
                     urlBuilder = urlBuilder.append(VOLUME);
                     urlBuilder = urlBuilder.append('=');
@@ -468,67 +535,67 @@ public class RemoteNode extends AbstractNode<RemoteNode> {
                         }
                     }
 
-
                     final String url = urlBuilder.toString();
 
-                    NodeWriteStreamBlob writeStreamBlob = new NodeWriteStreamBlob(_this) {
-                        @Override
-                        public Observable<DigestBlob> consume(ReadStream<Buffer> src) {
+                    if (LOGGER.isDebugEnabled()) {
+                        LOGGER.debug("createWriteStream " + url);
+                    }
+
+                    ResultMemoizeHandler<HttpClientResponse> httpClientResponseHandler = new ResultMemoizeHandler<>();
+
+                    HttpClientRequest httpClientRequest =
+                            httpClient
+                                    .putAbs(url, httpClientResponse -> {
+                                        httpClientResponse.pause();
+                                        httpClientResponseHandler.complete(httpClientResponse);
+                                    })
+                                    .exceptionHandler(httpClientResponseHandler::fail)
+                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                    .putHeader(CONTENT_LENGTH, valueOf(length))
+                                    .setTimeout(5000);
+                    httpClientRequest.sendHead();
+
+                    // this observable depends on the server sending the response header immediately then keepalive pings
+                    // and then ending once the stream has been written via NodeWriteStreamBlob.consume(...)
+
+                    return Observable.create(httpClientResponseHandler.subscribe)
+                            .doOnNext(httpClientResponse -> {
+                                if (HTTP_OK != httpClientResponse.statusCode()) {
+                                    httpClientResponse.resume();
+                                    throw new HttpClientResponseException(httpClientResponse, Buffer.buffer());
+                                }
+                            })
+                            .map(httpClientResponse -> {
+                                Observable<DigestBlob> oResponse =
+                                        Defer.just(httpClientResponse)
+                                                .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
+                                                .map(new BufferToJsonObject())
+                                                .map(jsonObject -> {
+                                                    Integer code = jsonObject.getInteger("code");
+                                                    if (code == null || HTTP_OK != code) {
+                                                        throw new HttpClientResponseException(httpClientResponse, jsonObject);
+                                                    }
+                                                    return jsonObject;
+                                                })
+                                                .map(jsonObject -> {
+                                                    JsonObject blob = jsonObject.getJsonObject("blob");
+                                                    return new DigestBlob(blob);
+                                                });
+                                NodeWriteStreamBlob writeStreamBlob = new NodeWriteStreamBlob(_this) {
+                                    @Override
+                                    public Observable<DigestBlob> consume(ReadStream<Buffer> src) {
+
+                                        return combineSinglesDelayError(
+                                                pump(src, new HttpClientRequestEndableWriteStream(httpClientRequest)),
+                                                oResponse,
+                                                (aVoid1, digestBlob) -> digestBlob);
 
 
-                            if (LOGGER.isDebugEnabled()) {
-                                LOGGER.debug("createWriteStream " + url);
-                            }
+                                    }
+                                };
+                                return writeStreamBlob;
+                            });
 
-                            ResultMemoizeHandler<HttpClientResponse> httpClientResponseHandler = new ResultMemoizeHandler<>();
-
-                            final HttpClientRequest httpClientRequest =
-                                    httpClient
-                                            .putAbs(url, httpClientResponse -> {
-                                                httpClientResponse.pause();
-                                                httpClientResponseHandler.handle(httpClientResponse);
-                                            })
-                                            .exceptionHandler(httpClientResponseHandler::fail)
-                                            .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                            .putHeader(CONTENT_LENGTH, valueOf(length))
-                                            .setTimeout(responseTimeout);
-
-                            Observable<DigestBlob> oResponse =
-                                    create(httpClientResponseHandler.subscribe)
-                                            .flatMap(
-                                                    httpClientResponse ->
-                                                            Defer.just(httpClientResponse)
-                                                                    .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
-                                                                    .map(buffer -> {
-                                                                        if (HTTP_OK != httpClientResponse.statusCode()) {
-                                                                            throw new HttpClientResponseException(httpClientResponse, buffer);
-                                                                        }
-                                                                        return buffer;
-                                                                    })
-                                                                    .map(new BufferToJsonObject())
-                                                                    .map(jsonObject -> {
-                                                                        Integer code = jsonObject.getInteger("code");
-                                                                        if (code == null || HTTP_OK != code) {
-                                                                            throw new HttpClientResponseException(httpClientResponse, jsonObject);
-                                                                        }
-                                                                        return jsonObject;
-                                                                    })
-                                                                    .map(jsonObject -> {
-                                                                        JsonObject blob = jsonObject.getJsonObject("blob");
-                                                                        return new DigestBlob(blob);
-                                                                    }));
-
-
-                            return combineSinglesDelayError(
-                                    pump(src, new HttpClientRequestEndableWriteStream(httpClientRequest)),
-                                    oResponse,
-                                    (aVoid1, digestBlob) -> digestBlob);
-
-
-                        }
-                    };
-
-                    return writeStreamBlob;
                 });
     }
 

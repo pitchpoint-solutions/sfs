@@ -19,6 +19,7 @@ package org.sfs;
 import com.fasterxml.jackson.core.JsonFactory;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpClient;
+import io.vertx.core.http.HttpServer;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import org.sfs.auth.AuthProviderService;
@@ -29,10 +30,17 @@ import org.sfs.encryption.ContainerKeys;
 import org.sfs.encryption.MasterKeys;
 import org.sfs.filesystem.temp.TempDirectoryCleaner;
 import org.sfs.jobs.Jobs;
+import org.sfs.nodes.ClusterInfo;
+import org.sfs.nodes.NodeStats;
 import org.sfs.nodes.Nodes;
-import org.sfs.vo.TransientXListener;
+import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.Defer;
+import org.sfs.rx.RxHelper;
+import org.sfs.rx.ToVoid;
+import rx.Observable;
 import rx.Subscriber;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -44,6 +52,7 @@ public class SfsServer extends Server {
     private SfsSingletonServer delegate;
     private HttpClient httpClient;
     private HttpClient httpsClient;
+    private List<HttpServer> httpServers = new ArrayList<>();
 
     public SfsServer() {
     }
@@ -67,7 +76,9 @@ public class SfsServer extends Server {
                     httpsClient = server.createHttpClient(vertx, true);
                     httpClient = server.createHttpClient(vertx, false);
                     server.initHttpListeners(vertxContext, true)
-                            .subscribe(new Subscriber<List<TransientXListener>>() {
+                            .doOnNext(httpServers1 -> httpServers.addAll(httpServers1))
+                            .map(new ToVoid<>())
+                            .subscribe(new Subscriber<Void>() {
                                 @Override
                                 public void onCompleted() {
                                     LOGGER.info("Started verticle " + _this);
@@ -81,7 +92,7 @@ public class SfsServer extends Server {
                                 }
 
                                 @Override
-                                public void onNext(List<TransientXListener> listenerList) {
+                                public void onNext(Void aVoid) {
 
                                 }
                             });
@@ -102,7 +113,32 @@ public class SfsServer extends Server {
             sfsSingletonServer.stop(stoppedResult);
         } else {
             LOGGER.info("Stopped verticle " + _this);
-            stoppedResult.complete();
+            Defer.empty()
+                    .flatMap(aVoid ->
+                            RxHelper.iterate(httpServers, httpServer -> {
+                                AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+                                httpServer.close(handler);
+                                return Observable.create(handler.subscribe)
+                                        .onErrorResumeNext(throwable -> {
+                                            LOGGER.error("Unhandled Exception", throwable);
+                                            return Defer.empty();
+                                        })
+                                        .map(aVoid1 -> Boolean.TRUE);
+                            }).map(new ToVoid<>()))
+                    .subscribe(
+                            aVoid -> {
+                                // do nothing
+                            },
+                            throwable -> {
+                                LOGGER.info("Failed to stop verticle " + _this, throwable);
+                                stoppedResult.fail(throwable);
+                            },
+                            () -> {
+                                LOGGER.info("Stopped verticle " + _this);
+                                stoppedResult.complete();
+                            });
+
+
         }
     }
 
@@ -185,6 +221,16 @@ public class SfsServer extends Server {
     @Override
     public ContainerKeys containerKeys() {
         return getDelegate().containerKeys();
+    }
+
+    @Override
+    public ClusterInfo getClusterInfo() {
+        return getDelegate().getClusterInfo();
+    }
+
+    @Override
+    public NodeStats getNodeStats() {
+        return getDelegate().getNodeStats();
     }
 
     @Override

@@ -73,13 +73,13 @@ public class CopySegmentsReadStreams implements Func1<Iterable<TransientSegment>
                                 .flatMap(holder -> {
                                     TransientBlobReference transientBlobReference = holder.value0();
                                     if (LOGGER.isDebugEnabled()) {
-                                        LOGGER.debug("begin copy of blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition() + ", primary=" + transientBlobReference.isVolumePrimary() + ", replica=" + transientBlobReference.isVolumeReplica());
+                                        LOGGER.debug("begin copy of blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition());
                                     }
                                     return prepareWriteStream(new NoEndEndableWriteStream(writeStream), transientSegment)
                                             .flatMap(writeStream -> holder.value1().produce(writeStream))
                                             .doOnNext(aVoid -> {
                                                 if (LOGGER.isDebugEnabled()) {
-                                                    LOGGER.debug("end copy of blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition() + ", primary=" + transientBlobReference.isVolumePrimary() + ", replica=" + transientBlobReference.isVolumeReplica());
+                                                    LOGGER.debug("end copy of blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition());
                                                 }
                                             });
                                 })

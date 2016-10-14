@@ -128,9 +128,9 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
     protected Observable<Void> prepareContainer(TestContext context) {
 
         return just((Void) null)
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().nodes().forceNodeStatsUpdate(VERTX_CONTEXT))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().nodes().forceClusterInfoRefresh(VERTX_CONTEXT))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
                 .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())

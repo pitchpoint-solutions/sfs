@@ -28,10 +28,11 @@ import org.sfs.TestSubscriber;
 import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.filesystem.volume.VolumeManager;
 import org.sfs.integration.java.BaseTestVerticle;
+import org.sfs.integration.java.func.WaitForCluster;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.nodes.Nodes;
-import org.sfs.nodes.ReplicaGroup;
+import org.sfs.nodes.VolumeReplicaGroup;
 import org.sfs.nodes.XNode;
 import org.sfs.rx.Holder2;
 import org.sfs.rx.ToVoid;
@@ -92,23 +93,26 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
 
         final AsyncFile asyncFile = VERTX.fileSystem().openBlocking(tempFile1.toString(), openOptions);
 
-        final Nodes nodes = vertxContext().verticle().nodes();
+        Nodes nodes = vertxContext().verticle().nodes();
 
         Async async = context.async();
         just((Void) null)
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
+                .flatMap(new WaitForCluster(VERTX, HTTP_CLIENT))
                 .flatMap(aVoid -> {
                     final VolumeManager volumeManager = nodes.volumeManager();
-                    assertEquals(context, 1, Iterables.size(volumeManager.getReplica()));
-                    assertEquals(context, 1, Iterables.size(volumeManager.getPrimary()));
+                    assertEquals(context, 1, Iterables.size(volumeManager.volumes()));
                     return just(
-                            new ReplicaGroup(vertxContext(), 1, 1, true));
+                            new VolumeReplicaGroup(vertxContext(), 2)
+                                    .setAllowSameNode(true));
                 })
-                .flatMap(replicaGroup ->
+                .flatMap(volumeReplicaGroup ->
                         just((Void) null)
-                                .flatMap(aVoid -> replicaGroup.consume(nodes.getDataNodes(VERTX_CONTEXT), size, newArrayList(MD5, SHA512), asyncFile))
+                                .flatMap(aVoid -> volumeReplicaGroup.consume(size, newArrayList(MD5, SHA512), asyncFile))
                                 .map(responses -> {
                                     DigestBlob blob;
-                                    for (Holder2<XNode<? extends XNode>, DigestBlob> h : responses) {
+                                    for (Holder2<XNode, DigestBlob> h : responses) {
                                         blob = h.value1();
                                         assertArrayEquals(context, md5, blob.getDigest(MD5).get());
                                         assertArrayEquals(context, sha512, blob.getDigest(SHA512).get());
@@ -120,7 +124,7 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                                         from(responses)
                                                 .flatMap(response -> {
                                                     DigestBlob digestBlob = response.value1();
-                                                    XNode<? extends XNode> xNode = response.value0();
+                                                    XNode xNode = response.value0();
                                                     LOGGER.debug("Doing ack for volume " + digestBlob.getVolume() + " position " + digestBlob.getPosition());
                                                     return xNode.acknowledge(digestBlob.getVolume(), digestBlob.getPosition())
                                                             .map(headerBlobOptional -> {
@@ -135,7 +139,7 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                                         from(responses)
                                                 .flatMap(response -> {
                                                     DigestBlob digestBlob = response.value1();
-                                                    XNode<? extends XNode> xNode = response.value0();
+                                                    XNode xNode = response.value0();
                                                     return xNode.createReadStream(digestBlob.getVolume(), digestBlob.getPosition(), absent(), absent())
                                                             .map(Optional::get)
                                                             .flatMap(readStreamBlob -> {
@@ -155,7 +159,7 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                                         from(responses)
                                                 .flatMap(response -> {
                                                     DigestBlob digestBlob = response.value1();
-                                                    XNode<? extends XNode> xNode = response.value0();
+                                                    XNode xNode = response.value0();
                                                     return xNode.delete(digestBlob.getVolume(), digestBlob.getPosition())
                                                             .map(headerBlobOptional -> {
                                                                 assertTrue(context, headerBlobOptional.isPresent());

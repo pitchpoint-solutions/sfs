@@ -40,7 +40,6 @@ import org.sfs.rx.Defer;
 import org.sfs.rx.ResultMemoizeHandler;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.ExceptionHelper;
-import org.sfs.util.UUIDGen;
 import org.sfs.vo.TransientXAllocatedFile;
 import org.sfs.vo.TransientXFileSystem;
 import org.sfs.vo.TransientXVolume;
@@ -94,7 +93,6 @@ public class VolumeV1 implements Volume {
     private RecyclingAllocator indexFileAllocator;
     private final Path basePath;
     private String volumeId;
-    private XVolume.XSuperBlock.Type type;
     private AtomicReference<GcState> gcState = new AtomicReference<>(GcState.STOPPED);
     private AtomicReference<Status> volumeState = new AtomicReference<>(Status.STOPPED);
     private MetaFile metaFile;
@@ -193,8 +191,6 @@ public class VolumeV1 implements Volume {
                                 .setIndexFile(indexFileInfo)
                                 .setDataFile(dataFileInfo)
                                 .setFileSystem(fileSystemInfo)
-                                .setPrimary(isPrimary())
-                                .setReplica(isReplica())
                                 .setUsableSpace(actualUsableSpace)
                                 .setStatus(volumeState.get());
 
@@ -322,54 +318,6 @@ public class VolumeV1 implements Volume {
                 });
     }
 
-    @Override
-    public boolean isPrimary() {
-        return XVolume.XSuperBlock.Type.PRIMARY.equals(type);
-    }
-
-    @Override
-    public boolean isReplica() {
-        return XVolume.XSuperBlock.Type.REPLICA.equals(type);
-    }
-
-    @Override
-    public Observable<Void> setPrimary(SfsVertx vertx) {
-        return Observable.defer(
-                () -> {
-                    checkStarted();
-                    return Defer.empty();
-                })
-                .flatMap(aVoid -> getSuperBlock(vertx))
-                .flatMap(superBlock -> {
-                    XVolume.XSuperBlock updated = superBlock.toBuilder()
-                            .setType(XVolume.XSuperBlock.Type.PRIMARY)
-                            .build();
-                    return setSuperBlock(vertx, updated);
-                })
-                .doOnNext(aVoid -> {
-                    type = XVolume.XSuperBlock.Type.PRIMARY;
-                });
-    }
-
-    @Override
-    public Observable<Void> setReplica(SfsVertx vertx) {
-        return Observable.defer(
-                () -> {
-                    checkStarted();
-                    return Defer.empty();
-                })
-                .flatMap(aVoid -> getSuperBlock(vertx))
-                .flatMap(superBlock -> {
-                    XVolume.XSuperBlock updated = superBlock.toBuilder()
-                            .setType(XVolume.XSuperBlock.Type.REPLICA)
-                            .build();
-                    return setSuperBlock(vertx, updated);
-                })
-                .doOnNext(aVoid -> {
-                    type = XVolume.XSuperBlock.Type.REPLICA;
-                });
-    }
-
     protected Observable<XVolume.XSuperBlock> getSuperBlock(SfsVertx vertx) {
         return RangeLock.lockedObservable(vertx,
                 () -> metaFile.tryReadLock(),
@@ -414,12 +362,10 @@ public class VolumeV1 implements Volume {
                                 .flatMap(size -> {
                                     if (size <= 0) {
                                         _this.volumeId = UUID.randomUUID().toString();
-                                        _this.type = XVolume.XSuperBlock.Type.REPLICA;
                                         _this.dataBlockSize = DATA_BLOCK_SIZE;
                                         _this.indexBlockSize = INDEX_BLOCK_SIZE;
                                         XVolume.XSuperBlock xSuperBlock =
                                                 XVolume.XSuperBlock.newBuilder()
-                                                        .setType(_this.type)
                                                         .setVolumeId(_this.volumeId)
                                                         .setDataBlockSize(dataBlockSize)
                                                         .setIndexBlockSize(indexBlockSize)
@@ -435,14 +381,6 @@ public class VolumeV1 implements Volume {
                                                     Preconditions.checkState(superBlock.getDataBlockSize() > 0, "Corrupt superblock");
                                                     Preconditions.checkState(superBlock.getIndexBlockSize() > 0, "Corrupt superblock");
                                                     _this.volumeId = superBlock.getVolumeId();
-                                                    XVolume.XSuperBlock.Type type1 = superBlock.getType();
-                                                    if (XVolume.XSuperBlock.Type.PRIMARY.equals(type1)) {
-                                                        _this.type = XVolume.XSuperBlock.Type.PRIMARY;
-                                                    } else if (XVolume.XSuperBlock.Type.REPLICA.equals(type1)) {
-                                                        _this.type = XVolume.XSuperBlock.Type.REPLICA;
-                                                    } else {
-                                                        throw new RuntimeException(type1.name() + " is not a support volume type");
-                                                    }
                                                     _this.indexBlockSize = superBlock.getIndexBlockSize();
                                                     _this.dataBlockSize = superBlock.getDataBlockSize();
                                                     // TODO: add functionality to upgrade the volume data structures
@@ -625,7 +563,7 @@ public class VolumeV1 implements Volume {
                         Preconditions.checkState(startPosition <= endPosition, "Offset must be <= %s", endPosition - dataPosition);
                     }
                     ReadStreamBlob readStreamBlob =
-                            new ReadStreamBlob(volumeId, isPrimary(), isReplica(), position, 0, normalizedLength) {
+                            new ReadStreamBlob(volumeId, position, 0, normalizedLength) {
                                 @Override
                                 public Observable<Void> produce(BufferEndableWriteStream endableWriteStream) {
                                     return RangeLock.lockedObservable(vertx,
@@ -692,7 +630,7 @@ public class VolumeV1 implements Volume {
                                                     });
                                         })
                                         .map(aVoid -> {
-                                            WriteStreamBlob writeStreamBlob = new WriteStreamBlob(volumeId, isPrimary(), isReplica(), headerPosition, length) {
+                                            WriteStreamBlob writeStreamBlob = new WriteStreamBlob(volumeId, headerPosition, length) {
 
                                                 @Override
                                                 public Observable<Void> consume(ReadStream<Buffer> src) {
@@ -751,7 +689,7 @@ public class VolumeV1 implements Volume {
                                                     .setUpdatedTs(System.currentTimeMillis())
                                                     .build();
                                             return setIndexBlock0(vertx, positional.getPosition(), updated)
-                                                    .map(aVoid1 -> Optional.of(new HeaderBlob(volumeId, isPrimary(), isReplica(), position, header.getDataLength())));
+                                                    .map(aVoid1 -> Optional.of(new HeaderBlob(volumeId, position, header.getDataLength())));
                                         })
                                         .singleOrDefault(Optional.absent()),
                                 LOCK_WAIT_TIMEOUT
@@ -783,14 +721,14 @@ public class VolumeV1 implements Volume {
                                         .flatMap(positional -> {
                                             XVolume.XIndexBlock header = positional.getValue();
                                             if (header.getDeleted()) {
-                                                return Observable.just(Optional.of(new HeaderBlob(volumeId, isPrimary(), isReplica(), position, header.getDataLength())));
+                                                return Observable.just(Optional.of(new HeaderBlob(volumeId, position, header.getDataLength())));
                                             } else {
                                                 XVolume.XIndexBlock updated = header.toBuilder()
                                                         .setDeleted(true)
                                                         .setUpdatedTs(System.currentTimeMillis())
                                                         .build();
                                                 return setIndexBlock0(vertx, positional.getPosition(), updated)
-                                                        .map(aVoid1 -> Optional.of(new HeaderBlob(volumeId, isPrimary(), isReplica(), position, header.getDataLength())));
+                                                        .map(aVoid1 -> Optional.of(new HeaderBlob(volumeId, position, header.getDataLength())));
                                             }
                                         })
                                         .singleOrDefault(Optional.absent()),

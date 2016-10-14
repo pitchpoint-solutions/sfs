@@ -23,13 +23,13 @@ import rx.Observable;
 
 public abstract class NodeWriteStreamBlob {
 
-    private final XNode<? extends XNode> node;
+    private final XNode node;
 
-    public NodeWriteStreamBlob(XNode<? extends XNode> node) {
+    public NodeWriteStreamBlob(XNode node) {
         this.node = node;
     }
 
-    public XNode<? extends XNode> getNode() {
+    public XNode getNode() {
         return node;
     }
 

@@ -17,44 +17,29 @@
 package org.sfs.nodes;
 
 import com.google.common.base.Optional;
-import com.google.common.collect.FluentIterable;
-import com.google.common.collect.ImmutableList;
 import com.google.common.net.HostAndPort;
 import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.elasticsearch.nodes.DeleteServiceDef;
 import org.sfs.elasticsearch.nodes.GetDocumentsCountForNode;
-import org.sfs.elasticsearch.nodes.LoadServiceDef;
-import org.sfs.elasticsearch.nodes.PersistServiceDef;
-import org.sfs.elasticsearch.nodes.UpdateServiceDef;
 import org.sfs.filesystem.volume.VolumeManager;
 import org.sfs.rx.ToVoid;
-import org.sfs.vo.PersistentServiceDef;
 import org.sfs.vo.TransientServiceDef;
 import org.sfs.vo.TransientXFileSystem;
-import org.sfs.vo.TransientXListener;
 import rx.Observable;
 import rx.Subscriber;
 
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.SocketException;
 import java.nio.file.FileStore;
 import java.nio.file.Path;
+import java.util.List;
 
 import static com.google.common.base.Optional.fromNullable;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.base.Predicates.notNull;
-import static com.google.common.net.HostAndPort.fromParts;
-import static com.google.common.net.InetAddresses.forString;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Runtime.getRuntime;
-import static java.net.NetworkInterface.getNetworkInterfaces;
 import static java.nio.file.Files.getFileStore;
-import static java.util.Calendar.getInstance;
-import static java.util.Collections.list;
 import static org.sfs.rx.Defer.empty;
 import static org.sfs.rx.Defer.just;
 import static rx.Observable.from;
@@ -62,37 +47,18 @@ import static rx.Observable.from;
 public class NodeStats {
 
     private static Logger LOGGER = getLogger(NodeStats.class);
-    private ImmutableList<TransientXListener> listeners;
     private VertxContext<Server> vertxContext;
     private boolean started = false;
     private TransientServiceDef transientServiceDef;
     private Long timerId;
-    private long pingTimeout;
-    private long pingInterval;
 
-    public NodeStats(ImmutableList<TransientXListener> listeners, long pingTimeout, long pingInterval) {
-        this.listeners = listeners;
-        this.pingTimeout = pingTimeout;
-        this.pingInterval = pingInterval;
-    }
-
-    public ImmutableList<TransientXListener> getListeners() {
-        return listeners;
-    }
-
-    public long getPingTimeout() {
-        return pingTimeout;
-    }
-
-    public long getPingInterval() {
-        return pingInterval;
+    public NodeStats() {
     }
 
     public Observable<Void> open(VertxContext<Server> vertxContext) {
         this.vertxContext = vertxContext;
         return empty()
                 .flatMap(aVoid -> generate(vertxContext))
-                .flatMap(aVoid -> persist(vertxContext))
                 .doOnNext(aVoid -> startTimer())
                 .doOnNext(aVoid -> started = true);
     }
@@ -105,7 +71,6 @@ public class NodeStats {
                     LOGGER.warn("Handling Exception", throwable);
                     return empty();
                 })
-                .flatMap(aVoid -> remove(vertxContext))
                 .onErrorResumeNext(throwable -> {
                     LOGGER.warn("Handling Exception", throwable);
                     return empty();
@@ -116,8 +81,7 @@ public class NodeStats {
     }
 
     public Observable<Void> forceUpdate(VertxContext<Server> vertxContext) {
-        return generate(vertxContext)
-                .flatMap(aVoid -> persist(vertxContext));
+        return generate(vertxContext);
     }
 
     public Optional<TransientServiceDef> getStats() {
@@ -133,17 +97,18 @@ public class NodeStats {
             @Override
             public void handle(Long event) {
                 generate(vertxContext)
-                        .flatMap(aVoid -> persist(vertxContext))
                         .subscribe(new Subscriber<Void>() {
                             @Override
                             public void onCompleted() {
-                                timerId = vertxContext.vertx().setTimer(pingInterval, _this);
+                                long refreshInterval = vertxContext.verticle().nodes().getNodeStatsRefreshInterval();
+                                timerId = vertxContext.vertx().setTimer(refreshInterval, _this);
                             }
 
                             @Override
                             public void onError(Throwable e) {
                                 LOGGER.debug("Handling Exception", e);
-                                timerId = vertxContext.vertx().setTimer(pingInterval, _this);
+                                long refreshInterval = vertxContext.verticle().nodes().getNodeStatsRefreshInterval();
+                                timerId = vertxContext.vertx().setTimer(refreshInterval, _this);
                             }
 
                             @Override
@@ -153,7 +118,8 @@ public class NodeStats {
                         });
             }
         };
-        timerId = vertxContext.vertx().setTimer(pingInterval, handler);
+        long refreshInterval = vertxContext.verticle().nodes().getNodeStatsRefreshInterval();
+        timerId = vertxContext.vertx().setTimer(refreshInterval, handler);
     }
 
     protected void stopTimer() {
@@ -167,56 +133,13 @@ public class NodeStats {
     }
 
 
-    protected Observable<Void> remove(VertxContext<Server> vertxContext) {
-        String nodeId = vertxContext.verticle().nodes().getNodeId();
-        return just(nodeId)
-                .filter(s -> s != null)
-                .flatMap(new LoadServiceDef(vertxContext))
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .flatMap(persistentServiceDef ->
-                        Observable.just(persistentServiceDef)
-                                .flatMap(new DeleteServiceDef(vertxContext))
-                                .map(persistentServiceDefOptional -> (Void) null))
-                .singleOrDefault(null);
-    }
-
-    protected Observable<Void> persist(VertxContext<Server> vertxContext) {
-        String nodeId = vertxContext.verticle().nodes().getNodeId();
-        return just(nodeId)
-                .filter(s -> transientServiceDef != null)
-                .filter(s -> nodeId != null)
-                .flatMap(new LoadServiceDef(vertxContext))
-                .map(persistentServiceDefOptional -> {
-                    if (persistentServiceDefOptional.isPresent()) {
-                        PersistentServiceDef persistentServiceDef = persistentServiceDefOptional.get();
-                        return persistentServiceDef.merge(transientServiceDef)
-                                .setLastUpdate(getInstance());
-                    } else {
-                        return transientServiceDef;
-                    }
-                })
-                .filter(serviceDef -> serviceDef != null)
-                .flatMap(serviceDef -> {
-                    if (serviceDef instanceof TransientServiceDef) {
-                        return Observable.just((TransientServiceDef) serviceDef)
-                                .flatMap(new PersistServiceDef(vertxContext, pingTimeout));
-                    } else {
-                        return Observable.just((PersistentServiceDef) serviceDef)
-                                .flatMap(new UpdateServiceDef(vertxContext, pingTimeout));
-                    }
-                })
-                .map(persistentServiceDefOptional -> (Void) null)
-                .singleOrDefault(null);
-
-    }
-
     protected Observable<Void> generate(VertxContext<Server> vertxContext) {
         NodeStats _this = this;
         return empty()
                 .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
                     try {
                         Nodes nodes = vertxContext.verticle().nodes();
+                        List<HostAndPort> publishAddresses = nodes.getPublishAddresses();
 
                         Path workingDirectory = vertxContext.verticle().sfsFileSystem().workingDirectory();
                         FileStore fileStore = getFileStore(workingDirectory);
@@ -242,7 +165,7 @@ public class NodeStats {
                                 .setBackgroundPoolQueueSize(nodes.getBackgroundQueueSize())
                                 .setIoPoolQueueSize(nodes.getIoQueueSize())
                                 .setFileSystem(fileSystemInfo)
-                                .setListeners(availableListeners());
+                                .setPublishAddresses(publishAddresses);
 
                     } catch (IOException e) {
                         throw new RuntimeException(e);
@@ -277,42 +200,5 @@ public class NodeStats {
                         empty()
                                 .flatMap(new GetDocumentsCountForNode(vertxContext, nodeId))
                         : just(0L);
-    }
-
-    protected Iterable<TransientXListener> availableListeners() {
-        try {
-            return
-                    FluentIterable.from(list(getNetworkInterfaces()))
-                            .filter(input -> {
-                                try {
-                                    return input.isUp();
-                                } catch (SocketException e) {
-                                    throw new RuntimeException(e);
-                                }
-                            })
-                            .transformAndConcat(input -> input.getInterfaceAddresses())
-                            .transform(input -> input.getAddress())
-                            .filter(input -> !input.isLoopbackAddress())
-                            .transform(thisHost -> {
-                                for (TransientXListener listenerInConfiguration : listeners) {
-                                    Optional<HostAndPort> oHostAndPortInConfiguration = listenerInConfiguration.getHostAndPort();
-                                    if (oHostAndPortInConfiguration.isPresent()) {
-                                        HostAndPort hostAndPortInConfiguration = oHostAndPortInConfiguration.get();
-                                        InetAddress hostAddressInConfiguration = forString(hostAndPortInConfiguration.getHostText());
-                                        if (hostAddressInConfiguration.isAnyLocalAddress()) {
-                                            return new TransientXListener()
-                                                    .setHostAndPort(fromParts(thisHost.getHostAddress(), oHostAndPortInConfiguration.get().getPort()));
-                                        } else if (hostAddressInConfiguration.equals(thisHost)) {
-                                            return listenerInConfiguration;
-                                        }
-                                    }
-                                }
-                                return null;
-                            })
-                            .filter(notNull());
-        } catch (SocketException e) {
-            throw new RuntimeException(e);
-        }
-
     }
 }

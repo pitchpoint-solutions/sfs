@@ -28,9 +28,10 @@ import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
 public class ValidateHeaderExists implements Func1<SfsRequest, SfsRequest> {
 
 
-    private final String headerName;
+    private final CharSequence headerName;
 
-    public ValidateHeaderExists(String headerName) {
+
+    public ValidateHeaderExists(CharSequence headerName) {
         this.headerName = headerName;
     }
 

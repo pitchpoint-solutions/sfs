@@ -30,16 +30,12 @@ public abstract class XVolume<T extends XVolume> {
     private XAllocatedFile<? extends XAllocatedFile> indexFile;
     private XAllocatedFile<? extends XAllocatedFile> dataFile;
     private Long usableSpace;
-    private Boolean primary;
-    private Boolean replica;
     private Status status;
 
     public abstract T copy();
 
     protected T copyInternal(XVolume t) {
         setId(t.id);
-        setPrimary(t.primary);
-        setReplica(t.replica);
         setStatus(t.status);
         setUsableSpace(t.usableSpace);
         setFileSystem(t.fileSystem != null ? t.fileSystem.copy() : null);
@@ -54,15 +50,6 @@ public abstract class XVolume<T extends XVolume> {
 
     public T setId(String id) {
         this.id = id;
-        return (T) this;
-    }
-
-    public Optional<Boolean> isPrimary() {
-        return fromNullable(primary);
-    }
-
-    public T setPrimary(Boolean primary) {
-        this.primary = primary;
         return (T) this;
     }
 
@@ -102,15 +89,6 @@ public abstract class XVolume<T extends XVolume> {
         return (T) this;
     }
 
-    public Optional<Boolean> isReplica() {
-        return fromNullable(replica);
-    }
-
-    public T setReplica(Boolean replica) {
-        this.replica = replica;
-        return (T) this;
-    }
-
     public Optional<Long> getUsableSpace() {
         return fromNullable(usableSpace);
     }
@@ -123,8 +101,6 @@ public abstract class XVolume<T extends XVolume> {
     public T merge(XVolume<? extends XVolume> other) {
         this.id = other.id;
         this.fileSystem = other.fileSystem;
-        this.primary = other.primary;
-        this.replica = other.replica;
         this.status = other.status;
         this.indexFile = other.indexFile;
         this.dataFile = other.dataFile;
@@ -156,8 +132,6 @@ public abstract class XVolume<T extends XVolume> {
                     new TransientXAllocatedFile()
                             .merge(jsonDataFile);
         }
-        this.primary = jsonObject.getBoolean("primary");
-        this.replica = jsonObject.getBoolean("replica");
         this.status = fromNameIfExists(jsonObject.getString("status"));
         this.usableSpace = jsonObject.getLong("usable_space");
         return (T) this;
@@ -167,8 +141,6 @@ public abstract class XVolume<T extends XVolume> {
         JsonObject jsonObject =
                 new JsonObject()
                         .put("id", id)
-                        .put("primary", primary)
-                        .put("replica", replica)
                         .put("status", status != null ? status.name() : null)
                         .put("usable_space", usableSpace);
 

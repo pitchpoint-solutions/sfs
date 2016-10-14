@@ -32,6 +32,7 @@ import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
 import org.sfs.Server;
 import org.sfs.VertxContext;
+import org.sfs.util.ConfigHelper;
 import rx.Observable;
 
 import java.util.Map;
@@ -86,20 +87,16 @@ public class AzureKms implements Kms {
                 .flatMap(aVoid -> {
                     executorService = newCachedThreadPool();
 
-                    endpoint = config.getString("keystore.azure.kms.endpoint", getProperty("sfs.keystore.azure.kms.endpoint", getenv("SFS_KEYSTORE_AZURE_KMS_ENDPOINT")));
-                    LOGGER.info(format("keystore.azure.kms.endpoint: %s", endpoint));
+                    endpoint = ConfigHelper.getFieldOrEnv(config, "keystore.azure.kms.endpoint");
                     checkArgument(endpoint != null, "keystore.azure.kms.endpoint is required");
 
-                    keyId = config.getString("keystore.azure.kms.key_id", getProperty("sfs.keystore.azure.kms.key_id", getenv("SFS_KEYSTORE_AZURE_KMS_KEY_ID")));
-                    LOGGER.info(format("keystore.azure.kms.key_id: %s", keyId));
+                    keyId = ConfigHelper.getFieldOrEnv(config, "keystore.azure.kms.key_id");
                     checkArgument(keyId != null, "keystore.azure.kms.key_id is required");
 
-                    accessKeyId = config.getString("keystore.azure.kms.access_key_id", getProperty("sfs.keystore.azure.kms.access_key_id", getenv("SFS_KEYSTORE_AZURE_KMS_ACCESS_KEY_ID")));
-                    LOGGER.info(format("keystore.azure.kms.access_key_id: %s", accessKeyId));
+                    accessKeyId = ConfigHelper.getFieldOrEnv(config, "keystore.azure.kms.access_key_id");
                     checkArgument(accessKeyId != null, "keystore.aws.kms.access_key_id is required");
 
-                    secretKey = config.getString("keystore.azure.kms.secret_key", getProperty("sfs.keystore.azure.kms.secret_key", getenv("SFS_KEYSTORE_AZURE_KMS_SECRET_KEY")));
-                    LOGGER.info(format("keystore.azure.kms.secret_key: ****"));
+                    secretKey = ConfigHelper.getFieldOrEnv(config, "keystore.azure.kms.secret_key");
                     checkArgument(secretKey != null, "keystore.azure.kms.secret_key is required");
 
                     azureKeyIdentifier = format("%s/keys/%s", endpoint, keyId);

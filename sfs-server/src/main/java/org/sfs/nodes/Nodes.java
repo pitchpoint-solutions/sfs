@@ -17,22 +17,14 @@
 package org.sfs.nodes;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Optional;
-import com.google.common.cache.Cache;
-import com.google.common.cache.RemovalListener;
-import com.google.common.cache.RemovalNotification;
 import com.google.common.collect.ImmutableList;
 import com.google.common.net.HostAndPort;
-import io.vertx.core.http.HttpClient;
 import io.vertx.core.logging.Logger;
-import org.sfs.HttpClientKey;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.VolumeManager;
 import org.sfs.rx.Sleep;
-import org.sfs.vo.PersistentServiceDef;
-import org.sfs.vo.ServiceDef;
-import org.sfs.vo.TransientXListener;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 
 import java.io.IOException;
@@ -43,28 +35,21 @@ import java.util.concurrent.BlockingQueue;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.cache.CacheBuilder.newBuilder;
 import static com.google.common.collect.FluentIterable.from;
 import static com.google.common.collect.ImmutableList.copyOf;
-import static com.google.common.collect.Iterables.size;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.nio.file.Files.createDirectories;
 import static java.nio.file.Files.createFile;
 import static java.nio.file.Files.readAllBytes;
 import static java.nio.file.Files.write;
 import static java.nio.file.Paths.get;
-import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
-import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.sfs.rx.Defer.empty;
-import static rx.Observable.defer;
-import static rx.Observable.just;
 
 public class Nodes {
 
     private static final Logger LOGGER = getLogger(Nodes.class);
-    private int numberOfReplicas = 0;
-    private int numberOfPrimaries = 1;
+    private int numberOfObjectReplicasReplicas = 1;
     // if true a primary and replica copies of volume data
     // can exist on the same node
     private boolean allowSameNode = false;
@@ -74,27 +59,11 @@ public class Nodes {
     private VolumeManager volumeManager;
     private boolean dataNode = false;
     private String nodeId;
-    private Cache<HttpClientKey, HttpClient> httpClientCache =
-            newBuilder()
-                    .maximumSize(1000)
-                    .expireAfterAccess(30, MINUTES)
-                    .removalListener(new RemovalListener<HttpClientKey, HttpClient>() {
-                        @Override
-                        public void onRemoval(RemovalNotification<HttpClientKey, HttpClient> notification) {
-                            if (notification != null) {
-                                HttpClient httpClient = notification.getValue();
-                                if (httpClient != null) {
-                                    httpClient.close();
-                                }
-                            }
-                        }
-                    })
-                    .build();
     private Path nodeIdPath;
     private boolean masterNode;
-    private ClusterInfo clusterInfo = new ClusterInfo();
-    private NodeStats nodeStats;
-    private ImmutableList<TransientXListener> listeners;
+    private long nodeStatsRefreshInterval;
+    private ImmutableList<HostAndPort> clusterHosts;
+    private ImmutableList<HostAndPort> publishAddresses;
     private final BlockingQueue<Runnable> ioQueue;
     private final BlockingQueue<Runnable> backgroundQueue;
 
@@ -105,29 +74,30 @@ public class Nodes {
 
     public Observable<Void> open(
             VertxContext<Server> vertxContext,
-            final Iterable<TransientXListener> listeners,
+            final Iterable<HostAndPort> publicAddresses,
+            final Iterable<HostAndPort> clusterHosts,
             final int maxPoolSize,
             final int connectTimeout,
             final int responseTimeout,
-            final int numberOfReplicas,
-            final long pingInterval,
-            final long pingTimeout,
+            final int numberOfObjectReplicas,
+            final long nodeStatsRefreshInterval,
             final boolean dataNode,
             final boolean masterNode) {
 
-        checkArgument(numberOfReplicas >= 0, "Replicas must be >= 0");
-        checkArgument(pingInterval >= 1000, "RefreshInterval must be greater than 1000");
+        checkArgument(numberOfObjectReplicas > 0, "Replicas must be > 0");
+        checkArgument(nodeStatsRefreshInterval >= 1000, "RefreshInterval must be greater than 1000");
 
         this.dataNode = dataNode;
         this.masterNode = masterNode;
-        this.numberOfReplicas = numberOfReplicas;
+        this.numberOfObjectReplicasReplicas = numberOfObjectReplicas;
         this.maxPoolSize = maxPoolSize;
         this.connectTimeout = connectTimeout;
         this.responseTimeout = responseTimeout;
         this.nodeIdPath = get(vertxContext.verticle().sfsFileSystem().workingDirectory().toString(), "node", ".nodeId");
         this.volumeManager = new VolumeManager(vertxContext.verticle().sfsFileSystem().workingDirectory());
-        this.listeners = copyOf(listeners);
-        this.nodeStats = new NodeStats(this.listeners, pingTimeout, pingInterval);
+        this.publishAddresses = copyOf(publicAddresses);
+        this.clusterHosts = copyOf(clusterHosts);
+        this.nodeStatsRefreshInterval = nodeStatsRefreshInterval;
 
         return empty()
                 .flatMap(aVoid -> initNode(vertxContext)
@@ -141,33 +111,30 @@ public class Nodes {
                         return empty();
                     }
                 })
-                .flatMap(aVoid -> nodeStats.open(vertxContext))
-                .flatMap(aVoid -> clusterInfo.open(vertxContext))
                 .single()
                 .doOnNext(aVoid -> {
                     LOGGER.info("Started node " + nodeId);
                 });
     }
 
-    public List<TransientXListener> getListeners() {
-        return listeners;
+    public long getNodeStatsRefreshInterval() {
+        return nodeStatsRefreshInterval;
     }
 
-    public int getNumberOfPrimaries() {
-        return numberOfPrimaries;
+    public List<HostAndPort> getPublishAddresses() {
+        return publishAddresses;
     }
 
-    public int getNumberOfReplicas() {
-        return numberOfReplicas;
+    public ImmutableList<HostAndPort> getClusterHosts() {
+        return clusterHosts;
     }
 
-    public Nodes setNumberOfPrimaries(int numberOfPrimaries) {
-        this.numberOfPrimaries = numberOfPrimaries;
-        return this;
+    public int getNumberOfObjectReplicasReplicas() {
+        return numberOfObjectReplicasReplicas;
     }
 
-    public Nodes setNumberOfReplicas(int numberOfReplicas) {
-        this.numberOfReplicas = numberOfReplicas;
+    public Nodes setNumberOfObjectReplicasReplicas(int numberOfObjectReplicasReplicas) {
+        this.numberOfObjectReplicasReplicas = numberOfObjectReplicasReplicas;
         return this;
     }
 
@@ -221,18 +188,9 @@ public class Nodes {
 
     @VisibleForTesting
     public HostAndPort getHostAndPort() {
-        return listeners.get(0).getHostAndPort().get();
+        return publishAddresses.get(0);
     }
 
-    @VisibleForTesting
-    public Observable<Void> forceNodeStatsUpdate(VertxContext<Server> vertxContext) {
-        return nodeStats.forceUpdate(vertxContext);
-    }
-
-    @VisibleForTesting
-    public Observable<Void> forceClusterInfoRefresh(VertxContext<Server> vertxContext) {
-        return clusterInfo.forceRefresh(vertxContext);
-    }
 
     public int getMaxPoolSize() {
         return maxPoolSize;
@@ -258,45 +216,9 @@ public class Nodes {
         return nodeId;
     }
 
-    public NodeStats getNodeStats() {
-        return nodeStats;
-    }
-
-    public Observable<Boolean> isOnline(VertxContext<Server> vertxContext) {
-        return defer(() -> {
-            int expectedNodeCount = getNumberOfPrimaries() + getNumberOfReplicas();
-            int count = size(getDataNodes(vertxContext));
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Expected node count was " + expectedNodeCount + ", Active node count was " + count);
-            }
-            return just(count >= expectedNodeCount);
-        });
-    }
-
-    public Observable<Optional<PersistentServiceDef>> getMaintainerNode(VertxContext<Server> vertxContext) {
-        return just(clusterInfo.getCurrentMaintainerNode());
-    }
-
-    public Iterable<XNode<?>> getNodesForVolume(VertxContext<Server> vertxContext, String volumeId) {
-        List<PersistentServiceDef> nodes = clusterInfo.getNodesForVolume(volumeId);
-        return from(nodes)
-                .transformAndConcat(input -> candidateConnections(vertxContext, input));
-    }
-
-    public Iterable<PersistentServiceDef> getDataNodes(VertxContext<Server> vertxContext) {
-        return clusterInfo.getDataNodes();
-    }
-
-    public Iterable<PersistentServiceDef> getNodes() {
-        return clusterInfo.getNodes();
-    }
-
     public Observable<Void> close(VertxContext<Server> vertxContext) {
         String aNodeId = nodeId;
         return empty()
-                .doOnNext(aVoid -> {
-                    httpClientCache.invalidateAll();
-                })
                 .flatMap(aVoid -> {
                     VolumeManager v = volumeManager;
                     volumeManager = null;
@@ -310,23 +232,9 @@ public class Nodes {
                     return empty();
 
                 })
-                .flatMap(aVoid -> {
-                    if (clusterInfo != null) {
-                        return clusterInfo.close(vertxContext);
-                    } else {
-                        return just(null);
-                    }
-                })
                 .onErrorResumeNext(throwable -> {
                     LOGGER.warn("Handling Exception", throwable);
                     return empty();
-                })
-                .flatMap(aVoid -> {
-                    if (nodeStats != null) {
-                        return nodeStats.close(vertxContext);
-                    } else {
-                        return just(null);
-                    }
                 })
                 .onErrorResumeNext(throwable -> {
                     LOGGER.warn("Handling Exception", throwable);
@@ -338,18 +246,27 @@ public class Nodes {
                 });
     }
 
-    public Iterable<XNode<? extends XNode>> candidateConnections(final VertxContext<Server> vertxContext, final ServiceDef<? extends ServiceDef> serviceDef) {
-        String nodeId = serviceDef.getId();
-        if (this.nodeId.equals(nodeId)) {
-            if (volumeManager == null) {
-                return emptyList();
-            } else {
-                return singletonList(new LocalNode(vertxContext, volumeManager));
+    public Iterable<XNode> createNodes(final VertxContext<Server> vertxContext, TransientServiceDef serviceDef) {
+        boolean localNode = false;
+        for (HostAndPort targetNodeAddress : serviceDef.getPublishAddresses()) {
+            if (publishAddresses.contains(targetNodeAddress)) {
+                localNode = true;
+                break;
             }
+        }
+        if (localNode) {
+            return singletonList(new LocalNode(vertxContext, volumeManager));
         } else {
-            return from(serviceDef.getListeners())
-                    .filter(input -> input.getHostAndPort().isPresent())
-                    .transform(input -> new RemoteNode(vertxContext, nodeId, responseTimeout, input.getHostAndPort().get()));
+            return from(serviceDef.getPublishAddresses())
+                    .transform(input -> new RemoteNode(vertxContext, responseTimeout, input));
+        }
+    }
+
+    public XNode createNode(final VertxContext<Server> vertxContext, HostAndPort hostAndPort) {
+        if (publishAddresses.contains(hostAndPort)) {
+            return new LocalNode(vertxContext, volumeManager);
+        } else {
+            return new RemoteNode(vertxContext, responseTimeout, hostAndPort);
         }
     }
 

@@ -25,19 +25,17 @@ import org.sfs.filesystem.volume.ReadStreamBlob;
 import org.sfs.io.PipedEndableWriteStream;
 import org.sfs.io.PipedReadStream;
 import org.sfs.nodes.Nodes;
-import org.sfs.nodes.ReplicaGroup;
+import org.sfs.nodes.VolumeReplicaGroup;
 import org.sfs.nodes.XNode;
 import org.sfs.nodes.all.blobreference.DeleteBlobReference;
 import org.sfs.rx.Defer;
 import org.sfs.rx.Holder2;
-import org.sfs.vo.PersistentServiceDef;
 import org.sfs.vo.TransientBlobReference;
 import org.sfs.vo.TransientSegment;
-import org.sfs.vo.XVolume;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 import rx.functions.Func1;
 
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,9 +58,9 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
     private static final Logger LOGGER = getLogger(RebalanceSegment.class);
     private VertxContext<Server> vertxContext;
     private Nodes nodes;
-    private List<PersistentServiceDef> dataNodes;
+    private List<TransientServiceDef> dataNodes;
 
-    public RebalanceSegment(VertxContext<Server> vertxContext, List<PersistentServiceDef> copyOfDataNodes) {
+    public RebalanceSegment(VertxContext<Server> vertxContext, List<TransientServiceDef> copyOfDataNodes) {
         this.vertxContext = vertxContext;
         this.nodes = vertxContext.verticle().nodes();
         this.dataNodes = copyOfDataNodes;
@@ -79,15 +77,8 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
 
 
     protected Observable<Boolean> reBalance(TransientSegment transientSegment) {
-        List<TransientBlobReference> primaries =
-                from(transientSegment.verifiedAckdPrimaryBlobs())
-                        .filter(input -> {
-                            Optional<Integer> verifyFailCount = input.getVerifyFailCount();
-                            return !verifyFailCount.isPresent() || verifyFailCount.get() <= 0;
-                        })
-                        .toList();
         List<TransientBlobReference> replicas =
-                from(transientSegment.verifiedAckdReplicaBlobs())
+                from(transientSegment.verifiedAckdBlobs())
                         .filter(input -> {
                             Optional<Integer> verifyFailCount = input.getVerifyFailCount();
                             return !verifyFailCount.isPresent() || verifyFailCount.get() <= 0;
@@ -96,27 +87,13 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
 
         int numberOfObjectReplicasRequestedOnContainer = transientSegment.getParent().getParent().getParent().getObjectReplicas();
 
-        int numberOfExpectedPrimaries = nodes.getNumberOfPrimaries();
-        int numberOfExpectedReplicas = NOT_SET == numberOfObjectReplicasRequestedOnContainer ? nodes.getNumberOfReplicas() : numberOfObjectReplicasRequestedOnContainer;
+        int numberOfExpectedReplicas = NOT_SET == numberOfObjectReplicasRequestedOnContainer ? nodes.getNumberOfObjectReplicasReplicas() : numberOfObjectReplicasRequestedOnContainer;
 
-        checkState(numberOfExpectedPrimaries > 0 || numberOfExpectedReplicas > 0, "Number of primary + replica volumes must be greater than zero");
+        checkState(numberOfExpectedReplicas > 0, "Number of replica volumes must be greater than zero");
 
-        int numberOfExistingPrimaries = primaries.size();
         int numberOfExistingReplicas = replicas.size();
 
-        int numberOfPrimariesNeeded = numberOfExpectedPrimaries - numberOfExistingPrimaries;
         int numberOfReplicasNeeded = numberOfExpectedReplicas - numberOfExistingReplicas;
-
-
-        Observable<Boolean> oBalanceDownPrimaries =
-                empty()
-                        .filter(aVoid -> numberOfPrimariesNeeded < 0)
-                        .flatMap(aVoid -> balanceDown(primaries, abs(numberOfPrimariesNeeded)))
-                        .onErrorResumeNext(throwable -> {
-                            LOGGER.error("Handling Balance Down Primaries Exception", throwable);
-                            return Defer.just(false);
-                        })
-                        .singleOrDefault(false);
 
         Observable<Boolean> oBalanceDownReplicas =
                 empty()
@@ -130,13 +107,13 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
 
         Observable<Boolean> oBalanceUp =
                 empty()
-                        .filter(aVoid -> numberOfPrimariesNeeded > 0 || numberOfReplicasNeeded > 0)
+                        .filter(aVoid -> numberOfReplicasNeeded > 0)
                         .flatMap(aVoid -> {
                             Set<String> usedVolumeIds =
-                                    from(concat(primaries, replicas))
+                                    from(concat(replicas))
                                             .transform(input -> input.getVolumeId().get())
                                             .toSet();
-                            return balanceUp(transientSegment, usedVolumeIds, numberOfPrimariesNeeded, numberOfReplicasNeeded);
+                            return balanceUp(transientSegment, usedVolumeIds, numberOfReplicasNeeded);
                         })
                         .onErrorResumeNext(throwable -> {
                             LOGGER.error("Handling Balance Up Exception", throwable);
@@ -146,10 +123,9 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
 
         return zip(
                 oBalanceUp,
-                oBalanceDownPrimaries,
                 oBalanceDownReplicas,
-                (balanceDownPrimaries, balanceDownReplicas, balanceUp) ->
-                        balanceDownPrimaries || balanceDownReplicas || balanceUp);
+                (balanceDownReplicas, balanceUp) ->
+                        balanceDownReplicas || balanceUp);
     }
 
     protected Observable<Boolean> balanceDown(List<TransientBlobReference> blobs, int delta) {
@@ -172,7 +148,7 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
                 .map(aborted -> counter.get() > 0);
     }
 
-    protected Observable<Boolean> balanceUp(TransientSegment transientSegment, Set<String> usedVolumeIds, int numberOfPrimariesNeeded, int numberOfReplicasNeeded) {
+    protected Observable<Boolean> balanceUp(TransientSegment transientSegment, Set<String> usedVolumeIds, int numberOfReplicasNeeded) {
         return Defer.just(transientSegment)
                 .flatMap(new GetSegmentReadStream(vertxContext, true))
                 .filter(Optional::isPresent)
@@ -180,36 +156,23 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
                 .flatMap(holder -> {
                     ReadStreamBlob readStreamBlob = holder.value1();
 
-                    Iterable<PersistentServiceDef> oCandidateNodes =
-                            from(dataNodes)
-                                    .transform(PersistentServiceDef::copy)
-                                    .transform(persistentServiceDef -> {
-                                        Iterator<XVolume<? extends XVolume>> iterator = persistentServiceDef.getVolumes().iterator();
-                                        while (iterator.hasNext()) {
-                                            XVolume<? extends XVolume> volume = iterator.next();
-                                            if (usedVolumeIds.contains(volume.getId().get())) {
-                                                iterator.remove();
-                                            }
-                                        }
-                                        return persistentServiceDef;
-                                    })
-                                    .filter(persistentServiceDef -> !persistentServiceDef.getVolumes().isEmpty());
 
-                    ReplicaGroup replicaGroup = new ReplicaGroup(vertxContext, numberOfPrimariesNeeded, numberOfReplicasNeeded, nodes.isAllowSameNode());
+                    VolumeReplicaGroup volumeReplicaGroup =
+                            new VolumeReplicaGroup(vertxContext, numberOfReplicasNeeded)
+                                    .setAllowSameNode(nodes.isAllowSameNode())
+                                    .setExcludeVolumeIds(usedVolumeIds);
 
                     PipedReadStream pipedReadStream = new PipedReadStream();
                     PipedEndableWriteStream pipedEndableWriteStream = new PipedEndableWriteStream(pipedReadStream);
                     Observable<Void> producer = readStreamBlob.produce(pipedEndableWriteStream);
 
-                    Observable<List<Holder2<XNode<? extends XNode>, DigestBlob>>> consumer = replicaGroup.consume(oCandidateNodes, readStreamBlob.getLength(), SHA512, pipedReadStream);
+                    Observable<List<Holder2<XNode, DigestBlob>>> consumer = volumeReplicaGroup.consume(readStreamBlob.getLength(), SHA512, pipedReadStream);
 
                     return combineSinglesDelayError(producer, consumer, (aVoid, holders) -> {
-                        for (Holder2<XNode<?>, DigestBlob> response : holders) {
+                        for (Holder2<XNode, DigestBlob> response : holders) {
                             DigestBlob digestBlob = response.value1();
                             transientSegment.newBlob()
                                     .setVolumeId(digestBlob.getVolume())
-                                    .setVolumePrimary(digestBlob.isPrimary())
-                                    .setVolumeReplica(digestBlob.isReplica())
                                     .setPosition(digestBlob.getPosition())
                                     .setReadLength(digestBlob.getLength())
                                     .setReadSha512(digestBlob.getDigest(SHA512).get());

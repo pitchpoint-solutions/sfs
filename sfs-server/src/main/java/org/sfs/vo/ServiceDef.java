@@ -18,6 +18,7 @@ package org.sfs.vo;
 
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
+import com.google.common.net.HostAndPort;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 
@@ -35,7 +36,7 @@ import static org.sfs.util.DateFormatter.toDateTimeString;
 
 public abstract class ServiceDef<T extends ServiceDef> {
 
-    private final String id;
+    private String id;
     private XFileSystem<? extends XFileSystem> fileSystem;
     private Calendar lastUpdate;
     private Boolean master;
@@ -47,11 +48,14 @@ public abstract class ServiceDef<T extends ServiceDef> {
     private Long maxMemory;
     private Integer backgroundPoolQueueSize;
     private Integer ioPoolQueueSize;
-    private List<XListener<? extends XListener>> listeners = new ArrayList<>();
+    private List<HostAndPort> publishAddresses = new ArrayList<>();
     private List<XVolume<? extends XVolume>> volumes = new ArrayList<>();
 
     public ServiceDef(String id) {
         this.id = id;
+    }
+
+    public ServiceDef() {
     }
 
     public String getId() {
@@ -115,13 +119,13 @@ public abstract class ServiceDef<T extends ServiceDef> {
         return fromNullable(documentCount);
     }
 
-    public List<XListener<? extends XListener>> getListeners() {
-        return unmodifiableList(listeners);
+    public List<HostAndPort> getPublishAddresses() {
+        return unmodifiableList(publishAddresses);
     }
 
-    public T setListeners(Iterable<? extends XListener<? extends XListener>> listeners) {
-        this.listeners.clear();
-        addAll(this.listeners, listeners);
+    public T setPublishAddresses(Iterable<HostAndPort> publishAddresses) {
+        this.publishAddresses.clear();
+        addAll(this.publishAddresses, publishAddresses);
         return (T) this;
     }
 
@@ -209,20 +213,14 @@ public abstract class ServiceDef<T extends ServiceDef> {
                                 }
                             }));
         }
-        if (t.listeners != null) {
-            setListeners(
-                    from(t.listeners)
-                            .transform(new Function<XListener<? extends XListener>, XListener<? extends XListener>>() {
-                                @Override
-                                public XListener<? extends XListener> apply(XListener<? extends XListener> input) {
-                                    return input.copy();
-                                }
-                            }));
+        if (t.publishAddresses != null) {
+            setPublishAddresses(t.publishAddresses);
         }
         return (T) this;
     }
 
     public T merge(ServiceDef<? extends ServiceDef> other) {
+        this.id = other.id;
         this.lastUpdate = other.lastUpdate != null ? (Calendar) other.lastUpdate.clone() : null;
         this.master = other.master;
         this.dataNode = other.dataNode;
@@ -234,14 +232,15 @@ public abstract class ServiceDef<T extends ServiceDef> {
         this.fileSystem = other.fileSystem;
         this.ioPoolQueueSize = other.ioPoolQueueSize;
         this.backgroundPoolQueueSize = other.backgroundPoolQueueSize;
-        this.listeners.clear();
-        addAll(this.listeners, other.listeners);
+        this.publishAddresses.clear();
+        addAll(this.publishAddresses, other.publishAddresses);
         this.volumes.clear();
         addAll(this.volumes, other.volumes);
         return (T) this;
     }
 
     public T merge(JsonObject jsonObject) {
+        this.id = jsonObject.getString("id");
         this.lastUpdate = fromDateTimeString(jsonObject.getString("update_ts"));
         this.master = jsonObject.getBoolean("master_node");
         this.dataNode = jsonObject.getBoolean("data_node");
@@ -262,15 +261,12 @@ public abstract class ServiceDef<T extends ServiceDef> {
             this.fileSystem = null;
         }
 
-        JsonArray jsonListeners = jsonObject.getJsonArray("listeners");
-        this.listeners.clear();
+        JsonArray jsonListeners = jsonObject.getJsonArray("publish_addresses");
+        this.publishAddresses.clear();
         if (jsonListeners != null) {
             for (Object o : jsonListeners) {
-                JsonObject jsonListener = (JsonObject) o;
-                TransientXListener transientXListener =
-                        new TransientXListener()
-                                .merge(jsonListener);
-                this.listeners.add(transientXListener);
+                String jsonListener = (String) o;
+                this.publishAddresses.add(HostAndPort.fromString(jsonListener));
             }
         }
 
@@ -290,6 +286,7 @@ public abstract class ServiceDef<T extends ServiceDef> {
 
     public JsonObject toJsonObject() {
         JsonObject jsonObject = new JsonObject()
+                .put("id", id)
                 .put("update_ts", toDateTimeString(getLastUpdate()))
                 .put("master_node", master)
                 .put("data_node", dataNode)
@@ -307,10 +304,10 @@ public abstract class ServiceDef<T extends ServiceDef> {
         }
 
         JsonArray jsonListeners = new JsonArray();
-        for (XListener<? extends XListener> xListener : listeners) {
-            jsonListeners.add(xListener.toJsonObject());
+        for (HostAndPort publishAddress : publishAddresses) {
+            jsonListeners.add(publishAddress.toString());
         }
-        jsonObject.put("listeners", jsonListeners);
+        jsonObject.put("publish_addresses", jsonListeners);
 
         JsonArray jsonVolumes = new JsonArray();
         for (XVolume<? extends XVolume> xVolume : volumes) {

@@ -26,10 +26,11 @@ import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.elasticsearch.nodes.AssignUnassignedDocumentsToNode;
 import org.sfs.elasticsearch.object.MaintainObjectsForNode;
-import org.sfs.nodes.Nodes;
+import org.sfs.nodes.ClusterInfo;
 import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.ResultMemoizeHandler;
 import org.sfs.rx.SingleAsyncResultSubscriber;
+import org.sfs.util.ConfigHelper;
 import rx.Observable;
 import rx.Subscriber;
 import rx.functions.Func1;
@@ -48,7 +49,6 @@ import static org.sfs.elasticsearch.AbstractBulkUpdateEndableWriteStream.BulkUpd
 import static org.sfs.rx.Defer.empty;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.ExceptionHelper.containsException;
-import static org.sfs.util.JsonHelper.getField;
 import static rx.Observable.create;
 import static rx.Observable.defer;
 import static rx.Observable.from;
@@ -68,7 +68,7 @@ public class Jobs {
                 .flatMap(new Func1<Void, Observable<Void>>() {
                     @Override
                     public Observable<Void> call(Void aVoid) {
-                        interval = parseLong(getField(config, "jobs.maintenance_interval", valueOf(MINUTES.toMillis(5))));
+                        interval = parseLong(ConfigHelper.getFieldOrEnv(config, "jobs.maintenance_interval", valueOf(MINUTES.toMillis(5))));
                         if (LOGGER.isInfoEnabled()) {
                             LOGGER.info("Running initial maintenance sweep in " + initialInterval + "ms. Subsequent sweeps every every " + interval + "ms.");
                         }
@@ -187,8 +187,8 @@ public class Jobs {
     protected Observable<Void> assignUnassignedDocumentsToNodes(VertxContext<Server> vertxContext) {
         return empty()
                 .flatMap(aVoid -> {
-                    Nodes nodes = vertxContext.verticle().nodes();
-                    return from(nodes.getDataNodes(vertxContext));
+                    ClusterInfo clusterInfo = vertxContext.verticle().getClusterInfo();
+                    return from(clusterInfo.getDataNodes());
                 })
                 .reduce(new HashMap<String, Long>(), (documentCountsByNode, persistentServiceDef) -> {
                     Optional<Long> documentCount = persistentServiceDef.getDocumentCount();

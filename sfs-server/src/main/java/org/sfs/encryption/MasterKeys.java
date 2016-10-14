@@ -26,6 +26,7 @@ import org.sfs.elasticsearch.masterkey.ListReEncryptableMasterKeys;
 import org.sfs.elasticsearch.masterkey.LoadMasterKey;
 import org.sfs.elasticsearch.masterkey.PersistMasterKey;
 import org.sfs.elasticsearch.masterkey.UpdateMasterKey;
+import org.sfs.rx.Defer;
 import org.sfs.rx.Holder2;
 import org.sfs.rx.ToType;
 import org.sfs.rx.ToVoid;
@@ -673,8 +674,8 @@ public class MasterKeys {
                             return combineLatest(
                                     kms.encrypt(vertxContext, clearMasterSecret),
                                     backup0Kms.encrypt(vertxContext, clearMasterSecret),
-                                    vertxContext.verticle().nodes().getMaintainerNode(vertxContext),
-                                    (awsEncrypted, azureEncrypted, persistentServiceDefOptional) -> {
+                                    Defer.just(vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode()),
+                                    (awsEncrypted, azureEncrypted, transientServiceDefServiceDefOptional) -> {
                                         Calendar now = getInstance();
                                         TransientMasterKey transientMasterKey =
                                                 new TransientMasterKey(id)
@@ -688,8 +689,8 @@ public class MasterKeys {
                                                         .setReEncrypteTs(now)
                                                         .setCreateTs(now)
                                                         .setUpdateTs(now);
-                                        if (persistentServiceDefOptional.isPresent()) {
-                                            transientMasterKey.setNodeId(persistentServiceDefOptional.get().getId());
+                                        if (transientServiceDefServiceDefOptional.isPresent()) {
+                                            transientMasterKey.setNodeId(transientServiceDefServiceDefOptional.get().getId());
                                         }
                                         return transientMasterKey;
 
@@ -744,7 +745,7 @@ public class MasterKeys {
                         return combineLatest(
                                 kms.encrypt(vertxContext, clearMasterSecret),
                                 backup0Kms.encrypt(vertxContext, clearMasterSecret),
-                                vertxContext.verticle().nodes().getMaintainerNode(vertxContext),
+                                Defer.just(vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode()),
                                 (awsEncrypted, azureEncrypted, persistentServiceDefOptional) -> {
                                     Calendar now = getInstance();
                                     TransientMasterKey transientMasterKey =

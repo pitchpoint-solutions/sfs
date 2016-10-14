@@ -22,8 +22,8 @@ import rx.Observable;
 
 public abstract class WriteStreamBlob extends HeaderBlob {
 
-    public WriteStreamBlob(String volume, boolean primary, boolean replica, long position, long length) {
-        super(volume, primary, replica, position, length);
+    public WriteStreamBlob(String volume, long position, long length) {
+        super(volume, position, length);
     }
 
     public WriteStreamBlob(HeaderBlob headerBlob) {

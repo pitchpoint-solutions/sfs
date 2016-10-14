@@ -27,8 +27,8 @@ public abstract class ReadStreamBlob extends HeaderBlob {
 
     private final long offset;
 
-    public ReadStreamBlob(String volume, boolean primary, boolean replica, long position, long offset, long length) {
-        super(volume, primary, replica, position, length);
+    public ReadStreamBlob(String volume, long position, long offset, long length) {
+        super(volume, position, length);
         this.offset = offset;
     }
 

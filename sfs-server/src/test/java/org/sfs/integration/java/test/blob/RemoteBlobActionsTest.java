@@ -91,7 +91,6 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                     RemoteNode remoteNode =
                             new RemoteNode(
                                     vertxContext(),
-                                    nodes.getNodeId(),
                                     nodes.getResponseTimeout(),
                                     nodes.getHostAndPort());
                     return remoteNode;
@@ -236,7 +235,6 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                     RemoteNode remoteNode =
                             new RemoteNode(
                                     vertxContext(),
-                                    nodes.getNodeId(),
                                     nodes.getResponseTimeout(),
                                     nodes.getHostAndPort());
                     return remoteNode;
@@ -399,8 +397,8 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                             throw new RuntimeException(e);
                         }
 
-                        return just(fromNullable(getFirst(vertx.verticle().nodes().volumeManager().getPrimary(), null)))
-                                .map(volumeOptional -> volumeOptional.get().getVolumeId())
+                        return just(fromNullable(getFirst(vertx.verticle().nodes().volumeManager().volumes(), null)))
+                                .map(volumeOptional -> volumeOptional.get())
                                 .flatMap(new Func1<String, Observable<HeaderBlob>>() {
                                     @Override
                                     public Observable<HeaderBlob> call(String volumeId) {

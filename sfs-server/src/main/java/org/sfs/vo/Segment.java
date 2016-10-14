@@ -145,30 +145,6 @@ public abstract class Segment<T extends Segment> implements Identity {
         return blobReference;
     }
 
-    public Iterable<TransientBlobReference> verifiedPrimaryBlobs() {
-        checkState(!TRUE.equals(isTinyData), "isTinyData must be set to false");
-        return from(verifiedBlobs())
-                .filter(TransientBlobReference::isVolumePrimary);
-    }
-
-    public Iterable<TransientBlobReference> verifiedAckdPrimaryBlobs() {
-        checkState(!TRUE.equals(isTinyData), "isTinyData must be set to false");
-        return from(verifiedAckdBlobs())
-                .filter(TransientBlobReference::isVolumePrimary);
-    }
-
-    public Iterable<TransientBlobReference> verifiedReplicaBlobs() {
-        checkState(!TRUE.equals(isTinyData), "isTinyData must be set to false");
-        return from(verifiedBlobs())
-                .filter(TransientBlobReference::isVolumeReplica);
-    }
-
-    public Iterable<TransientBlobReference> verifiedAckdReplicaBlobs() {
-        checkState(!TRUE.equals(isTinyData), "isTinyData must be set to false");
-        return from(verifiedAckdBlobs())
-                .filter(TransientBlobReference::isVolumeReplica);
-    }
-
     public Iterable<TransientBlobReference> verifiedAckdBlobs() {
         checkState(!TRUE.equals(isTinyData), "isTinyData must be set to false");
         return from(verifiedBlobs())

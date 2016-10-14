@@ -17,30 +17,37 @@
 package org.sfs.nodes;
 
 import com.google.common.base.Optional;
-import com.google.common.collect.ListMultimap;
 import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.elasticsearch.nodes.GetServiceDefs;
+import org.sfs.rx.Defer;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
-import org.sfs.vo.PersistentServiceDef;
+import org.sfs.vo.TransientServiceDef;
 import org.sfs.vo.XVolume;
 import rx.Observable;
 import rx.Subscriber;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Set;
+import java.util.TreeMap;
 
 import static com.google.common.base.Optional.fromNullable;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.collect.ArrayListMultimap.create;
 import static com.google.common.collect.FluentIterable.from;
+import static com.google.common.collect.Iterables.size;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Boolean.TRUE;
 import static java.util.Collections.emptyList;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.sfs.filesystem.volume.Volume.Status;
-import static org.sfs.filesystem.volume.Volume.Status.STARTED;
 import static org.sfs.rx.Defer.empty;
 
 public class ClusterInfo {
@@ -49,14 +56,17 @@ public class ClusterInfo {
     private final long refreshInterval = SECONDS.toMillis(1);
     private boolean started = false;
     private VertxContext<Server> vertxContext;
-    private ListMultimap<String, PersistentServiceDef> nodesByVolume;
-    private PersistentServiceDef maintainerNode;
+    private List<TransientServiceDef> allNodes;
+    private Map<String, TransientServiceDef> nodesByStartedVolume;
+    private NavigableMap<Long, Set<String>> startedVolumeIdByUseableSpace;
+    private int numberOfObjectReplicas;
+    private TransientServiceDef maintainerNode;
     private Long timerId;
 
     public Observable<Void> open(VertxContext<Server> vertxContext) {
         this.vertxContext = vertxContext;
         return empty()
-                .flatMap(aVoid -> updateList(vertxContext))
+                .flatMap(aVoid -> updateClusterInfo(vertxContext))
                 .doOnNext(aVoid -> startTimer())
                 .doOnNext(aVoid -> started = true);
     }
@@ -66,50 +76,87 @@ public class ClusterInfo {
                 .doOnNext(aVoid -> started = false)
                 .doOnNext(aVoid -> stopTimer())
                 .doOnNext(aVoid -> {
-                    if (nodesByVolume != null) {
-                        nodesByVolume.clear();
-                        nodesByVolume = null;
+                    if (nodesByStartedVolume != null) {
+                        nodesByStartedVolume.clear();
+                        nodesByStartedVolume = null;
                     }
                     maintainerNode = null;
                 });
     }
 
+    public List<TransientServiceDef> getAllNodes() {
+        return allNodes;
+    }
+
+    public long getRefreshInterval() {
+        return refreshInterval;
+    }
+
+    public int getNumberOfObjectReplicas() {
+        return numberOfObjectReplicas;
+    }
+
+    public NavigableMap<Long, Set<String>> getStartedVolumeIdByUseableSpace() {
+        return startedVolumeIdByUseableSpace != null ? startedVolumeIdByUseableSpace : Collections.emptyNavigableMap();
+    }
+
     public Observable<Void> forceRefresh(VertxContext<Server> vertxContext) {
         return empty()
                 .doOnNext(aVoid -> checkStarted())
-                .flatMap(aVoid -> updateList(vertxContext));
+                .flatMap(aVoid -> updateClusterInfo(vertxContext));
     }
 
-    public Iterable<PersistentServiceDef> getNodes() {
+    public Iterable<TransientServiceDef> getNodesWithStartedVolumes() {
         checkStarted();
-        if (nodesByVolume == null) {
+        if (nodesByStartedVolume == null) {
             return emptyList();
         }
-        return nodesByVolume.values();
+        return nodesByStartedVolume.values();
     }
 
-    public List<PersistentServiceDef> getNodesForVolume(String volumeId) {
+    public Observable<Boolean> isOnline() {
+        return Observable.defer(() -> {
+            int expectedNodeCount = getNumberOfObjectReplicas();
+            int count = size(getDataNodes());
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Expected node count was " + expectedNodeCount + ", Active node count was " + count);
+            }
+            return Observable.just(count >= expectedNodeCount);
+        });
+    }
+
+    public Iterable<XNode> getNodesForVolume(VertxContext<Server> vertxContext, String volumeId) {
+        Nodes nodes = vertxContext.verticle().nodes();
+        TransientServiceDef serviceDef = nodesByStartedVolume.get(volumeId);
+        if (serviceDef != null) {
+            return nodes.createNodes(vertxContext, serviceDef);
+        } else {
+            return Collections.emptyList();
+        }
+    }
+
+    public Optional<TransientServiceDef> getServiceDefForVolume(String volumeId) {
         checkStarted();
-        return nodesByVolume != null ? nodesByVolume.get(volumeId) : emptyList();
+        return nodesByStartedVolume != null ? Optional.fromNullable(nodesByStartedVolume.get(volumeId)) : Optional.absent();
     }
 
-    public Optional<PersistentServiceDef> getCurrentMaintainerNode() {
+    public Optional<TransientServiceDef> getCurrentMaintainerNode() {
         checkStarted();
         return fromNullable(maintainerNode);
     }
 
-    public Iterable<PersistentServiceDef> getMasterNodes() {
+    public Iterable<TransientServiceDef> getMasterNodes() {
         checkStarted();
-        return from(getNodes())
+        return from(getNodesWithStartedVolumes())
                 .filter(input -> {
                     Boolean masterNode = input.getMaster().orNull();
                     return TRUE.equals(masterNode);
                 });
     }
 
-    public Iterable<PersistentServiceDef> getDataNodes() {
+    public Iterable<TransientServiceDef> getDataNodes() {
         checkStarted();
-        return from(getNodes())
+        return from(getNodesWithStartedVolumes())
                 .filter(input -> {
                     Boolean dataNode = input.getDataNode().orNull();
                     return TRUE.equals(dataNode);
@@ -123,7 +170,7 @@ public class ClusterInfo {
 
             @Override
             public void handle(Long event) {
-                updateList(vertxContext)
+                updateClusterInfo(vertxContext)
                         .subscribe(new Subscriber<Void>() {
                             @Override
                             public void onCompleted() {
@@ -156,41 +203,79 @@ public class ClusterInfo {
         checkState(started, "Not started");
     }
 
-    protected Observable<Void> updateList(VertxContext<Server> vertxContext) {
-        return empty()
-                .flatMap(new GetServiceDefs(vertxContext))
-                .toList()
-                .doOnNext(persistentServiceDefs -> {
+    protected Observable<Void> updateClusterInfo(VertxContext<Server> vertxContext) {
+        Nodes nodes = vertxContext.verticle().nodes();
+        List<TransientServiceDef> transientServiceDefs = new ArrayList<>();
+        return RxHelper.iterate(nodes.getClusterHosts(), hostAndPort -> {
+            XNode xNode = nodes.createNode(vertxContext, hostAndPort);
+            return xNode.getNodeStats()
+                    .doOnNext(transientServiceDefOptional -> {
+                        if (transientServiceDefOptional.isPresent()) {
+                            transientServiceDefs.add(transientServiceDefOptional.get());
+                        }
+                    })
+                    .map(transientServiceDefOptional -> true)
+                    .onErrorResumeNext(throwable -> {
+                        LOGGER.warn("Handling Connect Error", throwable);
+                        return Defer.just(true);
+                    });
+        })
+                .map(new ToVoid<>())
+                .doOnNext(aVoid -> {
+                    int updatedPrimaryCount = 0;
+                    int updatedReplicaCount = 0;
 
-                    ListMultimap<String, PersistentServiceDef> map = create();
+                    Map<String, TransientServiceDef> updatedNodesByStartedVolume = new HashMap<>();
+                    NavigableMap<Long, Set<String>> updatedStartedVolumeIdByUseableSpace = new TreeMap<>();
 
-                    PersistentServiceDef candidateMaintainerNode = null;
+                    TransientServiceDef candidateMaintainerNode = null;
 
-                    for (PersistentServiceDef persistentServiceDef : persistentServiceDefs) {
+                    for (TransientServiceDef transientServiceDef : transientServiceDefs) {
+
 
                         if (candidateMaintainerNode == null) {
-                            candidateMaintainerNode = persistentServiceDef;
+                            candidateMaintainerNode = transientServiceDef;
                         } else {
                             long currentDocumentCount = candidateMaintainerNode.getDocumentCount().or(0L);
-                            long candidateDocumentCount = persistentServiceDef.getDocumentCount().or(0L);
+                            long candidateDocumentCount = transientServiceDef.getDocumentCount().or(0L);
                             if (candidateDocumentCount < currentDocumentCount) {
-                                candidateMaintainerNode = persistentServiceDef;
+                                candidateMaintainerNode = transientServiceDef;
                             }
                         }
 
-                        for (XVolume<? extends XVolume> xVolume : persistentServiceDef.getVolumes()) {
+                        for (XVolume<?> xVolume : transientServiceDef.getVolumes()) {
+                            Optional<String> oVolumeId = xVolume.getId();
                             Optional<Status> oStatus = xVolume.getStatus();
-                            if (oStatus.isPresent()) {
-                                if (STARTED.equals(oStatus.get())) {
-                                    map.put(xVolume.getId().get(), persistentServiceDef);
+                            Optional<Long> oUseableSpace = xVolume.getUsableSpace();
+                            if (oVolumeId.isPresent()
+                                    && oStatus.isPresent()
+                                    && oUseableSpace.isPresent()) {
+                                Status status = oStatus.get();
+                                if (Status.STARTED.equals(status)) {
+                                    String volumeId = oVolumeId.get();
+
+                                    long useableSpace = oUseableSpace.get();
+
+                                    updatedReplicaCount++;
+                                    Set<String> volumeIdsForSpace = updatedStartedVolumeIdByUseableSpace.get(useableSpace);
+                                    if (volumeIdsForSpace == null) {
+                                        volumeIdsForSpace = new HashSet<>();
+                                        updatedStartedVolumeIdByUseableSpace.put(useableSpace, volumeIdsForSpace);
+                                    }
+                                    volumeIdsForSpace.add(volumeId);
+
+
+                                    updatedNodesByStartedVolume.put(volumeId, transientServiceDef);
+
+                                    numberOfObjectReplicas = updatedReplicaCount;
+                                    startedVolumeIdByUseableSpace = updatedStartedVolumeIdByUseableSpace;
+                                    nodesByStartedVolume = updatedNodesByStartedVolume;
+                                    maintainerNode = candidateMaintainerNode;
+                                    allNodes = transientServiceDefs;
                                 }
                             }
                         }
                     }
-
-                    nodesByVolume = map;
-                    maintainerNode = candidateMaintainerNode;
-                })
-                .map(new ToVoid<>());
+                });
     }
 }

@@ -368,7 +368,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                                     .flatMap(new ReadSegments(vertxContext, writeStream))
                                     .map(new ToVoid<>())
                                     .doOnNext(aVoid -> writeStream.end());
-                    Observable<Void> oConsumer = dumpFile.append(vertx, buffer(marshaledMetadata), contentLength, pipedReadStream);
+                    Observable<Void> oConsumer = dumpFile.append(vertx, buffer(marshaledMetadata), contentLength, pipedReadStream).map(new ToVoid<>());
                     return combineSinglesDelayError(oConsumer, oProducer, (aVoid11, aVoid12) -> TRUE);
                 }
             } else {

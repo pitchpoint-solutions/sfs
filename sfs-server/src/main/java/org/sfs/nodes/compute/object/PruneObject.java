@@ -56,7 +56,7 @@ public class PruneObject implements Func1<PersistentObject, Observable<Boolean>>
                     return modified;
                 })
                 .map(modified -> persistentObject)
-                .flatMap(new DeleteDataInVolumes(vertxContext, excludes))
+                .concatMapDelayError(new DeleteDataInVolumes(vertxContext, excludes))
                 .map(modified -> {
                     modifiedAck.value |= modified;
                     return modified;

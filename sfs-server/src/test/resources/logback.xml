@@ -46,6 +46,9 @@
         <appender-ref ref="STDOUT"/>
     </logger>
 
+    <logger name="org.sfs" level="DEBUG" additivity="false">
+        <appender-ref ref="STDOUT"/>
+    </logger>
 
     <logger name="org.sfs.io.AsyncFileWriterImpl" level="ERROR" additivity="false">
         <appender-ref ref="STDOUT"/>

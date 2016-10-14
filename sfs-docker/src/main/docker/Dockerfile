@@ -19,7 +19,12 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 RUN mkdir -p /data && mkdir -p /opt/sfs
 
 COPY libs/ /opt/sfs
+COPY vertx-conf.json /etc/vertx-conf.json
 COPY vertx-logback.xml /etc/vertx-logback.xml
+
+VOLUME /data/sfs
+
+EXPOSE 80
 
 CMD ["/sbin/my_init"]
 

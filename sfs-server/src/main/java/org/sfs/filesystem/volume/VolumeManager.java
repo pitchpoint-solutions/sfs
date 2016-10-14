@@ -36,9 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.google.common.base.Optional.fromNullable;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.base.Predicates.notNull;
 import static com.google.common.collect.ImmutableSet.copyOf;
-import static com.google.common.collect.Iterables.isEmpty;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.String.valueOf;
 import static java.nio.file.Files.createDirectory;
@@ -99,16 +97,9 @@ public class VolumeManager {
                     .map(new ToVoid<>())
                     .singleOrDefault(null)
                     .flatMap(o -> {
-                        if (isEmpty(getPrimary())) {
+                        if (volumeMap.isEmpty()) {
                             return newVolume(vertxContext)
-                                    .flatMap(volumeId -> get(volumeId).get().setPrimary(vertxContext.vertx()));
-                        }
-                        return empty();
-                    })
-                    .flatMap(aVoid -> {
-                        if (isEmpty(getReplica())) {
-                            return newVolume(vertxContext)
-                                    .flatMap(volumeId -> get(volumeId).get().setReplica(vertxContext.vertx()));
+                                    .map(new ToVoid<>());
                         }
                         return empty();
                     });
@@ -125,18 +116,6 @@ public class VolumeManager {
                     vertxContext.vertx().fileSystem().deleteRecursive(basePath.toString(), true, handler);
                     return create(handler.subscribe);
                 });
-    }
-
-    public Iterable<Volume> getPrimary() {
-        return FluentIterable.from(volumeMap.values())
-                .filter(notNull())
-                .filter(Volume::isPrimary);
-    }
-
-    public Iterable<Volume> getReplica() {
-        return FluentIterable.from(volumeMap.values())
-                .filter(notNull())
-                .filter(Volume::isReplica);
     }
 
     public Observable<String> newVolume(VertxContext<Server> vertxContext) {

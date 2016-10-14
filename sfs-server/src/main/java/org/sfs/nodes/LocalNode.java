@@ -33,9 +33,11 @@ import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.DigestReadStream;
 import org.sfs.io.NullEndableWriteStream;
+import org.sfs.rx.Defer;
 import org.sfs.rx.HandleServerToBusy;
 import org.sfs.rx.Holder2;
 import org.sfs.util.MessageDigestFactory;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -47,7 +49,7 @@ import static java.lang.String.format;
 import static org.sfs.rx.Defer.just;
 import static rx.Observable.defer;
 
-public class LocalNode extends AbstractNode<LocalNode> {
+public class LocalNode extends AbstractNode {
 
     private static final Logger LOGGER = getLogger(LocalNode.class);
     private final VolumeManager volumeManager;
@@ -68,6 +70,12 @@ public class LocalNode extends AbstractNode<LocalNode> {
     @Override
     public boolean isLocal() {
         return true;
+    }
+
+    @Override
+    public Observable<Optional<TransientServiceDef>> getNodeStats() {
+        NodeStats nodeStats = vertxContext.verticle().getNodeStats();
+        return Defer.just(nodeStats.getStats());
     }
 
     @Override
@@ -152,9 +160,28 @@ public class LocalNode extends AbstractNode<LocalNode> {
     }
 
     @Override
-    public Observable<Boolean> canPut(String volumeId) {
-        return defer(() -> Observable.just(volumeManager.get(volumeId).isPresent()))
-                .onErrorResumeNext(new HandleServerToBusy<>());
+    public Observable<Boolean> canReadVolume(String volumeId) {
+        return canWriteVolume(volumeId);
+    }
+
+    @Override
+    public Observable<Boolean> canWriteVolume(String volumeId) {
+        return defer(() -> {
+            LOGGER.debug("Volume Manager is Open " + volumeManager.isOpen());
+            if (volumeManager.isOpen()) {
+                Optional<Volume> oVolume = volumeManager.get(volumeId);
+                LOGGER.debug("Volume is " + oVolume);
+                if (oVolume.isPresent()) {
+                    Volume volume = oVolume.get();
+                    Volume.Status status = volume.status();
+                    LOGGER.debug("Volume status is " + status);
+                    if (Volume.Status.STARTED.equals(status)) {
+                        return Defer.just(true);
+                    }
+                }
+            }
+            return Defer.just(false);
+        });
     }
 
     @Override
@@ -174,8 +201,6 @@ public class LocalNode extends AbstractNode<LocalNode> {
                                     .map(aVoid -> {
                                         DigestBlob digestBlob =
                                                 new DigestBlob(writeStreamBlob.getVolume(),
-                                                        writeStreamBlob.isPrimary(),
-                                                        writeStreamBlob.isReplica(),
                                                         writeStreamBlob.getPosition(),
                                                         writeStreamBlob.getLength());
                                         for (MessageDigestFactory messageDigestFactory : messageDigestFactories) {

@@ -34,6 +34,7 @@ import org.sfs.vo.ObjectPath;
 import org.sfs.vo.PersistentContainer;
 import org.sfs.vo.PersistentContainerKey;
 import org.sfs.vo.TransientContainerKey;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 import rx.Subscriber;
 
@@ -304,17 +305,12 @@ public class ContainerKeys {
 
                             return containerKey;
                         })
-                        .flatMap(containerKey ->
-                                vertxContext
-                                        .verticle()
-                                        .nodes()
-                                        .getMaintainerNode(vertxContext)
-                                        .map(persistentServiceDefOptional -> {
-                                            if (persistentServiceDefOptional.isPresent()) {
-                                                containerKey.setNodeId(persistentServiceDefOptional.get().getId());
-                                            }
-                                            return containerKey;
-                                        }))
+                        .doOnNext(transientContainerKey -> {
+                            Optional<TransientServiceDef> currentMaintainerNode = vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode();
+                            if (currentMaintainerNode.isPresent()) {
+                                transientContainerKey.setNodeId(currentMaintainerNode.get().getId());
+                            }
+                        })
                         .flatMap(new PersistContainerKey(vertxContext))
                         .map(Holder2::value1)
                         .map(newPersistentContainerKeyOptional -> {
@@ -379,17 +375,12 @@ public class ContainerKeys {
 
                         return containerKey;
                     })
-                    .flatMap(containerKey ->
-                            vertxContext
-                                    .verticle()
-                                    .nodes()
-                                    .getMaintainerNode(vertxContext)
-                                    .map(persistentServiceDefOptional -> {
-                                        if (persistentServiceDefOptional.isPresent()) {
-                                            containerKey.setNodeId(persistentServiceDefOptional.get().getId());
-                                        }
-                                        return containerKey;
-                                    }))
+                    .doOnNext(transientContainerKey -> {
+                        Optional<TransientServiceDef> currentMaintainerNode = vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode();
+                        if (currentMaintainerNode.isPresent()) {
+                            transientContainerKey.setNodeId(currentMaintainerNode.get().getId());
+                        }
+                    })
                     .flatMap(new PersistContainerKey(vertxContext))
                     .map(Holder2::value1)
                     .flatMap(newPersistentContainerKey -> {

@@ -21,7 +21,7 @@ import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.DigestBlob;
-import org.sfs.nodes.Nodes;
+import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.XNode;
 import org.sfs.vo.Segment;
 import org.sfs.vo.TransientBlobReference;
@@ -53,9 +53,9 @@ public class VerifyBlobReference implements Func1<TransientBlobReference, Observ
     @Override
     public Observable<Boolean> call(TransientBlobReference transientBlobReference) {
         if (LOGGER.isDebugEnabled()) {
-            LOGGER.debug("begin verify blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition() + ", primary=" + transientBlobReference.isVolumePrimary() + ", replica=" + transientBlobReference.isVolumeReplica());
+            LOGGER.debug("begin verify blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition());
         }
-        final Nodes nodes = vertxContext.verticle().nodes();
+        ClusterInfo clusterInfo = vertxContext.verticle().getClusterInfo();
         Segment<? extends Segment> segment = transientBlobReference.getSegment();
         Optional<byte[]> writeSha512 = segment.getWriteSha512();
         Optional<Long> writeLength = segment.getWriteLength();
@@ -67,7 +67,7 @@ public class VerifyBlobReference implements Func1<TransientBlobReference, Observ
                 .flatMap(transientBlobReference1 -> {
                     String volumeId = transientBlobReference.getVolumeId().get();
                     long position = transientBlobReference.getPosition().get();
-                    Iterable<XNode<?>> xNodes = nodes.getNodesForVolume(vertxContext, volumeId);
+                    Iterable<XNode> xNodes = clusterInfo.getNodesForVolume(vertxContext, volumeId);
                     if (isEmpty(xNodes)) {
                         LOGGER.warn("No nodes contain volume " + volumeId);
                     }
@@ -85,7 +85,7 @@ public class VerifyBlobReference implements Func1<TransientBlobReference, Observ
                                                 return true;
                                             })
                                             .onErrorResumeNext(throwable -> {
-                                                LOGGER.error("Handling Connect Failure " + xNode.getHostAndPort() + ". verify blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition() + ", primary=" + transientBlobReference.isVolumePrimary() + ", replica=" + transientBlobReference.isVolumeReplica(), throwable);
+                                                LOGGER.error("Handling Connect Failure " + xNode.getHostAndPort() + ". verify blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition(), throwable);
                                                 // continue iterating
                                                 return just(true);
                                             }))
@@ -112,7 +112,7 @@ public class VerifyBlobReference implements Func1<TransientBlobReference, Observ
                 .singleOrDefault(false)
                 .map(verified -> {
                     if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("end verify blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition() + ", primary=" + transientBlobReference.isVolumePrimary() + ", replica=" + transientBlobReference.isVolumeReplica() + ", verified=" + verified);
+                        LOGGER.debug("end verify blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition() + ", verified=" + verified);
                     }
                     return verified;
                 });

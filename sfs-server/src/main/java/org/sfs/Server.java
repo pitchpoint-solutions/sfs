@@ -27,6 +27,8 @@ import org.sfs.encryption.ContainerKeys;
 import org.sfs.encryption.MasterKeys;
 import org.sfs.filesystem.temp.TempDirectoryCleaner;
 import org.sfs.jobs.Jobs;
+import org.sfs.nodes.ClusterInfo;
+import org.sfs.nodes.NodeStats;
 import org.sfs.nodes.Nodes;
 
 import java.util.concurrent.ExecutorService;
@@ -62,6 +64,10 @@ public abstract class Server extends AbstractVerticle implements SfsVerticle {
     public abstract ContainerKeys containerKeys();
 
     public abstract HttpClient httpClient(boolean https);
+
+    public abstract ClusterInfo getClusterInfo();
+
+    public abstract NodeStats getNodeStats();
 
     public abstract byte[] getRemoteNodeSecret();
 }

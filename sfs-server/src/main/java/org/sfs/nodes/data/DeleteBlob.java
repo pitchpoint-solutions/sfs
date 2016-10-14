@@ -54,11 +54,9 @@ public class DeleteBlob implements Handler<SfsRequest> {
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
                 .map(aVoid -> httpServerRequest)
                 .map(httpServerRequestServiceContextHolder2 -> httpServerRequest)
-                .map(new ValidateParamExists(NODE))
                 .map(new ValidateParamExists(VOLUME))
                 .map(new ValidateParamExists(POSITION))
                 .map(new ValidateParamBetweenLong(POSITION, 0, MAX_VALUE))
-                .map(new ValidateNodeIdMatchesLocalNodeId<>(vertxContext, httpServerRequest.params().get(NODE)))
                 .flatMap(httpServerRequest1 -> {
                     MultiMap headers = httpServerRequest1.params();
                     String volumeId = headers.get(VOLUME);

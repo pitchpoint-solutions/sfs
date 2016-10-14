@@ -26,8 +26,6 @@ public abstract class BlobReference<T extends BlobReference> {
 
     private final Segment<? extends Segment> segment;
     private String volumeId;
-    private Boolean volumePrimary;
-    private Boolean volumeReplica;
     private Long position;
     private byte[] readSha512;
     private Long readLength;
@@ -59,24 +57,6 @@ public abstract class BlobReference<T extends BlobReference> {
 
     public T setPosition(Long position) {
         this.position = position;
-        return (T) this;
-    }
-
-    public boolean isVolumePrimary() {
-        return TRUE.equals(volumePrimary);
-    }
-
-    public T setVolumePrimary(Boolean volumePrimary) {
-        this.volumePrimary = volumePrimary;
-        return (T) this;
-    }
-
-    public boolean isVolumeReplica() {
-        return TRUE.equals(volumeReplica);
-    }
-
-    public T setVolumeReplica(Boolean volumeReplica) {
-        this.volumeReplica = volumeReplica;
         return (T) this;
     }
 
@@ -127,8 +107,6 @@ public abstract class BlobReference<T extends BlobReference> {
     public JsonObject toJsonObject() {
         JsonObject jsonObject = new JsonObject()
                 .put("volume_id", volumeId)
-                .put("volume_primary", volumePrimary)
-                .put("volume_replica", volumeReplica)
                 .put("position", position)
                 .put("read_sha512", readSha512)
                 .put("read_length", readLength)
@@ -140,8 +118,6 @@ public abstract class BlobReference<T extends BlobReference> {
 
     public T merge(JsonObject jsonObject) {
         volumeId = jsonObject.getString("volume_id");
-        volumePrimary = jsonObject.getBoolean("volume_primary");
-        volumeReplica = jsonObject.getBoolean("volume_replica");
         position = jsonObject.getLong("position");
         readSha512 = jsonObject.getBinary("read_sha512");
         readLength = jsonObject.getLong("read_length");

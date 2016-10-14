@@ -41,7 +41,7 @@ public class PruneDeletedBlobs implements Func1<TransientSegment, Boolean> {
             if (blob.isDeleted()) {
                 blobIterator.remove();
                 if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug("removed prunedeletedblobs object=" + blob.getSegment().getParent().getParent().getId() + ", version=" + blob.getSegment().getParent().getId() + ", segment=" + blob.getSegment().getId() + ", volume=" + blob.getVolumeId() + ", position=" + blob.getPosition() + ", primary=" + blob.isVolumePrimary() + ", replica=" + blob.isVolumeReplica());
+                    LOGGER.debug("removed prunedeletedblobs object=" + blob.getSegment().getParent().getParent().getId() + ", version=" + blob.getSegment().getParent().getId() + ", segment=" + blob.getSegment().getId() + ", volume=" + blob.getVolumeId() + ", position=" + blob.getPosition());
                 }
                 modified |= true;
             }

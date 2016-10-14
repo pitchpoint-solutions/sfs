@@ -1,9 +1,5 @@
 {
-  "test_mode": true,
-  "http.maxheadersize": "40960",
-  "remotenode.secret": "YWJjMTIzCg==",
-  "elasticsearch.shards": 1,
-  "elasticsearch.replicas": 0,
+  "fs.home" : "/data/sfs",
   "auth": {
     "admin": [
       {
