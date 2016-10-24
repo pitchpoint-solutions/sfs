@@ -102,10 +102,15 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                 .flatMap(new WaitForCluster(VERTX, HTTP_CLIENT))
                 .flatMap(aVoid -> {
                     final VolumeManager volumeManager = nodes.volumeManager();
-                    assertEquals(context, 1, Iterables.size(volumeManager.volumes()));
-                    return just(
-                            new VolumeReplicaGroup(vertxContext(), 2)
-                                    .setAllowSameNode(true));
+                    return volumeManager.newVolume(VERTX_CONTEXT)
+                            .map(new ToVoid<>())
+                            .flatMap(aVoid1 -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
+                            .flatMap(aVoid1 -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
+                            .flatMap(aVoid1 -> {
+                                assertEquals(context, 2, Iterables.size(volumeManager.volumes()));
+                                return just(new VolumeReplicaGroup(vertxContext(), 2)
+                                        .setAllowSameNode(true));
+                            });
                 })
                 .flatMap(volumeReplicaGroup ->
                         just((Void) null)
