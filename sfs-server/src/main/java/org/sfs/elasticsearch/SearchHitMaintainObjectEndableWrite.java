@@ -114,6 +114,7 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                 .concatMapDelayError(persistentObject1 -> Observable.from(persistentObject1.getVersions()))
                 .filter(version -> !version.isDeleted())
                 .concatMapDelayError(transientVersion -> Observable.from(transientVersion.getSegments()))
+                .filter(transientSegment -> !transientSegment.isTinyData())
                 .concatMapDelayError(transientSegment -> Observable.from(transientSegment.getBlobs()))
                 .filter(transientBlobReference -> !transientBlobReference.isDeleted())
                 .concatMapDelayError(transientBlobReference -> {
