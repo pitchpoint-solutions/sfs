@@ -126,17 +126,19 @@ public class IndexFile {
     protected Optional<ChecksummedPositional<XIndexBlock>> parse(ChecksummedPositional<byte[]> checksummedPositional) {
         try {
             if (checksummedPositional.isChecksumValid()) {
-                XIndexBlock indexBlock = parseFrom(checksummedPositional.getValue());
-                return of(new ChecksummedPositional<XIndexBlock>(checksummedPositional.getPosition(), indexBlock, checksummedPositional.getActualChecksum()) {
-                    @Override
-                    public boolean isChecksumValid() {
-                        return true;
-                    }
-                });
-            } else {
-                LOGGER.warn("Invalid checksum for index block @ position " + checksummedPositional.getPosition());
-                return absent();
+                byte[] frame = checksummedPositional.getValue();
+                if (frame != null && frame.length > 0) {
+                    XIndexBlock indexBlock = parseFrom(frame);
+                    return of(new ChecksummedPositional<XIndexBlock>(checksummedPositional.getPosition(), indexBlock, checksummedPositional.getActualChecksum()) {
+                        @Override
+                        public boolean isChecksumValid() {
+                            return checksummedPositional.isChecksumValid();
+                        }
+                    });
+                }
             }
+            LOGGER.warn("Invalid checksum for index block @ position " + checksummedPositional.getPosition());
+            return absent();
         } catch (Throwable e) {
             LOGGER.warn("Error parsing index block @ position " + checksummedPositional.getPosition(), e);
             return absent();

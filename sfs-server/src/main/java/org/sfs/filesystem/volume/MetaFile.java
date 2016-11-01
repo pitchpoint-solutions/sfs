@@ -125,17 +125,19 @@ public class MetaFile {
     protected Optional<ChecksummedPositional<XSuperBlock>> parse(ChecksummedPositional<byte[]> checksummedPositional) {
         try {
             if (checksummedPositional.isChecksumValid()) {
-                XSuperBlock indexBlock = parseFrom(checksummedPositional.getValue());
-                return of(new ChecksummedPositional<XSuperBlock>(checksummedPositional.getPosition(), indexBlock, checksummedPositional.getActualChecksum()) {
-                    @Override
-                    public boolean isChecksumValid() {
-                        return true;
-                    }
-                });
-            } else {
-                LOGGER.warn("Invalid checksum for index block @ position " + checksummedPositional.getPosition());
-                return absent();
+                byte[] frame = checksummedPositional.getValue();
+                if (frame != null && frame.length > 0) {
+                    XSuperBlock indexBlock = parseFrom(checksummedPositional.getValue());
+                    return of(new ChecksummedPositional<XSuperBlock>(checksummedPositional.getPosition(), indexBlock, checksummedPositional.getActualChecksum()) {
+                        @Override
+                        public boolean isChecksumValid() {
+                            return true;
+                        }
+                    });
+                }
             }
+            LOGGER.warn("Invalid checksum for index block @ position " + checksummedPositional.getPosition());
+            return absent();
         } catch (Throwable e) {
             LOGGER.warn("Error parsing index block @ position " + checksummedPositional.getPosition(), e);
             return absent();

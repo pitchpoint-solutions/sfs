@@ -21,7 +21,7 @@ import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.rx.Defer;
+import org.sfs.rx.ResultMemoizeHandler;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.vo.TransientServiceDef;
@@ -217,12 +217,13 @@ public class ClusterInfo {
                     .map(transientServiceDefOptional -> true)
                     .onErrorResumeNext(throwable -> {
                         LOGGER.warn("Handling Connect Error", throwable);
-                        return Defer.just(true);
+                        ResultMemoizeHandler<Boolean> handler = new ResultMemoizeHandler<>();
+                        vertxContext.vertx().runOnContext(event -> handler.complete(true));
+                        return Observable.create(handler.subscribe);
                     });
         })
                 .map(new ToVoid<>())
                 .doOnNext(aVoid -> {
-                    int updatedPrimaryCount = 0;
                     int updatedReplicaCount = 0;
 
                     Map<String, TransientServiceDef> updatedNodesByStartedVolume = new HashMap<>();
