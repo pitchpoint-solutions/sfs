@@ -132,7 +132,7 @@ public class IndexFile {
                     return of(new ChecksummedPositional<XIndexBlock>(checksummedPositional.getPosition(), indexBlock, checksummedPositional.getActualChecksum()) {
                         @Override
                         public boolean isChecksumValid() {
-                            return checksummedPositional.isChecksumValid();
+                            return true;
                         }
                     });
                 }
