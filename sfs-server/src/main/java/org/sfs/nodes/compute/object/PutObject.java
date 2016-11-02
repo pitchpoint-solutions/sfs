@@ -71,7 +71,7 @@ import static java.util.Calendar.getInstance;
 import static java.util.Collections.emptyList;
 import static org.sfs.encryption.AlgorithmDef.getPreferred;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.Limits.MAX_SEGMENT_SIZE;
 import static org.sfs.util.SfsHttpHeaders.X_CONTENT_SHA512;
@@ -88,7 +88,6 @@ public class PutObject implements Handler<SfsRequest> {
 
     private static final Logger LOGGER = getLogger(PutObject.class);
     private static final AlgorithmDef ALGORITHM_DEF = getPreferred();
-    private static byte[] SALT = ALGORITHM_DEF.generateSalt();
 
     @Override
     public void handle(final SfsRequest httpServerRequest) {
@@ -99,7 +98,7 @@ public class PutObject implements Handler<SfsRequest> {
         final AtomicReference<FileBackedBuffer> tempFileRef = new AtomicReference<>();
 
         Observable<Void> o =
-                empty()
+                aVoid()
                         .flatMap(new Authenticate(httpServerRequest))
                         .flatMap(new ValidateActionAuthenticated(httpServerRequest))
                         .map(aVoid -> httpServerRequest)
@@ -161,7 +160,7 @@ public class PutObject implements Handler<SfsRequest> {
                         .flatMap(transientVersion -> {
                             long length = transientVersion.getContentLength().get();
                             if (length > 0) {
-                                return empty()
+                                return aVoid()
                                         .flatMap(aVoid -> {
                                             if (tempFileRef.get() != null) {
                                                 FileBackedBuffer fileBackedBuffer = tempFileRef.get();
@@ -242,7 +241,7 @@ public class PutObject implements Handler<SfsRequest> {
                         })
                         .doOnNext(version -> httpServerRequest.response().setStatusCode(HTTP_CREATED))
                         .flatMap(version ->
-                                empty()
+                                aVoid()
                                         .map(new WriteHttpServerResponseHeaders(httpServerRequest, version, emptyList())))
                         .single();
 
@@ -291,9 +290,9 @@ public class PutObject implements Handler<SfsRequest> {
             return fileBackedBuffer.close()
                     .onErrorResumeNext(throwable -> {
                         LOGGER.warn("Failed to close and delete " + fileBackedBuffer, throwable);
-                        return empty();
+                        return aVoid();
                     });
         }
-        return empty();
+        return aVoid();
     }
 }

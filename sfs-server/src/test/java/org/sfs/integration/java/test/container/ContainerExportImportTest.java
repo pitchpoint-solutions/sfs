@@ -130,7 +130,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
 
         byte[] secret = new byte[32];
         if (encrypt) {
-            getCurrentInstance().nextBytes(secret);
+            getCurrentInstance().nextBytesBlocking(secret);
         }
 
         final String md50 = base16().lowerCase().encode(md5().hashBytes(data0).asBytes());
@@ -242,7 +242,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
 
         byte[] secret = new byte[32];
         if (encrypt) {
-            getCurrentInstance().nextBytes(secret);
+            getCurrentInstance().nextBytesBlocking(secret);
         }
 
         String md50 = base16().lowerCase().encode(md5().hashBytes(data0).asBytes());
@@ -348,7 +348,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
 
         byte[] secret = new byte[32];
         if (encrypt) {
-            getCurrentInstance().nextBytes(secret);
+            getCurrentInstance().nextBytesBlocking(secret);
         }
 
         String importContainerName = "import-container";
@@ -438,7 +438,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
 
         byte[] secret = new byte[32];
         if (encrypt) {
-            getCurrentInstance().nextBytes(secret);
+            getCurrentInstance().nextBytesBlocking(secret);
         }
 
         Async async = context.async();
@@ -555,7 +555,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
 
         byte[] secret = new byte[32];
         if (encrypt) {
-            getCurrentInstance().nextBytes(secret);
+            getCurrentInstance().nextBytesBlocking(secret);
         }
 
         Async async = context.async();

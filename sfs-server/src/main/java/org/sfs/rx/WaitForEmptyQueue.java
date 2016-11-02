@@ -26,7 +26,6 @@ import rx.functions.Func1;
 import java.util.Queue;
 
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static rx.Observable.create;
 
 public class WaitForEmptyQueue implements Func1<Void, Observable<Void>> {
 
@@ -45,7 +44,7 @@ public class WaitForEmptyQueue implements Func1<Void, Observable<Void>> {
 
     @Override
     public Observable<Void> call(Void aVoid) {
-        final MemoizeHandler<Void, Void> handler = new MemoizeHandler<>();
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("Waiting for empty queue. Size is " + queue.size());
         }
@@ -62,7 +61,7 @@ public class WaitForEmptyQueue implements Func1<Void, Observable<Void>> {
         } else {
             handler.complete(null);
         }
-        return create(handler.subscribe)
+        return handler
                 .map(aVoid1 -> {
                     if (LOGGER.isDebugEnabled()) {
                         LOGGER.debug("Done waiting for empty queue. Size is " + queue.size());

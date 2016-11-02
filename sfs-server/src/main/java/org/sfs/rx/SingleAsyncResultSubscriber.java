@@ -17,8 +17,6 @@
 package org.sfs.rx;
 
 
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Handler;
 import rx.Subscriber;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -27,66 +25,22 @@ import static com.google.common.base.Preconditions.checkState;
 
 public class SingleAsyncResultSubscriber<T> extends Subscriber<T> {
 
-    private final Handler<AsyncResult<T>> handler;
+    private final ObservableFuture<T> handler;
     private AtomicReference<T> result = new AtomicReference<>();
 
-    public SingleAsyncResultSubscriber(Handler<AsyncResult<T>> handler) {
+    public SingleAsyncResultSubscriber(ObservableFuture<T> handler) {
         this.handler = handler;
     }
 
-    public SingleAsyncResultSubscriber(Subscriber<?> op, Handler<AsyncResult<T>> handler) {
-        super(op);
-        this.handler = handler;
-    }
 
     @Override
     public void onCompleted() {
-        handler.handle(new AsyncResult<T>() {
-            @Override
-            public T result() {
-                return result.get();
-            }
-
-            @Override
-            public Throwable cause() {
-                return null;
-            }
-
-            @Override
-            public boolean succeeded() {
-                return true;
-            }
-
-            @Override
-            public boolean failed() {
-                return false;
-            }
-        });
+        handler.complete(result.get());
     }
 
     @Override
     public void onError(Throwable e) {
-        handler.handle(new AsyncResult<T>() {
-            @Override
-            public T result() {
-                return null;
-            }
-
-            @Override
-            public Throwable cause() {
-                return e;
-            }
-
-            @Override
-            public boolean succeeded() {
-                return false;
-            }
-
-            @Override
-            public boolean failed() {
-                return true;
-            }
-        });
+        handler.fail(e);
     }
 
     @Override

@@ -73,7 +73,7 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
             return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                     .flatMap(keyResponse -> {
 
-                        VolumeReplicaGroup volumeReplicaGroup = new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectReplicasReplicas())
+                        VolumeReplicaGroup volumeReplicaGroup = new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectCopies())
                                 .setAllowSameNode(nodes.isAllowSameNode());
 
                         long encryptedLength = keyResponse.getData().encryptOutputSize(contentLength);
@@ -141,7 +141,7 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
         } else {
 
             VolumeReplicaGroup volumeReplicaGroup =
-                    new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectReplicasReplicas())
+                    new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectCopies())
                             .setAllowSameNode(nodes.isAllowSameNode());
 
             final CountingReadStream clearByteCount = new CountingReadStream(readStream);

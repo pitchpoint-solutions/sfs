@@ -36,7 +36,7 @@ import static io.vertx.core.http.HttpHeaders.CONTENT_LENGTH;
 import static io.vertx.core.http.HttpHeaders.CONTENT_TYPE;
 import static java.lang.String.valueOf;
 import static java.net.HttpURLConnection.HTTP_OK;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.vo.ObjectPath.fromSfsRequest;
 
 public class GetObjectMeta implements Handler<SfsRequest> {
@@ -45,7 +45,7 @@ public class GetObjectMeta implements Handler<SfsRequest> {
     public void handle(SfsRequest httpServerRequest) {
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdmin(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))

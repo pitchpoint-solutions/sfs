@@ -16,21 +16,33 @@
 
 package org.sfs.util;
 
+import io.vertx.core.Vertx;
+import io.vertx.core.logging.Logger;
+import io.vertx.core.logging.LoggerFactory;
+import org.sfs.rx.RxHelper;
+import rx.Observable;
+
 import java.security.SecureRandom;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class PrngRandom {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(PrngRandom.class);
     private static volatile SecureRandom secureRandom;
     private static final AtomicLong invocationCount = new AtomicLong(0L);
-    private static final long MAX_INVOCATIONS = 1000;
+    private static final long MAX_INVOCATIONS = 1000000;
 
     static {
         try {
-            secureRandom = SecureRandom.getInstance("SHA1PRNG");
+            secureRandom = SecureRandom.getInstance("NativePRNGNonBlocking");
         } catch (Exception e) {
-            throw new ExceptionInInitializerError(e);
+            try {
+                secureRandom = SecureRandom.getInstanceStrong();
+            } catch (Exception nE) {
+                throw new ExceptionInInitializerError(nE);
+            }
         }
+        LOGGER.info("Entropy generator is " + secureRandom.getAlgorithm());
     }
 
     private SecureRandom getSecureRandom() {
@@ -39,9 +51,13 @@ public class PrngRandom {
             synchronized (invocationCount) {
                 if (invocationCount.get() >= MAX_INVOCATIONS) {
                     try {
-                        secureRandom = SecureRandom.getInstance("SHA1PRNG");
+                        secureRandom = SecureRandom.getInstance("NativePRNGNonBlocking");
                     } catch (Exception e) {
-                        throw new RuntimeException("could not get random generator", e);
+                        try {
+                            secureRandom = SecureRandom.getInstanceStrong();
+                        } catch (Exception nE) {
+                            throw new RuntimeException(nE);
+                        }
                     }
                     invocationCount.set(0);
                 }
@@ -54,8 +70,16 @@ public class PrngRandom {
         return new PrngRandom();
     }
 
-    public void nextBytes(byte[] destination) {
+    public void nextBytesBlocking(byte[] destination) {
         SecureRandom secureRandom = getSecureRandom();
         secureRandom.nextBytes(destination);
+    }
+
+    public Observable<Void> nextBytes(Vertx vertx, byte[] destination) {
+        return RxHelper.executeBlocking(vertx, () -> {
+            SecureRandom secureRandom = getSecureRandom();
+            secureRandom.nextBytes(destination);
+            return (Void) null;
+        });
     }
 }

@@ -32,7 +32,8 @@ import org.sfs.integration.java.func.PostAccount;
 import org.sfs.integration.java.func.PutContainer;
 import org.sfs.integration.java.func.PutObject;
 import org.sfs.integration.java.func.RefreshIndex;
-import org.sfs.integration.java.func.RunJobs;
+import org.sfs.integration.java.func.VerifyRepairAllContainersExecute;
+import org.sfs.jobs.VerifyRepairAllContainerObjects;
 import org.sfs.nodes.Nodes;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.HttpClientResponseHeaderLogger;
@@ -48,9 +49,7 @@ import java.util.NavigableSet;
 import static com.google.common.collect.Iterables.size;
 import static java.net.HttpURLConnection.HTTP_CREATED;
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
-import static java.util.Calendar.MILLISECOND;
 import static java.util.Calendar.getInstance;
-import static org.sfs.elasticsearch.object.MaintainObjectsForNode.CONSISTENCY_THRESHOLD;
 import static org.sfs.filesystem.volume.VolumeV1.TINY_DATA_THRESHOLD;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
 import static org.sfs.integration.java.help.AuthorizationFactory.httpBasic;
@@ -73,6 +72,8 @@ public class BalanceUpTest extends BaseTestVerticle {
     protected Observable<Void> prepareContainer(TestContext context) {
 
         return just((Void) null)
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
                 .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
@@ -88,7 +89,7 @@ public class BalanceUpTest extends BaseTestVerticle {
     @Test
     public void testIncreaseDecreaseNumberOfReplicas(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
         Async async = context.async();
         prepareContainer(context)
 
@@ -101,8 +102,9 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().jobs().stop(VERTX_CONTEXT))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().jobs().close(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -125,7 +127,7 @@ public class BalanceUpTest extends BaseTestVerticle {
                 })
                 .map(aVoid -> {
                     Nodes nodes = VERTX_CONTEXT.verticle().nodes();
-                    nodes.setNumberOfObjectReplicasReplicas(4)
+                    nodes.setNumberOfObjectCopies(4)
                             .setAllowSameNode(true);
                     return (Void) null;
                 })
@@ -152,7 +154,7 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .map(getResponse -> new JsonObject(getResponse.getSourceAsString()))
                 .flatMap(jsonObject -> {
                     Calendar past = getInstance();
-                    past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
@@ -166,7 +168,8 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
                 .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
                 .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -194,7 +197,8 @@ public class BalanceUpTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -216,14 +220,15 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .map(new ToVoid<>())
                 .map(aVoid -> {
                     Nodes nodes = VERTX_CONTEXT.verticle().nodes();
-                    nodes.setNumberOfObjectReplicasReplicas(1)
+                    nodes.setNumberOfObjectCopies(1)
                             .setAllowSameNode(true);
                     return (Void) null;
                 })
                 .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
                 .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -248,7 +253,8 @@ public class BalanceUpTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -278,7 +284,7 @@ public class BalanceUpTest extends BaseTestVerticle {
     @Test
     public void testFixCorruptReplica(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
         Async async = context.async();
         prepareContainer(context)
 
@@ -291,8 +297,9 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().jobs().stop(VERTX_CONTEXT))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().jobs().close(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -315,7 +322,7 @@ public class BalanceUpTest extends BaseTestVerticle {
                 })
                 .map(aVoid -> {
                     Nodes nodes = VERTX_CONTEXT.verticle().nodes();
-                    nodes.setNumberOfObjectReplicasReplicas(4)
+                    nodes.setNumberOfObjectCopies(4)
                             .setAllowSameNode(true);
                     return (Void) null;
                 })
@@ -342,7 +349,7 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .map(getResponse -> new JsonObject(getResponse.getSourceAsString()))
                 .flatMap(jsonObject -> {
                     Calendar past = getInstance();
-                    past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
@@ -356,7 +363,8 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
                 .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
                 .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -385,7 +393,8 @@ public class BalanceUpTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -440,7 +449,8 @@ public class BalanceUpTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -466,13 +476,17 @@ public class BalanceUpTest extends BaseTestVerticle {
                 .map(new ToVoid<>())
                 // run the job 4 times so the verify/ack retry count expires
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()

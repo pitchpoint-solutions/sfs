@@ -30,7 +30,7 @@ import rx.functions.Func1;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.String.format;
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class GetDocumentsCountForNode implements Func1<Void, Observable<Long>> {
 
@@ -48,7 +48,7 @@ public class GetDocumentsCountForNode implements Func1<Void, Observable<Long>> {
         final Elasticsearch elasticSearch = vertxContext.verticle().elasticsearch();
 
 
-        return empty()
+        return aVoid()
                 .flatMap(new ListSfsStorageIndexes(vertxContext))
                 .flatMap(index -> {
                     SearchRequestBuilder request = elasticSearch.get()

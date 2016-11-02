@@ -35,10 +35,14 @@ import org.sfs.io.FileBackedBuffer;
 import org.sfs.io.MultiEndableWriteStream;
 import org.sfs.io.PipedEndableWriteStream;
 import org.sfs.io.PipedReadStream;
+import org.sfs.nodes.compute.object.CopySegmentsReadStreams;
 import org.sfs.nodes.compute.object.ReadSegments;
+import org.sfs.rx.Defer;
 import org.sfs.rx.NullSubscriber;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
+import org.sfs.util.ExceptionHelper;
 import org.sfs.vo.PersistentContainer;
 import org.sfs.vo.PersistentObject;
 import rx.Observable;
@@ -64,12 +68,11 @@ import static org.sfs.protobuf.XVolume.XDumpFile.FirstHeader.newBuilder;
 import static org.sfs.protobuf.XVolume.XDumpFile.Header;
 import static org.sfs.protobuf.XVolume.XDumpFile.Header.Type.VERSION_01;
 import static org.sfs.protobuf.XVolume.XDumpFile.Version01;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.rx.RxHelper.combineSinglesDelayError;
 import static org.sfs.rx.RxHelper.iterate;
 import static org.sfs.vo.PersistentObject.fromSearchHit;
-import static rx.Observable.create;
 import static rx.Observable.using;
 
 public class DumpFileWriter implements EndableWriteStream<SearchHit> {
@@ -129,7 +132,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
     public DumpFileWriter write(SearchHit data) {
         checkNotEnded();
         writeQueueFull = true;
-        empty()
+        aVoid()
                 .flatMap(aVoid -> writeFirst())
                 .flatMap(aVoid -> write0(data))
                 .subscribe(new Subscriber<Void>() {
@@ -181,7 +184,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
         checkNotEnded();
         ended = true;
         writeQueueFull = true;
-        empty()
+        aVoid()
                 .flatMap(aVoid -> writeFirst())
                 .flatMap(aVoid -> write0(data))
                 .subscribe(new Subscriber<Void>() {
@@ -257,7 +260,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
             }
             return dumpFile.append(vertx, buffer(firstHeaderBuilder.build().toByteArray()));
         } else {
-            return empty();
+            return aVoid();
         }
     }
 
@@ -271,7 +274,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
 
         checkState(objectId.startsWith(containerId), "ObjectId %s does not start with ContainerId %s", objectId, containerId);
 
-        return iterate(persistentObject.getVersions(), transientVersion -> {
+        return iterate(vertx, persistentObject.getVersions(), transientVersion -> {
 
             Header.Builder headerBuilder = Header.newBuilder();
             headerBuilder.setType(VERSION_01);
@@ -289,7 +292,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
             }
 
             if (encrypt) {
-                byte[] cipherMetadataSalt = algorithmDef.generateSalt();
+                byte[] cipherMetadataSalt = algorithmDef.generateSaltBlocking();
                 byte[] encryptedMarshaledExportObject = encrypt(cipherMetadataSalt, marshaledExportObject);
                 headerBuilder.setCipherMetadataSalt(copyFrom(cipherMetadataSalt));
                 marshaledExportObject = encryptedMarshaledExportObject;
@@ -311,7 +314,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                                 BufferEndableWriteStream compressedDst = compressedFileBackedBuffer;
                                 BufferEndableWriteStream uncompressedDst = uncompressedFileBackedBuffer;
                                 if (encrypt) {
-                                    byte[] cipherDataSalt = algorithmDef.generateSalt();
+                                    byte[] cipherDataSalt = algorithmDef.generateSaltBlocking();
                                     compressedDst = encrypt(cipherDataSalt, compressedDst);
                                     uncompressedDst = encrypt(cipherDataSalt, uncompressedDst);
                                     headerBuilder.setCipherDataSalt(copyFrom(cipherDataSalt));
@@ -319,13 +322,13 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                                 compressedDst = new DeflateEndableWriteStream(compressedDst);
                                 BufferEndableWriteStream writeStream = new MultiEndableWriteStream(compressedDst, uncompressedDst);
                                 return just(singletonList(transientVersion))
-                                        .flatMap(new ReadSegments(vertxContext, writeStream))
+                                        .flatMap(new ReadSegments(vertxContext, writeStream, false))
                                         .map(new ToVoid<>())
                                         .flatMap(aVoid1 -> {
-                                            ResultMemoizeHandler<Void> h = new ResultMemoizeHandler<>();
-                                            writeStream.endHandler(h);
+                                            ObservableFuture<Void> h = RxHelper.observableFuture();
+                                            writeStream.endHandler(h::complete);
                                             writeStream.end();
-                                            return create(h.subscribe);
+                                            return h;
                                         })
                                         .flatMap(aVoid1 -> {
                                             if (compressedFileBackedBuffer.length() < uncompressedFileBackedBuffer.length()) {
@@ -338,6 +341,14 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                                                 ReadStream<Buffer> readStream = uncompressedFileBackedBuffer.readStream();
                                                 return dumpFile.append(vertx, buffer(marshaledMetadata), uncompressedFileBackedBuffer.length(), readStream);
                                             }
+                                        })
+                                        .map(new ToVoid<>())
+                                        .onErrorResumeNext(throwable -> {
+                                            if (ExceptionHelper.containsException(CopySegmentsReadStreams.SegmentReadStreamNotFoundException.class, throwable)) {
+                                                return Defer.aVoid();
+                                            } else {
+                                                return Observable.error(throwable);
+                                            }
                                         });
                             }
                             ,
@@ -349,11 +360,12 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                                             .subscribe(new NullSubscriber<>()))
                             .map(aVoid -> TRUE);
                 } else {
+
                     PipedReadStream pipedReadStream = new PipedReadStream();
                     BufferEndableWriteStream dst = new PipedEndableWriteStream(pipedReadStream);
                     long contentLength;
                     if (encrypt) {
-                        byte[] cipherDataSalt = algorithmDef.generateSalt();
+                        byte[] cipherDataSalt = algorithmDef.generateSaltBlocking();
                         Algorithm algorithm = algorithmDef.create(cipherDataSalt, key);
                         contentLength = algorithm.encryptOutputSize(transientVersion.calculateLength().get());
                         dst = encrypt(cipherDataSalt, dst);
@@ -365,11 +377,20 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                     BufferEndableWriteStream writeStream = dst;
                     Observable<Void> oProducer =
                             just(singletonList(transientVersion))
-                                    .flatMap(new ReadSegments(vertxContext, writeStream))
+                                    .flatMap(new ReadSegments(vertxContext, writeStream, false))
                                     .map(new ToVoid<>())
                                     .doOnNext(aVoid -> writeStream.end());
                     Observable<Void> oConsumer = dumpFile.append(vertx, buffer(marshaledMetadata), contentLength, pipedReadStream).map(new ToVoid<>());
-                    return combineSinglesDelayError(oConsumer, oProducer, (aVoid11, aVoid12) -> TRUE);
+                    return combineSinglesDelayError(oConsumer, oProducer, (aVoid11, aVoid12) -> TRUE)
+                            .onErrorResumeNext(throwable -> {
+                                if (ExceptionHelper.containsException(CopySegmentsReadStreams.SegmentReadStreamNotFoundException.class, throwable)) {
+                                    // this will leave a black space in the file which needs to be handled during import
+                                    return Defer.just(true);
+                                } else {
+                                    return Observable.error(throwable);
+                                }
+                            });
+
                 }
             } else {
                 byte[] marshaledMetadata = headerBuilder.build().toByteArray();

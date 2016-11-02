@@ -17,28 +17,24 @@
 package org.sfs.nodes.all.blobreference;
 
 import com.google.common.base.Optional;
+import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.XNode;
+import org.sfs.rx.Defer;
 import org.sfs.vo.Segment;
 import org.sfs.vo.TransientBlobReference;
 import rx.Observable;
 import rx.functions.Func1;
 
 import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static com.google.common.base.Optional.absent;
-import static com.google.common.base.Optional.fromNullable;
-import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.collect.Iterables.isEmpty;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Boolean.FALSE;
 import static org.sfs.rx.Defer.just;
-import static org.sfs.rx.RxHelper.iterate;
 import static org.sfs.util.MessageDigestFactory.SHA512;
 
 public class VerifyBlobReference implements Func1<TransientBlobReference, Observable<Boolean>> {
@@ -67,47 +63,34 @@ public class VerifyBlobReference implements Func1<TransientBlobReference, Observ
                 .flatMap(transientBlobReference1 -> {
                     String volumeId = transientBlobReference.getVolumeId().get();
                     long position = transientBlobReference.getPosition().get();
-                    Iterable<XNode> xNodes = clusterInfo.getNodesForVolume(vertxContext, volumeId);
-                    if (isEmpty(xNodes)) {
+                    Optional<XNode> oXNode = clusterInfo.getNodesForVolume(vertxContext, volumeId);
+                    if (!oXNode.isPresent()) {
                         LOGGER.warn("No nodes contain volume " + volumeId);
-                    }
-                    AtomicReference<DigestBlob> found = new AtomicReference<>();
-                    return iterate(
-                            xNodes,
-                            xNode ->
-                                    xNode.checksum(volumeId, position, absent(), absent(), SHA512)
-                                            .map(digestBlobOptional -> {
-                                                if (digestBlobOptional.isPresent()) {
-                                                    checkState(found.compareAndSet(null, digestBlobOptional.get()), "Modified more than once");
-                                                    // stop iterating
-                                                    return false;
-                                                }
-                                                return true;
-                                            })
-                                            .onErrorResumeNext(throwable -> {
-                                                LOGGER.error("Handling Connect Failure " + xNode.getHostAndPort() + ". verify blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition(), throwable);
-                                                // continue iterating
-                                                return just(true);
-                                            }))
-                            .map(aBoolean -> fromNullable(found.get()))
-                            .map(digestBlobOptional -> {
-                                // If we have a result blob and it's present compare the stored checksum
-                                // against the computed checksum.
-                                if (digestBlobOptional != null) {
-                                    if (digestBlobOptional.isPresent()) {
-                                        byte[] expectedSha512 = digestBlobOptional.get().getDigest(SHA512).get();
-                                        Long expectedLength = digestBlobOptional.get().getLength();
-                                        Optional<byte[]> oExistingSha512 = transientBlobReference1.getReadSha512();
-                                        Optional<Long> oExistingLength = transientBlobReference1.getReadLength();
-                                        boolean sha512Match = oExistingSha512.isPresent() ? Arrays.equals(expectedSha512, oExistingSha512.get()) : FALSE;
-                                        boolean lengthMatch = oExistingLength.isPresent() ? oExistingLength.get().equals(expectedLength) : FALSE;
-                                        return sha512Match && lengthMatch
-                                                && Arrays.equals(writeSha512.get(), expectedSha512)
-                                                && writeLength.get().equals(expectedLength);
+                        return Defer.just(false);
+                    } else {
+                        XNode xNode = oXNode.get();
+                        return xNode.checksum(volumeId, position, absent(), absent(), SHA512)
+                                .map(digestBlobOptional -> {
+                                    if (digestBlobOptional != null) {
+                                        if (digestBlobOptional.isPresent()) {
+                                            byte[] expectedSha512 = digestBlobOptional.get().getDigest(SHA512).get();
+                                            Long expectedLength = digestBlobOptional.get().getLength();
+                                            Optional<byte[]> oExistingSha512 = transientBlobReference1.getReadSha512();
+                                            Optional<Long> oExistingLength = transientBlobReference1.getReadLength();
+                                            boolean sha512Match = oExistingSha512.isPresent() ? Arrays.equals(expectedSha512, oExistingSha512.get()) : FALSE;
+                                            boolean lengthMatch = oExistingLength.isPresent() ? oExistingLength.get().equals(expectedLength) : FALSE;
+                                            return sha512Match && lengthMatch
+                                                    && Arrays.equals(writeSha512.get(), expectedSha512)
+                                                    && writeLength.get().equals(expectedLength);
+                                        }
                                     }
-                                }
-                                return false;
-                            });
+                                    return false;
+                                });
+                    }
+                })
+                .onErrorResumeNext(throwable -> {
+                    LOGGER.error("verify fail blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition(), throwable);
+                    return Defer.just(false);
                 })
                 .singleOrDefault(false)
                 .map(verified -> {

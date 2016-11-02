@@ -49,7 +49,7 @@ import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.net.HttpURLConnection.HTTP_ACCEPTED;
 import static java.util.Calendar.getInstance;
 import static java.util.Collections.emptyList;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.SfsHttpHeaders.X_DELETE_AFTER;
 import static org.sfs.util.SfsHttpHeaders.X_DELETE_AT;
@@ -66,7 +66,7 @@ public class PostObject implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAuthenticated(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))
@@ -131,7 +131,7 @@ public class PostObject implements Handler<SfsRequest> {
                 .map(persistentObject -> persistentObject.getNewestVersion().get())
                 .doOnNext(version -> httpServerRequest.response().setStatusCode(HTTP_ACCEPTED))
                 .flatMap(version ->
-                        empty()
+                        aVoid()
                                 .map(new WriteHttpServerResponseHeaders(httpServerRequest, version, emptyList())))
                 .single()
                 .subscribe(new ConnectionCloseTerminus<Void>(httpServerRequest) {

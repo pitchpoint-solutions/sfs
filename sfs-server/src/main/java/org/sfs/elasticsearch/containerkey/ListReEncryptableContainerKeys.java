@@ -24,7 +24,6 @@ import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.RangeQueryBuilder;
-import org.elasticsearch.index.query.TermQueryBuilder;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.elasticsearch.Elasticsearch;
@@ -46,7 +45,6 @@ import static java.util.Collections.emptyList;
 import static org.elasticsearch.common.unit.TimeValue.timeValueMillis;
 import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
 import static org.elasticsearch.index.query.QueryBuilders.rangeQuery;
-import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.DateFormatter.toDateTimeString;
 import static org.sfs.vo.PersistentContainerKey.fromSearchHit;
@@ -57,12 +55,10 @@ public class ListReEncryptableContainerKeys implements Func1<Void, Observable<Pe
     private static final Logger LOGGER = getLogger(ListReEncryptableContainerKeys.class);
     private final VertxContext<Server> vertxContext;
     private final Calendar threshold;
-    private final String nodeId;
 
-    public ListReEncryptableContainerKeys(VertxContext<Server> vertxContext, String nodeId, Calendar threshold) {
+    public ListReEncryptableContainerKeys(VertxContext<Server> vertxContext, Calendar threshold) {
         this.vertxContext = vertxContext;
         this.threshold = threshold;
-        this.nodeId = nodeId;
     }
 
     @Override
@@ -74,9 +70,7 @@ public class ListReEncryptableContainerKeys implements Func1<Void, Observable<Pe
                 rangeQuery("re_encrypt_ts")
                         .lte(toDateTimeString(threshold));
 
-        TermQueryBuilder nodeFilter = termQuery("node_id", nodeId);
-
-        BoolQueryBuilder query = boolQuery().must(nodeFilter).must(reEncryptThresholdExceededFilter);
+        BoolQueryBuilder query = boolQuery().must(reEncryptThresholdExceededFilter);
 
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug(format("Search Request {%s,%s} = %s", elasticSearch.defaultType(), elasticSearch.containerKeyIndex(), Jsonify.toString(query)));

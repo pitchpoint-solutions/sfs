@@ -22,7 +22,8 @@ import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
 import org.sfs.nodes.HttpClientResponseException;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.Subscriber;
 import rx.functions.Func1;
@@ -31,7 +32,6 @@ import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
 import static java.net.HttpURLConnection.HTTP_OK;
-import static rx.Observable.create;
 
 public class WaitForCluster implements Func1<Void, Observable<Void>> {
 
@@ -46,15 +46,15 @@ public class WaitForCluster implements Func1<Void, Observable<Void>> {
 
     @Override
     public Observable<Void> call(Void aVoid) {
-        final ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
         vertx.setPeriodic(100, timerId -> {
-            final ResultMemoizeHandler<HttpClientResponse> internalHandler = new ResultMemoizeHandler<>();
+            ObservableFuture<HttpClientResponse> internalHandler = RxHelper.observableFuture();
             HttpClientRequest httpClientRequest =
-                    httpClient.get("/admin/001/is_online", internalHandler)
-                            .exceptionHandler(handler::fail)
+                    httpClient.get("/admin/001/is_online", internalHandler::complete)
+                            .exceptionHandler(internalHandler::fail)
                             .setTimeout(10000);
             httpClientRequest.end();
-            create(internalHandler.subscribe)
+            internalHandler
                     .subscribe(new Subscriber<HttpClientResponse>() {
 
                         HttpClientResponse result;
@@ -83,6 +83,6 @@ public class WaitForCluster implements Func1<Void, Observable<Void>> {
                         }
                     });
         });
-        return create(handler.subscribe);
+        return handler;
     }
 }

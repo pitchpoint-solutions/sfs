@@ -18,7 +18,8 @@ package org.sfs.io;
 
 import io.vertx.core.logging.Logger;
 import org.sfs.SfsVertx;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -26,7 +27,6 @@ import java.util.Set;
 
 import static com.google.common.base.Joiner.on;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static rx.Observable.create;
 
 public class WaitForActiveWriters implements Func1<Void, Observable<Void>> {
 
@@ -44,7 +44,7 @@ public class WaitForActiveWriters implements Func1<Void, Observable<Void>> {
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("Waiting for Active Writers " + on(", ").join(writers));
         }
-        final MemoizeHandler<Void, Void> handler = new MemoizeHandler<>();
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
         if (hasActive()) {
             vertx.setPeriodic(100, event -> {
                 if (LOGGER.isDebugEnabled()) {
@@ -58,7 +58,7 @@ public class WaitForActiveWriters implements Func1<Void, Observable<Void>> {
         } else {
             handler.complete(null);
         }
-        return create(handler.subscribe)
+        return handler
                 .map(aVoid1 -> {
                     if (LOGGER.isDebugEnabled()) {
                         LOGGER.debug("Done waiting for Active Writers " + on(", ").join(writers));

@@ -35,8 +35,8 @@ import org.sfs.filesystem.Positional;
 import org.sfs.io.BufferReadStream;
 import org.sfs.math.Rounding;
 import org.sfs.protobuf.XVolume;
-import org.sfs.rx.ContextScheduler;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.thread.CapacityLinkedBlockingQueue;
 import org.sfs.thread.NamedThreadFactory;
@@ -107,7 +107,7 @@ public class VolumeV1Test {
         Async async = context.async();
         sfsDataV1.open(sfsVertx)
                 .flatMap(aVoid -> {
-                    ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<Void>();
+                    ObservableFuture<Void> handler = RxHelper.observableFuture();
                     rule.vertx().setPeriodic(1000, event -> sfsDataV1.volumeInfo(sfsVertx)
                             .doOnNext(transientXVolume -> System.out.println("Stats: " + transientXVolume.toJsonObject().encodePrettily()))
                             .doOnNext(transientXVolume -> System.out.println("sfs-io-pool-size: " + ioQueue.size()))
@@ -129,7 +129,7 @@ public class VolumeV1Test {
                                 }
                             }));
 
-                    Observable.interval(1, TimeUnit.MILLISECONDS, new ContextScheduler(rule.vertx()))
+                    Observable.interval(1, TimeUnit.MILLISECONDS, RxHelper.scheduler(rule.vertx().getOrCreateContext()))
                             .limit(10000)
                             .map(aLong -> count.getAndIncrement())
                             .doOnNext(integer -> {
@@ -171,7 +171,7 @@ public class VolumeV1Test {
 
                                 }
                             });
-                    return Observable.create(handler.subscribe);
+                    return handler;
                 })
                 .flatMap(aVoid -> sfsDataV1.close(sfsVertx))
                 .flatMap(aVoid -> sfsDataV1.open(sfsVertx))

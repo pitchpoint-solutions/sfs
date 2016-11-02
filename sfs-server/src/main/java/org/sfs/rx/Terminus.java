@@ -24,6 +24,7 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import org.sfs.SfsRequest;
 import org.sfs.util.HttpRequestValidationException;
+import org.sfs.util.HttpServerRequestHeaderToJsonObject;
 import org.sfs.util.HttpStatusCodeException;
 import rx.Subscriber;
 
@@ -60,98 +61,115 @@ public abstract class Terminus<T> extends Subscriber<T> {
     public void onCompleted() {
 
         LOGGER.debug("Ended onComplete");
-        HttpServerResponse response = httpServerRequest.response();
-        response.end();
+        try {
+            HttpServerResponse response = httpServerRequest.response();
+            response.end();
+        } finally {
+            httpServerRequest.resume();
+        }
 
     }
 
     @Override
     public void onError(Throwable e) {
-        HttpServerResponse response = httpServerRequest.response();
-        if (containsException(HttpRequestValidationException.class, e)) {
-            HttpRequestValidationException cause = unwrapCause(HttpRequestValidationException.class, e).get();
-            JsonObject entity = cause.getEntity();
-            int status = cause.getStatusCode();
+        try {
+            HttpServerResponse response = httpServerRequest.response();
+            response.setChunked(true);
+            JsonObject jsonRequestDump = HttpServerRequestHeaderToJsonObject.call(httpServerRequest);
+            if (containsException(HttpRequestValidationException.class, e)) {
+                HttpRequestValidationException cause = unwrapCause(HttpRequestValidationException.class, e).get();
+                JsonObject entity = cause.getEntity();
+                int status = cause.getStatusCode();
 
-            // if credentials weren't supplied send unauthorized instead
-            // of forbidden
-            if (status == HTTP_FORBIDDEN
-                    && !httpServerRequest.headers().contains(AUTHORIZATION)
-                    && !httpServerRequest.headers().contains(X_AUTH_TOKEN)) {
-                status = HTTP_UNAUTHORIZED;
-                if (!httpServerRequest.proxyKeepAliveStarted()) {
-                    response.putHeader(WWW_AUTHENTICATE, "Basic realm=\"Helix\"");
+                // if credentials weren't supplied send unauthorized instead
+                // of forbidden
+                if (status == HTTP_FORBIDDEN
+                        && !httpServerRequest.headers().contains(AUTHORIZATION)
+                        && !httpServerRequest.headers().contains(X_AUTH_TOKEN)) {
+                    status = HTTP_UNAUTHORIZED;
+                    if (!httpServerRequest.proxyKeepAliveStarted()) {
+                        response.putHeader(WWW_AUTHENTICATE, "Basic realm=\"Helix\"");
+                    }
                 }
-            }
 
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Validate Error " + httpServerRequest.path(), e);
-            }
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("Validate Error " + httpServerRequest.path(), e);
+                }
 
-            HttpMethod method = httpServerRequest.method();
-            if (Objects.equals(HEAD, method)) {
+                HttpMethod method = httpServerRequest.method();
+                if (Objects.equals(HEAD, method)) {
+                    if (httpServerRequest.proxyKeepAliveStarted()) {
+                        Buffer encoded = buffer(entity.encodePrettily(), UTF_8.toString())
+                                .appendBuffer(DELIMITER_BUFFER);
+                        response.end(encoded);
+                    } else {
+                        Buffer encoded = buffer(entity.encodePrettily(), UTF_8.toString());
+                        response.setStatusCode(status)
+                                .write(encoded)
+                                .end();
+                    }
+                } else {
+                    if (httpServerRequest.proxyKeepAliveStarted()) {
+                        Buffer encoded = buffer(entity.encodePrettily(), UTF_8.toString())
+                                .appendBuffer(DELIMITER_BUFFER);
+                        response.end(encoded);
+                    } else {
+                        Buffer buffer = buffer(entity.encodePrettily(), UTF_8.toString());
+                        response.setStatusCode(status)
+                                .write(buffer)
+                                .end(buffer);
+                    }
+                }
+
+            } else if (containsException(HttpStatusCodeException.class, e)) {
+                HttpStatusCodeException cause = unwrapCause(HttpStatusCodeException.class, e).get();
+
+                int status = cause.getStatusCode();
+
+                // if credentials weren't supplied send unauthorized instead
+                // of forbidden
+                if (status == HTTP_FORBIDDEN
+                        && !httpServerRequest.headers().contains(AUTHORIZATION)
+                        && !httpServerRequest.headers().contains(X_AUTH_TOKEN)) {
+                    status = HTTP_UNAUTHORIZED;
+                    if (!httpServerRequest.proxyKeepAliveStarted()) {
+                        response.putHeader(WWW_AUTHENTICATE, "Basic realm=\"Helix\"");
+                    }
+                }
+
+                LOGGER.error("HttpStatusCode Error " + httpServerRequest.path(), e);
+
                 if (httpServerRequest.proxyKeepAliveStarted()) {
-                    Buffer encoded = buffer(entity.encode(), UTF_8.toString())
+                    JsonObject jsonObject = new JsonObject()
+                            .put("code", status);
+                    Buffer encoded = buffer(jsonObject.encodePrettily(), UTF_8.toString())
                             .appendBuffer(DELIMITER_BUFFER);
                     response.end(encoded);
                 } else {
+                    Buffer encoded = buffer(jsonRequestDump.encodePrettily(), UTF_8.toString());
                     response.setStatusCode(status)
+                            .write(encoded)
                             .end();
                 }
+
             } else {
+                LOGGER.error("Unhandled Exception " + httpServerRequest.path(), e);
                 if (httpServerRequest.proxyKeepAliveStarted()) {
-                    Buffer encoded = buffer(entity.encode(), UTF_8.toString())
+                    JsonObject jsonObject = new JsonObject()
+                            .put("code", HTTP_INTERNAL_ERROR);
+                    Buffer encoded = buffer(jsonObject.encode(), UTF_8.toString())
                             .appendBuffer(DELIMITER_BUFFER);
                     response.end(encoded);
                 } else {
-                    Buffer buffer = buffer(entity.encode(), UTF_8.toString());
-                    response.setStatusCode(status)
-                            .end(buffer);
+                    Buffer encoded = buffer(jsonRequestDump.encodePrettily(), UTF_8.toString());
+                    response.setStatusCode(HTTP_INTERNAL_ERROR)
+                            .write(encoded)
+                            .end();
                 }
+
             }
-
-        } else if (containsException(HttpStatusCodeException.class, e)) {
-            HttpStatusCodeException cause = unwrapCause(HttpStatusCodeException.class, e).get();
-
-            int status = cause.getStatusCode();
-
-            // if credentials weren't supplied send unauthorized instead
-            // of forbidden
-            if (status == HTTP_FORBIDDEN
-                    && !httpServerRequest.headers().contains(AUTHORIZATION)
-                    && !httpServerRequest.headers().contains(X_AUTH_TOKEN)) {
-                status = HTTP_UNAUTHORIZED;
-                if (!httpServerRequest.proxyKeepAliveStarted()) {
-                    response.putHeader(WWW_AUTHENTICATE, "Basic realm=\"Helix\"");
-                }
-            }
-
-            LOGGER.error("HttpStatusCode Error " + httpServerRequest.path(), e);
-
-            if (httpServerRequest.proxyKeepAliveStarted()) {
-                JsonObject jsonObject = new JsonObject()
-                        .put("code", status);
-                Buffer encoded = buffer(jsonObject.encode(), UTF_8.toString())
-                        .appendBuffer(DELIMITER_BUFFER);
-                response.end(encoded);
-            } else {
-                response.setStatusCode(status)
-                        .end();
-            }
-
-        } else {
-            LOGGER.error("Unhandled Exception " + httpServerRequest.path(), e);
-            if (httpServerRequest.proxyKeepAliveStarted()) {
-                JsonObject jsonObject = new JsonObject()
-                        .put("code", HTTP_INTERNAL_ERROR);
-                Buffer encoded = buffer(jsonObject.encode(), UTF_8.toString())
-                        .appendBuffer(DELIMITER_BUFFER);
-                response.end(encoded);
-            } else {
-                response.setStatusCode(HTTP_INTERNAL_ERROR)
-                        .end();
-            }
-
+        } finally {
+            httpServerRequest.resume();
         }
     }
 }

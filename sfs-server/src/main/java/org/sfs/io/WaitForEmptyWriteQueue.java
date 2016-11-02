@@ -20,12 +20,12 @@ import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static rx.Observable.create;
 
 public class WaitForEmptyWriteQueue implements Func1<Void, Observable<Void>> {
 
@@ -44,7 +44,7 @@ public class WaitForEmptyWriteQueue implements Func1<Void, Observable<Void>> {
 
     @Override
     public Observable<Void> call(Void aVoid) {
-        final MemoizeHandler<Void, Void> handler = new MemoizeHandler<>();
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("Waiting for empty write queue. Size is " + writeQueueSupport.getSize());
         }
@@ -61,7 +61,7 @@ public class WaitForEmptyWriteQueue implements Func1<Void, Observable<Void>> {
         } else {
             handler.complete(null);
         }
-        return create(handler.subscribe)
+        return handler
                 .map(aVoid1 -> {
                     if (LOGGER.isDebugEnabled()) {
                         LOGGER.debug("Done waiting for empty write queue. Size is " + writeQueueSupport.getSize());

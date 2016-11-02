@@ -57,7 +57,7 @@ import static org.sfs.protobuf.XVolume.XJournal.Header.Builder;
 import static org.sfs.protobuf.XVolume.XJournal.Header.parseFrom;
 import static org.sfs.protobuf.XVolume.XJournal.Super;
 import static org.sfs.protobuf.XVolume.XJournal.Super.newBuilder;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.ExceptionHelper.containsException;
 import static rx.Observable.error;
@@ -114,7 +114,7 @@ public class JournalFile {
     }
 
     public Observable<Void> open(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> {
                     // do some funcky stuff here to read the existing super block so that
                     // we have enough information to access the journal entries
@@ -174,7 +174,7 @@ public class JournalFile {
 
         // write the super block twice so that we can recover from a failed
         // write
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> internalBlobFile.consume(vertx, SUPER_BLOCK_POSITION_0, frameBuffer))
                 .flatMap(aVoid -> internalBlobFile.force(vertx, true))
                 .flatMap(aVoid -> internalBlobFile.consume(vertx, SUPER_BLOCK_POSITION_1, frameBuffer))
@@ -182,7 +182,7 @@ public class JournalFile {
     }
 
     private Observable<Super> getSuperBlock(SfsVertx vertx, BlobFile internalBlobFile) {
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> getSuperBlock0(vertx, internalBlobFile, SUPER_BLOCK_POSITION_0))
                 .flatMap(superOptional -> {
                     if (superOptional.isPresent()) {
@@ -196,7 +196,7 @@ public class JournalFile {
     }
 
     private Observable<Optional<Super>> getSuperBlock0(SfsVertx vertx, BlobFile internalBlobFile, long position) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkState(position == SUPER_BLOCK_POSITION_0 || position == SUPER_BLOCK_POSITION_1, "Position must be equal to %s or %s", SUPER_BLOCK_POSITION_0, SUPER_BLOCK_POSITION_1))
                 .flatMap(aVoid -> {
                     BufferWriteEndableWriteStream bufferWriteStreamConsumer = new BufferWriteEndableWriteStream();
@@ -280,7 +280,7 @@ public class JournalFile {
     }
 
     public Observable<Optional<Entry>> getEntry(SfsVertx vertx, long position) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> blobFile.checkOpen())
                 .doOnNext(aVoid -> checkLogEntryPosition(position))
                 .flatMap(aVoid -> {
@@ -316,7 +316,7 @@ public class JournalFile {
     }
 
     public Observable<Void> scanFromFirst(SfsVertx vertx, Func1<Entry, Observable<Boolean>> func) {
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> {
                     JournalScanner journalScanner = new JournalScanner(this, firstLogEntryPosition());
                     return journalScanner.scan(vertx, func);
@@ -324,7 +324,7 @@ public class JournalFile {
     }
 
     public Observable<Void> scan(SfsVertx vertx, long position, Func1<Entry, Observable<Boolean>> func) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkLogEntryPosition(position))
                 .flatMap(aVoid -> {
                     JournalScanner journalScanner = new JournalScanner(this, position);
@@ -365,7 +365,7 @@ public class JournalFile {
 
         checkState(headerFrameSize <= blockSize, "Header Frame size was %s, which is greater block size of %s", headerFrameSize, blockSize);
 
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> {
                     if (LOGGER.isDebugEnabled()) {
                         LOGGER.debug("Writing header frame @ position " + headerPosition);
@@ -389,7 +389,7 @@ public class JournalFile {
                                     }
                                 });
                     } else {
-                        return empty();
+                        return aVoid();
                     }
                 })
                 .map(aVoid -> writePosition);

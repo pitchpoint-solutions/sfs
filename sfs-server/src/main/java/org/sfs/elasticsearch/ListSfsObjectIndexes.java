@@ -21,7 +21,7 @@ import org.sfs.VertxContext;
 import rx.Observable;
 import rx.functions.Func1;
 
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class ListSfsObjectIndexes implements Func1<Void, Observable<String>> {
 
@@ -34,7 +34,7 @@ public class ListSfsObjectIndexes implements Func1<Void, Observable<String>> {
     @Override
     public Observable<String> call(Void aVoid) {
         Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-        return empty()
+        return aVoid()
                 .flatMap(new ListSfsIndexes(vertxContext))
                 .filter(elasticsearch::isObjectIndex);
     }

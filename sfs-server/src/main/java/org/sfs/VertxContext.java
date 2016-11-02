@@ -17,14 +17,14 @@
 package org.sfs;
 
 
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.RxVertx;
 import rx.Observable;
 import rx.functions.Func0;
 
 import java.util.concurrent.ExecutorService;
 
-import static rx.Observable.create;
 import static rx.Observable.defer;
 
 public class VertxContext<A extends Server> {
@@ -73,17 +73,17 @@ public class VertxContext<A extends Server> {
 
     public static <R> Observable<R> executeBlocking(SfsVertx vertx, Func0<R> func) {
         return defer(() -> {
-            AsyncResultMemoizeHandler<R, R> handler = new AsyncResultMemoizeHandler<>();
-            vertx.executeBlocking(func, handler);
-            return create(handler.subscribe);
+            ObservableFuture<R> handler = RxHelper.observableFuture();
+            vertx.executeBlocking(func, handler.toHandler());
+            return handler;
         });
     }
 
     public static <R> Observable<R> executeBlockingObservable(SfsVertx vertx, Func0<Observable<R>> func) {
         return defer(() -> {
-            AsyncResultMemoizeHandler<R, R> handler = new AsyncResultMemoizeHandler<>();
-            vertx.executeBlockingObservable(func::call, handler);
-            return create(handler.subscribe);
+            ObservableFuture<R> handler = RxHelper.observableFuture();
+            vertx.executeBlockingObservable(func::call, handler.toHandler());
+            return handler;
         });
     }
 }

@@ -21,11 +21,10 @@ import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.nodes.all.blobreference.DeleteBlobReference;
 import org.sfs.rx.Holder1;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ToVoid;
 import org.sfs.vo.PersistentObject;
 import org.sfs.vo.XVersion;
 import rx.Observable;
-import rx.Subscriber;
 import rx.functions.Func1;
 
 import java.util.Set;
@@ -56,20 +55,19 @@ public class DeleteDataInVolumes implements Func1<PersistentObject, Observable<B
             LOGGER.debug("begin deletedatainvolumes object=" + persistentObject.getId());
         }
         Holder1<Boolean> modifiedHolder = new Holder1<>(false);
-        ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
-        just(persistentObject)
-                .concatMapDelayError(persistentObject1 -> from(persistentObject1.getVersions()))
+        return just(persistentObject)
+                .flatMap(persistentObject1 -> from(persistentObject1.getVersions()))
                 .filter(version -> !excludes.contains(version))
                 .filter(XVersion::isDeleted)
-                .concatMapDelayError(transientVersion -> from(transientVersion.getSegments()))
+                .flatMap(transientVersion -> from(transientVersion.getSegments()))
                 .doOnNext(transientSegment -> {
                     if (transientSegment.isTinyData()) {
                         transientSegment.deleteTinyData();
                     }
                 })
                 .filter(transientSegment -> !transientSegment.isTinyData())
-                .concatMapDelayError(transientSegment -> from(transientSegment.getBlobs()))
-                .concatMapDelayError(transientBlobReference ->
+                .flatMap(transientSegment -> from(transientSegment.getBlobs()))
+                .flatMap(transientBlobReference ->
                         just(transientBlobReference)
                                 .flatMap(new DeleteBlobReference(vertxContext))
                                 .filter(deleted -> deleted)
@@ -81,29 +79,8 @@ public class DeleteDataInVolumes implements Func1<PersistentObject, Observable<B
                                     modifiedHolder.value |= true;
                                     return (Void) null;
                                 }))
-                .subscribe(new Subscriber<Void>() {
-
-                    @Override
-                    public void onStart() {
-                        request(1);
-                    }
-
-                    @Override
-                    public void onCompleted() {
-                        handler.complete(null);
-                    }
-
-                    @Override
-                    public void onError(Throwable e) {
-                        handler.fail(e);
-                    }
-
-                    @Override
-                    public void onNext(Void aVoid) {
-                        request(1);
-                    }
-                });
-        return Observable.create(handler.subscribe)
+                .count()
+                .map(new ToVoid<>())
                 .map(aVoid -> modifiedHolder.value)
                 .map(modified -> {
                     if (LOGGER.isDebugEnabled()) {

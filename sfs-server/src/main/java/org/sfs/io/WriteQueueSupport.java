@@ -18,12 +18,22 @@ package org.sfs.io;
 
 
 import com.google.common.util.concurrent.AtomicLongMap;
+import io.vertx.core.Context;
+import io.vertx.core.Handler;
+import io.vertx.core.Vertx;
 
-public class WriteQueueSupport {
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class WriteQueueSupport<A> {
 
     private final long maxWrites;
     private final long lowWater;
-    private AtomicLongMap<AsyncFileWriterImpl> queues = AtomicLongMap.create();
+    private final AtomicLongMap<A> queues = AtomicLongMap.create();
+    private final Set<ContextHandler> drainHandlers = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
 
     public WriteQueueSupport(long maxWrites) {
         this.maxWrites = maxWrites;
@@ -38,33 +48,61 @@ public class WriteQueueSupport {
         return lowWater;
     }
 
-    public WriteQueueSupport remove(AsyncFileWriterImpl writer) {
+    public void drainHandler(Vertx vertx, Handler<Void> handler) {
+        drainHandler(vertx.getOrCreateContext(), handler);
+    }
+
+    public void drainHandler(Context context, Handler<Void> handler) {
+        drainHandlers.add(new ContextHandler(context, handler));
+        notifyDrainHandlers();
+    }
+
+    public WriteQueueSupport<A> remove(A writer) {
         queues.remove(writer);
+        notifyDrainHandlers();
         return this;
     }
 
-    public boolean writeQueueFull(AsyncFileWriterImpl writer) {
-        return queues.get(writer) >= maxWrites;
+    public boolean writeQueueFull() {
+        return queues.sum() >= maxWrites;
     }
 
-    public boolean writeQueueDrained(AsyncFileWriterImpl writer) {
-        return queues.get(writer) <= lowWater;
-    }
-
-    public void incrementWritesOutstanding(AsyncFileWriterImpl writer, long delta) {
+    public void incrementWritesOutstanding(A writer, long delta) {
         queues.addAndGet(writer, delta);
     }
 
-
-    public void decrementWritesOutstanding(AsyncFileWriterImpl writer, long delta) {
-        queues.addAndGet(writer, -delta);
-    }
-
-    public boolean writeQueueEmpty(AsyncFileWriterImpl writer) {
+    public boolean writeQueueEmpty(A writer) {
         return queues.get(writer) <= 0;
     }
 
     public long getSize() {
         return queues.sum();
+    }
+
+    protected void notifyDrainHandlers() {
+        long size = queues.sum();
+        if (size <= lowWater) {
+            Iterator<ContextHandler> iterator = drainHandlers.iterator();
+            while (iterator.hasNext()) {
+                ContextHandler contextHandler = iterator.next();
+                iterator.remove();
+                contextHandler.dispatch();
+            }
+        }
+    }
+
+    private static class ContextHandler {
+
+        private final Context context;
+        private final Handler<Void> handler;
+
+        public ContextHandler(Context context, Handler<Void> handler) {
+            this.context = context;
+            this.handler = handler;
+        }
+
+        public void dispatch() {
+            context.runOnContext(event -> handler.handle(null));
+        }
     }
 }

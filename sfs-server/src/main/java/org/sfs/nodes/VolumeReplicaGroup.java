@@ -19,6 +19,7 @@ package org.sfs.nodes;
 import com.google.common.base.Optional;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Iterables;
+import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.streams.ReadStream;
@@ -157,11 +158,7 @@ public class VolumeReplicaGroup {
 
     protected void checkFoundSufficientVolumes(int actualMatches, int expectedMatches, boolean primary) {
         if (actualMatches < expectedMatches) {
-            if (primary) {
-                throw new InsufficientPrimaryVolumeAvailableException(expectedMatches, actualMatches);
-            } else {
-                throw new InsufficientReplicaVolumesAvailableException(expectedMatches, actualMatches);
-            }
+            throw new InsufficientReplicaVolumesAvailableException(expectedMatches, actualMatches);
         }
     }
 
@@ -181,18 +178,19 @@ public class VolumeReplicaGroup {
             if (excludeVolumes != null) {
                 seenVolumes.addAll(excludeVolumes);
             }
-
-            return RxHelper.iterate(descendingMap.entrySet(), entry -> {
+            Vertx vertx = vertxContext.vertx();
+            return RxHelper.iterate(vertx, descendingMap.entrySet(), entry -> {
                 long useableSpace = entry.getKey();
                 if (useableSpace * 0.90 >= requiredSpace) {
                     Set<String> volumeIds = entry.getValue();
-                    return RxHelper.iterate(volumeIds, volumeId -> {
+                    return RxHelper.iterate(vertx, volumeIds, volumeId -> {
                         if (seenVolumes.add(volumeId)) {
                             Optional<TransientServiceDef> oServiceDef = clusterInfo.getServiceDefForVolume(volumeId);
                             if (oServiceDef.isPresent()) {
                                 TransientServiceDef serviceDef = oServiceDef.get();
-                                Iterable<XNode> nodes = clusterInfo.getNodesForVolume(vertxContext, volumeId);
-                                return RxHelper.iterate(nodes, xNode -> {
+                                Optional<XNode> oXNode = clusterInfo.getNodesForVolume(vertxContext, volumeId);
+                                if (oXNode.isPresent()) {
+                                    XNode xNode = oXNode.get();
                                     return xNode.createWriteStream(volumeId, requiredSpace, messageDigestFactories)
                                             .onErrorResumeNext(throwable -> {
                                                 LOGGER.warn(String.format("Failed to connect to volume %s", volumeId), throwable);
@@ -217,7 +215,9 @@ public class VolumeReplicaGroup {
                                                     return true;
                                                 }
                                             });
-                                });
+                                } else {
+                                    return Defer.just(true);
+                                }
                             }
                         }
                         return Defer.just(true);

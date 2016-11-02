@@ -48,7 +48,7 @@ import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.SfsHttpQueryParams.VERSION;
 import static org.sfs.vo.ObjectPath.fromSfsRequest;
@@ -68,7 +68,7 @@ public class GetObject implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAuthenticated(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))
@@ -122,7 +122,7 @@ public class GetObject implements Handler<SfsRequest> {
                                                 .map(aVoid -> transientVersions)
                                                 .flatMap(new ReadSegments(vertxContext, httpResponseWriteStream)));
                     } else {
-                        return empty()
+                        return aVoid()
                                 .doOnNext(aVoid -> httpServerRequest.response().setStatusCode(HTTP_OK))
                                 .map(new WriteHttpServerResponseHeaders(httpServerRequest, transientVersion, emptyList()))
                                 .map(aVoid -> singletonList(transientVersion))

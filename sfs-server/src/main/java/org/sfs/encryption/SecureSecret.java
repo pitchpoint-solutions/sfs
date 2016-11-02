@@ -17,13 +17,8 @@
 package org.sfs.encryption;
 
 import com.google.common.primitives.Longs;
-import org.sfs.rx.ResultMemoizeHandler;
-import rx.Observable;
-import rx.Subscriber;
-import rx.functions.Func1;
 
 import java.lang.management.ManagementFactory;
-import java.util.Arrays;
 
 public final class SecureSecret {
 
@@ -33,36 +28,7 @@ public final class SecureSecret {
 
     public SecureSecret() {
         this.algorithmDef = AlgorithmDef.getPreferred();
-        this.salt = algorithmDef.generateSalt();
-    }
-
-    public <T> Observable<T> apply(Func1<byte[], Observable<T>> function) {
-        byte[] clear = getClearBytes();
-        ResultMemoizeHandler<T> handler = new ResultMemoizeHandler<>();
-        function.call(clear)
-                .subscribe(new Subscriber<T>() {
-
-                    T value;
-
-                    @Override
-                    public void onCompleted() {
-                        Arrays.fill(clear, (byte) 0);
-                        handler.complete(value);
-                    }
-
-                    @Override
-                    public void onError(Throwable e) {
-                        Arrays.fill(clear, (byte) 0);
-                        handler.fail(e);
-                    }
-
-                    @Override
-                    public void onNext(T t) {
-                        value = t;
-                    }
-                });
-        return Observable.create(handler.subscribe);
-
+        this.salt = algorithmDef.generateSaltBlocking();
     }
 
     public byte[] getClearBytes() {

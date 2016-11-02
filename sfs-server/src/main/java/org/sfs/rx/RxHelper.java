@@ -16,9 +16,16 @@
 
 package org.sfs.rx;
 
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Context;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import rx.Observable;
+import rx.Observer;
+import rx.Scheduler;
 import rx.Subscriber;
+import rx.functions.Action0;
+import rx.functions.Action1;
 import rx.functions.Func0;
 import rx.functions.Func1;
 import rx.functions.Func2;
@@ -30,15 +37,14 @@ import rx.functions.Func7;
 import rx.functions.Func8;
 import rx.functions.Func9;
 import rx.functions.FuncN;
+import rx.plugins.RxJavaSchedulersHook;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
-import static java.lang.Boolean.TRUE;
 import static java.util.Arrays.asList;
 import static rx.Observable.combineLatestDelayError;
-import static rx.Observable.create;
 import static rx.Observable.defer;
-import static rx.Observable.from;
 import static rx.functions.Functions.fromFunc;
 
 public class RxHelper {
@@ -95,32 +101,43 @@ public class RxHelper {
         return combineSinglesDelayError(asList(o1.single(), o2.single(), o3.single(), o4.single(), o5.single(), o6.single(), o7.single(), o8.single(), o9.single()), fromFunc(combineFunction));
     }
 
+    public static <T> Observable<T> executeBlocking(Vertx vertx, ExecutorService executorService, Func0<T> func0) {
+        Context context = vertx.getOrCreateContext();
+        return Defer.aVoid()
+                .flatMap(aVoid -> {
+                    ObservableFuture<T> observableFuture = RxHelper.observableFuture();
+                    executorService.execute(() -> {
+                        try {
+                            T result = func0.call();
+                            context.runOnContext(event -> observableFuture.complete(result));
+                        } catch (Throwable e) {
+                            context.runOnContext(event -> observableFuture.fail(e));
+                        }
+                    });
+                    return observableFuture;
+                });
+    }
+
     public static <T> Observable<T> executeBlocking(Vertx vertx, Func0<T> func) {
         return executeBlocking(vertx, func, true);
     }
 
     public static <T> Observable<T> executeBlocking(Vertx vertx, Func0<T> func, boolean ordered) {
         return defer(() -> {
-            ResultMemoizeHandler<T> h = new ResultMemoizeHandler<T>();
+            ObservableFuture<T> h = RxHelper.observableFuture();
             vertx.executeBlocking(
-                    event -> {
+                    future -> {
                         T result;
                         try {
                             result = func.call();
                         } catch (Throwable e) {
-                            event.fail(e);
+                            future.fail(e);
                             return;
                         }
-                        event.complete(result);
+                        future.complete(result);
                     }, ordered,
-                    event -> {
-                        if (event.succeeded()) {
-                            h.complete((T) event.result());
-                        } else {
-                            h.fail(event.cause());
-                        }
-                    });
-            return create(h.subscribe);
+                    h.toHandler());
+            return h;
         });
     }
 
@@ -128,13 +145,13 @@ public class RxHelper {
         return combineLatestDelayError(sources, combineFunction);
     }
 
-    public static <A> Observable<Boolean> iterate(final Iterable<? extends A> items, final Func1<A, Observable<Boolean>> func1) {
-        ResultMemoizeHandler<Boolean> handler = new ResultMemoizeHandler<>();
-        from(items)
+    public static <A> Observable<Boolean> iterate(Vertx vertx, final Iterable<? extends A> items, final Func1<A, Observable<Boolean>> func1) {
+        ObservableFuture<Boolean> handler = RxHelper.observableFuture();
+        Observable.from(items)
                 .concatMap(func1::call)
                 .subscribe(new Subscriber<Boolean>() {
 
-                    Boolean c;
+                    Boolean result;
 
                     @Override
                     public void onStart() {
@@ -143,7 +160,11 @@ public class RxHelper {
 
                     @Override
                     public void onCompleted() {
-                        handler.complete(c);
+                        try {
+                            handler.complete(result);
+                        } finally {
+                            unsubscribe();
+                        }
                     }
 
                     @Override
@@ -153,16 +174,101 @@ public class RxHelper {
 
                     @Override
                     public void onNext(Boolean _continue) {
-                        c = _continue;
-                        if (TRUE.equals(_continue)) {
+                        result = _continue;
+                        if (Boolean.TRUE.equals(_continue)) {
                             request(1);
                         } else {
-                            unsubscribe();
                             onCompleted();
                         }
                     }
                 });
-        return create(handler.subscribe);
+        return handler;
+    }
+
+    public static <T> ObservableFuture<T> observableFuture() {
+        return new ObservableFuture<>();
+    }
+
+
+    public static <T> Handler<AsyncResult<T>> toFuture(Observer<T> observer) {
+        ObservableFuture<T> observable = RxHelper.<T>observableFuture();
+        observable.subscribe(observer);
+        return observable.toHandler();
+    }
+
+    public static <T> Handler<AsyncResult<T>> toFuture(Action1<T> onNext) {
+        ObservableFuture<T> observable = RxHelper.<T>observableFuture();
+        observable.subscribe(onNext);
+        return observable.toHandler();
+    }
+
+
+    public static <T> Handler<AsyncResult<T>> toFuture(Action1<T> onNext, Action1<Throwable> onError) {
+        ObservableFuture<T> observable = RxHelper.<T>observableFuture();
+        observable.subscribe(onNext, onError);
+        return observable.toHandler();
+    }
+
+    public static <T> Handler<AsyncResult<T>> toFuture(Action1<T> onNext, Action1<Throwable> onError, Action0 onComplete) {
+        ObservableFuture<T> observable = RxHelper.<T>observableFuture();
+        observable.subscribe(onNext, onError, onComplete);
+        return observable.toHandler();
+    }
+
+    public static Scheduler scheduler(Vertx vertx) {
+        return new ContextScheduler(vertx, false);
+    }
+
+
+    public static Scheduler scheduler(Context context) {
+        return new ContextScheduler(context, false);
+    }
+
+
+    public static Scheduler blockingScheduler(Vertx vertx) {
+        return new ContextScheduler(vertx, true);
+    }
+
+    public static Scheduler blockingScheduler(Vertx vertx, boolean ordered) {
+        return new ContextScheduler(vertx, true, ordered);
+    }
+
+    public static RxJavaSchedulersHook schedulerHook(Context context) {
+        return new RxJavaSchedulersHook() {
+            @Override
+            public Scheduler getComputationScheduler() {
+                return scheduler(context);
+            }
+
+            @Override
+            public Scheduler getIOScheduler() {
+                return blockingScheduler(context.owner());
+            }
+
+            @Override
+            public Scheduler getNewThreadScheduler() {
+                return scheduler(context);
+            }
+        };
+    }
+
+    public static RxJavaSchedulersHook schedulerHook(Vertx vertx) {
+        return new RxJavaSchedulersHook() {
+            @Override
+            public Scheduler getComputationScheduler() {
+                return scheduler(vertx);
+            }
+
+            @Override
+            public Scheduler getIOScheduler() {
+                return blockingScheduler(vertx);
+            }
+
+            @Override
+            public Scheduler getNewThreadScheduler() {
+                return scheduler(vertx);
+            }
+        };
     }
 
 }

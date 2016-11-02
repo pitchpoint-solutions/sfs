@@ -40,7 +40,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Runtime.getRuntime;
 import static java.nio.file.Files.getFileStore;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static rx.Observable.from;
 
@@ -57,23 +57,23 @@ public class NodeStats {
 
     public Observable<Void> open(VertxContext<Server> vertxContext) {
         this.vertxContext = vertxContext;
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> generate(vertxContext))
                 .doOnNext(aVoid -> startTimer())
                 .doOnNext(aVoid -> started = true);
     }
 
     public Observable<Void> close(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> started = false)
                 .doOnNext(aVoid -> stopTimer())
                 .onErrorResumeNext(throwable -> {
                     LOGGER.warn("Handling Exception", throwable);
-                    return empty();
+                    return aVoid();
                 })
                 .onErrorResumeNext(throwable -> {
                     LOGGER.warn("Handling Exception", throwable);
-                    return empty();
+                    return aVoid();
                 })
                 .doOnNext(aVoid -> {
                     transientServiceDef = null;
@@ -135,7 +135,7 @@ public class NodeStats {
 
     protected Observable<Void> generate(VertxContext<Server> vertxContext) {
         NodeStats _this = this;
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
                     try {
                         Nodes nodes = vertxContext.verticle().nodes();
@@ -197,7 +197,7 @@ public class NodeStats {
         String nodeId = vertxContext.verticle().nodes().getNodeId();
         return
                 dataNode ?
-                        empty()
+                        aVoid()
                                 .flatMap(new GetDocumentsCountForNode(vertxContext, nodeId))
                         : just(0L);
     }

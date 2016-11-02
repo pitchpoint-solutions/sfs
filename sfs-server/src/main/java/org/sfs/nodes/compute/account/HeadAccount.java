@@ -38,7 +38,7 @@ import static java.lang.String.format;
 import static java.lang.String.valueOf;
 import static java.math.BigDecimal.ROUND_HALF_UP;
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.SfsHttpHeaders.X_ACCOUNT_BYTES_USED;
 import static org.sfs.util.SfsHttpHeaders.X_ACCOUNT_CONTAINER_COUNT;
@@ -52,7 +52,7 @@ public class HeadAccount implements Handler<SfsRequest> {
     @Override
     public void handle(final SfsRequest httpServerRequest) {
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdmin(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))

@@ -17,19 +17,12 @@
 package org.sfs.rx;
 
 import io.vertx.core.Vertx;
-import rx.Observable;
 
 public class RxVertx {
     /**
      * Core
      */
     private Vertx core;
-
-
-    /**
-     * Timer
-     */
-    private RxTimer timer;
 
     /**
      * Scheduler
@@ -41,7 +34,6 @@ public class RxVertx {
      */
     public RxVertx(Vertx vertx) {
         this.core = vertx;
-        this.timer = new RxTimer(core);
     }
 
     /**
@@ -58,28 +50,16 @@ public class RxVertx {
      */
     public ContextScheduler contextScheduler() {
         if (this.ctxScheduler == null) {
-            this.ctxScheduler = new ContextScheduler(core);
+            this.ctxScheduler = new ContextScheduler(core.getOrCreateContext(), false);
         }
         return this.ctxScheduler;
     }
 
-    // Timer
-
-    /**
-     * Set One-off Timer
-     *
-     * @see RxTimer#setTimer
-     */
-    public Observable<Long> setTimer(final long delay) {
-        return this.timer.setTimer(delay);
+    public ContextScheduler blockingContextScheduler() {
+        if (this.ctxScheduler == null) {
+            this.ctxScheduler = new ContextScheduler(core.getOrCreateContext(), true);
+        }
+        return this.ctxScheduler;
     }
 
-    /**
-     * Set Periodic Timer
-     *
-     * @see RxTimer#setPeriodic
-     */
-    public Observable<Long> setPeriodic(final long delay) {
-        return this.timer.setPeriodic(delay);
-    }
 }

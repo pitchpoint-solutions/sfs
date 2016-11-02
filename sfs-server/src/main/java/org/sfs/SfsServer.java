@@ -33,11 +33,10 @@ import org.sfs.jobs.Jobs;
 import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.NodeStats;
 import org.sfs.nodes.Nodes;
-import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.Defer;
+import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
-import rx.Observable;
 import rx.Subscriber;
 
 import java.util.ArrayList;
@@ -75,6 +74,7 @@ public class SfsServer extends Server {
                     vertxContext = new VertxContext<Server>(this);
                     httpsClient = server.createHttpClient(vertx, true);
                     httpClient = server.createHttpClient(vertx, false);
+                    server.initRxSchedulers(vertx);
                     server.initHttpListeners(vertxContext, true)
                             .doOnNext(httpServers1 -> httpServers.addAll(httpServers1))
                             .map(new ToVoid<>())
@@ -113,15 +113,15 @@ public class SfsServer extends Server {
             sfsSingletonServer.stop(stoppedResult);
         } else {
             LOGGER.info("Stopped verticle " + _this);
-            Defer.empty()
+            Defer.aVoid()
                     .flatMap(aVoid ->
-                            RxHelper.iterate(httpServers, httpServer -> {
-                                AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
-                                httpServer.close(handler);
-                                return Observable.create(handler.subscribe)
+                            RxHelper.iterate(vertx, httpServers, httpServer -> {
+                                ObservableFuture<Void> handler = RxHelper.observableFuture();
+                                httpServer.close(handler.toHandler());
+                                return handler
                                         .onErrorResumeNext(throwable -> {
                                             LOGGER.error("Unhandled Exception", throwable);
-                                            return Defer.empty();
+                                            return Defer.aVoid();
                                         })
                                         .map(aVoid1 -> Boolean.TRUE);
                             }).map(new ToVoid<>()))

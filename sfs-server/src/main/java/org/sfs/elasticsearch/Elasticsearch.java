@@ -24,9 +24,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.FluentIterable;
 import com.google.common.io.CharStreams;
 import com.google.common.net.HostAndPort;
-import io.vertx.core.AsyncResultHandler;
 import io.vertx.core.Context;
-import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
@@ -51,9 +49,9 @@ import org.elasticsearch.index.engine.DocumentAlreadyExistsException;
 import org.elasticsearch.index.engine.VersionConflictEngineException;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.Defer;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.ConfigHelper;
 import org.sfs.util.ExceptionHelper;
@@ -96,7 +94,7 @@ public class Elasticsearch {
     }
 
     public Observable<Void> start(final VertxContext<Server> vertxContext, final JsonObject config, boolean isMasterNode) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .filter(aVoid -> status.compareAndSet(Status.STOPPED, Status.STARTING))
                 .flatMap(aVoid -> vertxContext.executeBlocking(
                         () -> {
@@ -193,12 +191,12 @@ public class Elasticsearch {
 
     private Observable<Void> waitForGreen(VertxContext<Server> vertxContext) {
         int maxRetries = 10;
-        AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
         waitForGreen0(vertxContext, 0, maxRetries, handler);
-        return Observable.create(handler.subscribe);
+        return handler;
     }
 
-    private void waitForGreen0(VertxContext<Server> vertxContext, int retryCount, int maxRetries, AsyncResultHandler<Void> handler) {
+    private void waitForGreen0(VertxContext<Server> vertxContext, int retryCount, int maxRetries, ObservableFuture<Void> handler) {
         String indexPrefix = indexPrefix();
         ClusterHealthRequestBuilder request =
                 elasticSearchClient
@@ -215,7 +213,7 @@ public class Elasticsearch {
 
                     @Override
                     public void onCompleted() {
-                        handler.handle(Future.succeededFuture());
+                        handler.complete(null);
                     }
 
                     @Override
@@ -226,7 +224,7 @@ public class Elasticsearch {
                             LOGGER.warn("Handling connect error. Retrying after " + delayMs + "ms", e);
                             vertxContext.vertx().setTimer(delayMs, event -> waitForGreen0(vertxContext, nextRetryCount, maxRetries, handler));
                         } else {
-                            handler.handle(Future.failedFuture(e));
+                            handler.fail(e);
                         }
                     }
 
@@ -239,13 +237,13 @@ public class Elasticsearch {
 
     public Observable<Void> prepareCommonIndex(VertxContext<Server> vertxContext, boolean isMasterNode) {
         if (isMasterNode) {
-            return createUpdateIndex(vertxContext, serviceDefTypeIndex(), "es-service-def-mapping.json", Limits.NOT_SET, Limits.NOT_SET)
+            return Defer.aVoid()
                     .flatMap(aVoid -> createUpdateIndex(vertxContext, accountIndex(), "es-account-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
                     .flatMap(aVoid -> createUpdateIndex(vertxContext, containerIndex(), "es-container-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
                     .flatMap(aVoid -> createUpdateIndex(vertxContext, containerKeyIndex(), "es-container-key-mapping.json", Limits.NOT_SET, Limits.NOT_SET))
                     .flatMap(aVoid -> createUpdateIndex(vertxContext, masterKeyTypeIndex(), "es-master-key-mapping.json", Limits.NOT_SET, Limits.NOT_SET));
         } else {
-            return Defer.empty();
+            return Defer.aVoid();
         }
     }
 
@@ -268,7 +266,7 @@ public class Elasticsearch {
                 .map(new ToVoid<>())
                 .onErrorResumeNext(throwable -> {
                     if (ExceptionHelper.containsException(IndexNotFoundException.class, throwable)) {
-                        return Defer.empty();
+                        return Defer.aVoid();
                     } else {
                         return Observable.error(throwable);
                     }
@@ -361,7 +359,7 @@ public class Elasticsearch {
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .filter(aVoid -> status.compareAndSet(Status.STARTED, Status.STOPPING) || status.compareAndSet(Status.STARTING, Status.STOPPING))
                 .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
                     LOGGER.debug("Stopping Elasticsearch");
@@ -386,21 +384,21 @@ public class Elasticsearch {
 
     public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> Observable<Optional<Response>> execute(Vertx vertx, final RequestBuilder actionRequestBuilder, long timeoutMs) {
         Context context = vertx.getOrCreateContext();
-        return Defer.empty()
+        return Defer.aVoid()
                 .flatMap(aVoid -> {
-                    ResultMemoizeHandler<Response> handler = new ResultMemoizeHandler<>();
+                    ObservableFuture<Response> observableFuture = RxHelper.observableFuture();
                     actionRequestBuilder.execute(new ActionListener<Response>() {
                         @Override
                         public void onResponse(Response response) {
-                            context.runOnContext(event -> handler.complete(response));
+                            context.runOnContext(event -> observableFuture.complete(response));
                         }
 
                         @Override
                         public void onFailure(Throwable e) {
-                            context.runOnContext(event -> handler.fail(e));
+                            context.runOnContext(event -> observableFuture.fail(e));
                         }
                     });
-                    return Observable.create(handler.subscribe);
+                    return observableFuture;
                 })
                 .doOnNext(response -> {
                     if (response instanceof SearchResponse) {

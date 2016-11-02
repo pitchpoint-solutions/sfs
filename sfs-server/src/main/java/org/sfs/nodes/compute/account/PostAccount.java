@@ -36,7 +36,7 @@ import rx.Observable;
 import rx.functions.Func1;
 
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.vo.ObjectPath.fromSfsRequest;
 
@@ -45,7 +45,7 @@ public class PostAccount implements Handler<SfsRequest> {
     @Override
     public void handle(final SfsRequest httpServerRequest) {
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdmin(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))

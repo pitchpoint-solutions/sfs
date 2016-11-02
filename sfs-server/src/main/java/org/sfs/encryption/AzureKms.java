@@ -59,7 +59,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.sfs.protobuf.AzureProtoBuff.CipherText;
 import static org.sfs.protobuf.AzureProtoBuff.CipherText.newBuilder;
 import static org.sfs.protobuf.AzureProtoBuff.CipherText.parseFrom;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static rx.Observable.defer;
 import static rx.Observable.using;
 
@@ -82,7 +82,7 @@ public class AzureKms implements Kms {
     public Observable<Void> start(VertxContext<Server> vertxContext,
                                   JsonObject config) {
 
-        return empty()
+        return aVoid()
                 .filter(aVoid -> started.compareAndSet(false, true))
                 .flatMap(aVoid -> {
                     executorService = newCachedThreadPool();
@@ -200,7 +200,7 @@ public class AzureKms implements Kms {
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .filter(aVoid -> started.compareAndSet(true, false))
                 .flatMap(aVoid -> {
                     if (properties != null) {
@@ -226,7 +226,7 @@ public class AzureKms implements Kms {
                             executorService = null;
                         }
                     }
-                    return empty();
+                    return aVoid();
                 })
                 .singleOrDefault(null);
     }

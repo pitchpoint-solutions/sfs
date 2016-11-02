@@ -16,10 +16,10 @@
 
 package org.sfs.util;
 
-import io.vertx.core.AsyncResultHandler;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.SingleAsyncResultSubscriber;
 import rx.Observable;
 
@@ -30,7 +30,6 @@ import java.util.concurrent.TimeUnit;
 import static java.lang.String.format;
 import static java.lang.System.currentTimeMillis;
 import static java.nio.file.Files.createFile;
-import static rx.Observable.create;
 
 public class FileSystemLock {
 
@@ -55,16 +54,16 @@ public class FileSystemLock {
     }
 
     public Observable<Void> lock(VertxContext<Server> vertxContext) {
-        AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
         lock(vertxContext, currentTimeMillis(), handler);
-        return create(handler.subscribe)
+        return handler
                 .map(aVoid -> {
                     name.toFile().deleteOnExit();
                     return null;
                 });
     }
 
-    private void lock(VertxContext<Server> vertxContext, long startTime, AsyncResultHandler<Void> handler) {
+    private void lock(VertxContext<Server> vertxContext, long startTime, ObservableFuture<Void> handler) {
         vertxContext.executeBlocking(
                 () -> {
                     try {

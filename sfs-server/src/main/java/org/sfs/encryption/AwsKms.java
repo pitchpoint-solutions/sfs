@@ -55,7 +55,7 @@ public class AwsKms implements Kms {
                                   JsonObject config) {
         AwsKms _this = this;
 
-        return Defer.empty()
+        return Defer.aVoid()
                 .filter(aVoid -> started.compareAndSet(false, true))
                 .flatMap(aVoid -> {
                     String keyStoreAwsKmsEndpoint = ConfigHelper.getFieldOrEnv(config, "keystore.aws.kms.endpoint");
@@ -147,7 +147,7 @@ public class AwsKms implements Kms {
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .filter(aVoid -> started.compareAndSet(true, false))
                 .flatMap(aVoid -> {
                     if (properties != null) {
@@ -164,7 +164,7 @@ public class AwsKms implements Kms {
                             return (Void) null;
                         });
                     }
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .singleOrDefault(null);
 

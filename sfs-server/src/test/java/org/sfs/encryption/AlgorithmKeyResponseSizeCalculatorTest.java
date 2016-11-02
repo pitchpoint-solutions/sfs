@@ -40,8 +40,8 @@ public class AlgorithmKeyResponseSizeCalculatorTest extends BaseTestVerticle {
         final byte[] secret = new byte[64];
 
         PrngRandom random = getCurrentInstance();
-        random.nextBytes(salt);
-        random.nextBytes(secret);
+        random.nextBytesBlocking(salt);
+        random.nextBytesBlocking(secret);
 
 
         for (AlgorithmDef algorithmDef : AlgorithmDef.values()) {
@@ -64,8 +64,8 @@ public class AlgorithmKeyResponseSizeCalculatorTest extends BaseTestVerticle {
         final byte[] secret = new byte[64];
 
         PrngRandom random = getCurrentInstance();
-        random.nextBytes(salt);
-        random.nextBytes(secret);
+        random.nextBytesBlocking(salt);
+        random.nextBytesBlocking(secret);
 
 
         Async async = context.async();

@@ -20,6 +20,8 @@ import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.logging.Logger;
+import io.vertx.core.logging.LoggerFactory;
 import org.elasticsearch.index.query.TermQueryBuilder;
 import org.sfs.Server;
 import org.sfs.SfsRequest;
@@ -30,8 +32,10 @@ import org.sfs.elasticsearch.ScanAndScrollStreamProducer;
 import org.sfs.elasticsearch.container.LoadAccountAndContainer;
 import org.sfs.filesystem.JournalFile;
 import org.sfs.filesystem.containerdump.DumpFileWriter;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.jobs.VerifyRepairAllContainerObjects;
 import org.sfs.rx.ConnectionCloseTerminus;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.HttpRequestValidationException;
 import org.sfs.validate.ValidateActionAdmin;
@@ -40,14 +44,15 @@ import org.sfs.validate.ValidateHeaderBetweenLong;
 import org.sfs.validate.ValidateHeaderExists;
 import org.sfs.validate.ValidateHeaderIsBase64Encoded;
 import org.sfs.validate.ValidateHeaderIsBoolean;
+import rx.Observable;
 
 import java.io.IOException;
+import java.util.Calendar;
 import java.util.List;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.io.BaseEncoding.base64;
 import static java.lang.Boolean.TRUE;
-import static java.lang.Long.parseLong;
 import static java.lang.String.format;
 import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
 import static java.net.HttpURLConnection.HTTP_OK;
@@ -55,11 +60,10 @@ import static java.nio.file.Files.write;
 import static java.nio.file.Paths.get;
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
 import static java.nio.file.StandardOpenOption.WRITE;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 import static org.sfs.filesystem.containerdump.DumpFileWriter.DUMP_FILE_NAME;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.RxHelper.executeBlocking;
 import static org.sfs.util.KeepAliveHttpServerResponse.DELIMITER_BUFFER;
 import static org.sfs.util.SfsHttpHeaders.X_SFS_COMPRESS;
@@ -67,16 +71,17 @@ import static org.sfs.util.SfsHttpHeaders.X_SFS_DEST_DIRECTORY;
 import static org.sfs.util.SfsHttpHeaders.X_SFS_KEEP_ALIVE_TIMEOUT;
 import static org.sfs.util.SfsHttpHeaders.X_SFS_SECRET;
 import static org.sfs.vo.ObjectPath.fromSfsRequest;
-import static rx.Observable.create;
 
 public class ExportContainer implements Handler<SfsRequest> {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ExportContainer.class);
 
     @Override
     public void handle(final SfsRequest httpServerRequest) {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdmin(httpServerRequest))
                 .map(aVoid -> httpServerRequest)
@@ -94,11 +99,11 @@ public class ExportContainer implements Handler<SfsRequest> {
                     boolean compress = "true".equalsIgnoreCase(headers.get(X_SFS_COMPRESS));
                     byte[] secret = headers.contains(X_SFS_SECRET) ? base64().decode(headers.get(X_SFS_SECRET)) : null;
 
-                    return empty()
+                    return aVoid()
                             .flatMap(aVoid -> {
-                                AsyncResultMemoizeHandler<Boolean, Boolean> handler = new AsyncResultMemoizeHandler<>();
-                                vertxContext.vertx().fileSystem().exists(destDirectory, handler);
-                                return create(handler.subscribe)
+                                ObservableFuture<Boolean> handler = RxHelper.observableFuture();
+                                vertxContext.vertx().fileSystem().exists(destDirectory, handler.toHandler());
+                                return handler
                                         .map(destDirectoryExists -> {
                                             if (!TRUE.equals(destDirectoryExists)) {
                                                 JsonObject jsonObject = new JsonObject()
@@ -111,9 +116,9 @@ public class ExportContainer implements Handler<SfsRequest> {
                                         });
                             })
                             .flatMap(oVoid -> {
-                                AsyncResultMemoizeHandler<List<String>, List<String>> handler = new AsyncResultMemoizeHandler<>();
-                                vertxContext.vertx().fileSystem().readDir(destDirectory, handler);
-                                return create(handler.subscribe)
+                                ObservableFuture<List<String>> handler = RxHelper.observableFuture();
+                                vertxContext.vertx().fileSystem().readDir(destDirectory, handler.toHandler());
+                                return handler
                                         .map(listing -> {
                                             if (listing.size() > 0) {
                                                 JsonObject jsonObject = new JsonObject()
@@ -126,6 +131,9 @@ public class ExportContainer implements Handler<SfsRequest> {
                                         });
                             })
                             .flatMap(aVoid -> {
+
+                                LOGGER.info("Exporting container " + persistentContainer.getId() + " to " + destDirectory);
+
                                 JournalFile dumpFile = new JournalFile(get(destDirectory).resolve(DUMP_FILE_NAME));
                                 return dumpFile.open(vertxContext.vertx())
                                         .flatMap(aVoid1 -> dumpFile.enableWrites(vertxContext.vertx()))
@@ -133,17 +141,20 @@ public class ExportContainer implements Handler<SfsRequest> {
                             })
                             .flatMap(dumpFile -> {
 
-                                final long keepAliveTimeout = parseLong(headers.contains(X_SFS_KEEP_ALIVE_TIMEOUT) ? headers.get(X_SFS_KEEP_ALIVE_TIMEOUT) : "10000");
-                                httpServerRequest.startProxyKeepAlive(keepAliveTimeout, MILLISECONDS);
+                                httpServerRequest.startProxyKeepAlive();
 
                                 Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                                 String containerId = persistentContainer.getId();
                                 String objectIndex = elasticsearch.objectIndex(persistentContainer.getName());
 
-                                TermQueryBuilder objectQuery = termQuery("container_id", containerId);
+                                long now = System.currentTimeMillis() - VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD;
+                                Calendar consistencyThreshold = Calendar.getInstance();
+                                consistencyThreshold.setTimeInMillis(now);
+
+                                TermQueryBuilder containerIdQuery = termQuery("container_id", containerId);
 
                                 ScanAndScrollStreamProducer producer =
-                                        new ScanAndScrollStreamProducer(vertxContext, objectQuery)
+                                        new ScanAndScrollStreamProducer(vertxContext, containerIdQuery)
                                                 .setIndeces(objectIndex)
                                                 .setTypes(elasticsearch.defaultType())
                                                 .setReturnVersion(true);
@@ -174,7 +185,12 @@ public class ExportContainer implements Handler<SfsRequest> {
                                             throw new RuntimeException(e);
                                         }
                                     })
-                            );
+                            )
+                            .doOnNext(aVoid -> LOGGER.info("Done exporting container " + persistentContainer.getId() + " to " + destDirectory))
+                            .onErrorResumeNext(throwable -> {
+                                LOGGER.info("Failed exporting container " + persistentContainer.getId() + " to " + destDirectory, throwable);
+                                return Observable.error(throwable);
+                            });
 
                 })
                 .map(new ToVoid<>())

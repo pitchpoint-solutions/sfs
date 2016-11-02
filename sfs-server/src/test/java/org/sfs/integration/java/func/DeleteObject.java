@@ -20,7 +20,8 @@ import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -92,14 +93,14 @@ public class DeleteObject implements Func1<Void, Observable<HttpClientResponse>>
                                     .append("=")
                                     .append(on(',').join(version));
                         }
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         HttpClientRequest httpClientRequest =
-                                httpClient.delete(urlBuilder.toString(), handler)
+                                httpClient.delete(urlBuilder.toString(), handler::complete)
                                         .exceptionHandler(handler::fail)
                                         .setTimeout(5000)
                                         .putHeader(AUTHORIZATION, s);
                         httpClientRequest.end();
-                        return create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

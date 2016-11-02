@@ -20,4 +20,5 @@ import io.vertx.core.streams.ReadStream;
 
 public interface StreamProducer<T> extends ReadStream<T> {
 
+    void abort();
 }

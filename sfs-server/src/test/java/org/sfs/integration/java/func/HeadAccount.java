@@ -16,18 +16,17 @@
 
 package org.sfs.integration.java.func;
 
-import io.vertx.core.Handler;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
 import static com.google.common.net.HttpHeaders.AUTHORIZATION;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
-import static rx.Observable.create;
 
 public class HeadAccount implements Func1<Void, Observable<HttpClientResponse>> {
 
@@ -48,18 +47,13 @@ public class HeadAccount implements Func1<Void, Observable<HttpClientResponse>> 
                 .flatMap(new Func1<String, Observable<HttpClientResponse>>() {
                     @Override
                     public Observable<HttpClientResponse> call(String s) {
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
-                        httpClient.head("/openstackswift001/" + accountName, handler)
-                                .exceptionHandler(new Handler<Throwable>() {
-                                    @Override
-                                    public void handle(Throwable event) {
-                                        handler.fail(event);
-                                    }
-                                })
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
+                        httpClient.head("/openstackswift001/" + accountName, handler::complete)
+                                .exceptionHandler(handler::fail)
                                 .setTimeout(10000)
                                 .putHeader(AUTHORIZATION, s)
                                 .end();
-                        return create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

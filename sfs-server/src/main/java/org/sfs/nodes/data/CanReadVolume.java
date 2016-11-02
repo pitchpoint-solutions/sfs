@@ -26,12 +26,13 @@ import org.sfs.filesystem.volume.VolumeManager;
 import org.sfs.nodes.LocalNode;
 import org.sfs.rx.Terminus;
 import org.sfs.validate.ValidateActionAdminOrSystem;
+import org.sfs.validate.ValidateNodeIsDataNode;
 import org.sfs.validate.ValidateParamExists;
 
 import static java.lang.Boolean.TRUE;
 import static java.net.HttpURLConnection.HTTP_NOT_ACCEPTABLE;
 import static java.net.HttpURLConnection.HTTP_OK;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.SfsHttpQueryParams.VOLUME;
 
 public class CanReadVolume implements Handler<SfsRequest> {
@@ -41,9 +42,10 @@ public class CanReadVolume implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
+                .map(new ValidateNodeIsDataNode<>(vertxContext))
                 .map(aVoid -> httpServerRequest)
                 .map(new ValidateParamExists(VOLUME))
                 .flatMap(httpServerRequest1 -> {

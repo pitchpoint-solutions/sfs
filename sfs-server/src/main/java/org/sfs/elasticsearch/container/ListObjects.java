@@ -17,6 +17,8 @@
 package org.sfs.elasticsearch.container;
 
 import com.google.common.base.Optional;
+import com.google.common.base.Predicates;
+import com.google.common.collect.FluentIterable;
 import io.vertx.core.MultiMap;
 import io.vertx.core.logging.Logger;
 import org.elasticsearch.action.search.ClearScrollRequestBuilder;
@@ -31,7 +33,6 @@ import org.sfs.auth.AuthProviderService;
 import org.sfs.elasticsearch.Elasticsearch;
 import org.sfs.elasticsearch.Jsonify;
 import org.sfs.rx.Defer;
-import org.sfs.rx.ToVoid;
 import org.sfs.util.HttpRequestValidationException;
 import org.sfs.validate.ValidateVersionHasSegments;
 import org.sfs.validate.ValidateVersionIsReadable;
@@ -72,9 +73,7 @@ import static org.sfs.util.UrlScaper.unescape;
 import static org.sfs.vo.ObjectPath.DELIMITER_LENGTH;
 import static org.sfs.vo.PersistentObject.fromSearchHit;
 import static org.sfs.vo.Segment.EMPTY_MD5;
-import static rx.Observable.empty;
 import static rx.Observable.error;
-import static rx.Observable.from;
 import static rx.Observable.just;
 
 public class ListObjects implements Func1<PersistentContainer, Observable<ObjectList>> {
@@ -82,12 +81,10 @@ public class ListObjects implements Func1<PersistentContainer, Observable<Object
     private static final Logger LOGGER = getLogger(ListObjects.class);
     private final SfsRequest sfsRequest;
     private final VertxContext<Server> vertxContext;
-    private final AuthProviderService authProviderService;
 
     public ListObjects(SfsRequest sfsRequest) {
         this.sfsRequest = sfsRequest;
         this.vertxContext = sfsRequest.vertxContext();
-        this.authProviderService = vertxContext.verticle().authProviderService();
     }
 
     @Override
@@ -162,22 +159,20 @@ public class ListObjects implements Func1<PersistentContainer, Observable<Object
 
                     SearchHits hits = searchResponse.getHits();
 
-                    return toIterable(container, prefix, delimiter, marker, endMarker, hits)
-                            .doOnNext(listedObject -> {
-                                String id = listedObject.getName();
-                                ListedObject existing = listedObjects.get(id);
-                                if (existing == null) {
-                                    listedObjects.put(id, listedObject);
-                                } else {
-                                    existing.setLength(existing.getLength() + listedObject.getLength());
-                                }
-                                if (listedObjects.size() > limit) {
-                                    listedObjects.pollLastEntry();
-                                }
-                            })
-                            .count()
-                            .map(new ToVoid<>())
-                            .flatMap(aVoid -> scroll(container, prefix, delimiter, marker, endMarker, limit, elasticsearch, searchResponse.getScrollId(), listedObjects));
+                    for (ListedObject listedObject : toIterable(container, prefix, delimiter, marker, endMarker, hits)) {
+                        String id = listedObject.getName();
+                        ListedObject existing = listedObjects.get(id);
+                        if (existing == null) {
+                            listedObjects.put(id, listedObject);
+                        } else {
+                            existing.setLength(existing.getLength() + listedObject.getLength());
+                        }
+                        if (listedObjects.size() > limit) {
+                            listedObjects.pollLastEntry();
+                        }
+                    }
+
+                    return scroll(container, prefix, delimiter, marker, endMarker, limit, elasticsearch, searchResponse.getScrollId(), listedObjects);
                 });
     }
 
@@ -209,22 +204,19 @@ public class ListObjects implements Func1<PersistentContainer, Observable<Object
                     SearchHits hits = searchResponse.getHits();
                     int numberOfHits = hits.getHits().length;
                     if (numberOfHits > 0) {
-                        return toIterable(container, prefix, delimiter, marker, endMarker, hits)
-                                .doOnNext(listedObject -> {
-                                    String id = listedObject.getName();
-                                    ListedObject existing = listedObjects.get(id);
-                                    if (existing == null) {
-                                        listedObjects.put(id, listedObject);
-                                    } else {
-                                        existing.setLength(existing.getLength() + listedObject.getLength());
-                                    }
-                                    if (listedObjects.size() > limit) {
-                                        listedObjects.pollLastEntry();
-                                    }
-                                })
-                                .count()
-                                .map(new ToVoid<>())
-                                .flatMap(aVoid -> scroll(container, prefix, delimiter, marker, endMarker, limit, elasticsearch, searchResponse.getScrollId(), listedObjects));
+                        for (ListedObject listedObject : toIterable(container, prefix, delimiter, marker, endMarker, hits)) {
+                            String id = listedObject.getName();
+                            ListedObject existing = listedObjects.get(id);
+                            if (existing == null) {
+                                listedObjects.put(id, listedObject);
+                            } else {
+                                existing.setLength(existing.getLength() + listedObject.getLength());
+                            }
+                            if (listedObjects.size() > limit) {
+                                listedObjects.pollLastEntry();
+                            }
+                        }
+                        return scroll(container, prefix, delimiter, marker, endMarker, limit, elasticsearch, searchResponse.getScrollId(), listedObjects);
                     } else {
                         return clearScroll(elasticsearch, searchResponse.getScrollId());
                     }
@@ -244,98 +236,92 @@ public class ListObjects implements Func1<PersistentContainer, Observable<Object
                 .map(clearScrollResponseOptional -> null);
     }
 
-    protected Observable<ListedObject> toIterable(final PersistentContainer container, final String prefix, final String delimiter, final String marker, final String endMarker, SearchHits searchHits) {
+    protected Iterable<ListedObject> toIterable(final PersistentContainer container, final String prefix, final String delimiter, final String marker, final String endMarker, SearchHits searchHits) {
         // container id looks like /account/container
         // object id looks like /account/container/a/b/c/1/2/3
         // which makes the start index of the object name is the length of the
         // container id + 1
         int objectNameStartIndex = container.getId().length() + DELIMITER_LENGTH;
-        return
-                from(searchHits)
-                        .flatMap(searchHit -> {
+        return FluentIterable.from(searchHits)
+                .transform(searchHit -> {
 
-                            String objectId = searchHit.getId();
-                            objectId = objectId.substring(objectNameStartIndex, objectId.length());
-                            boolean trimmed = false;
-                            if (delimiter != null) {
-                                int prefixLength = prefix != null ? prefix.length() : 0;
-                                int objectIdLength = objectId.length();
-                                if (objectIdLength > prefixLength) {
-                                    int indexOfDelimiter = objectId.indexOf(delimiter, prefixLength);
-                                    if (indexOfDelimiter <= objectIdLength && indexOfDelimiter >= 0) {
-                                        objectId = objectId.substring(0, indexOfDelimiter);
-                                        trimmed = true;
-                                    }
-                                }
+                    String objectId = searchHit.getId();
+                    objectId = objectId.substring(objectNameStartIndex, objectId.length());
+                    boolean trimmed = false;
+                    if (delimiter != null) {
+                        int prefixLength = prefix != null ? prefix.length() : 0;
+                        int objectIdLength = objectId.length();
+                        if (objectIdLength > prefixLength) {
+                            int indexOfDelimiter = objectId.indexOf(delimiter, prefixLength);
+                            if (indexOfDelimiter <= objectIdLength && indexOfDelimiter >= 0) {
+                                objectId = objectId.substring(0, indexOfDelimiter);
+                                trimmed = true;
+                            }
+                        }
+                    }
+
+                    boolean isInRange = (marker == null || objectId.compareTo(marker) > 0)
+                            && (endMarker == null || objectId.compareTo(endMarker) < 0);
+
+                    if (isInRange) {
+                        PersistentObject persistentObject = fromSearchHit(container, searchHit);
+                        Optional<TransientVersion> oTransientVersion = persistentObject.getNewestVersion();
+
+                        if (oTransientVersion.isPresent()) {
+                            TransientVersion transientVersion = oTransientVersion.get();
+
+                            boolean finalTrimmed = trimmed;
+                            String finalObjectId = objectId;
+
+                            // TODO clean this up!. Make GET object and HEAD object share the same logic
+                            try {
+                                new ValidateVersionNotDeleted().call(transientVersion);
+                                new ValidateVersionNotDeleteMarker().call(transientVersion);
+                                new ValidateVersionNotExpired().call(transientVersion);
+                                new ValidateVersionHasSegments().call(transientVersion);
+                                new ValidateVersionSegmentsHasData().call(transientVersion);
+                                new ValidateVersionIsReadable().call(transientVersion);
+                            } catch (HttpRequestValidationException e) {
+                                LOGGER.debug("Version " + transientVersion.getId() + " failed validation", e);
+                                return null;
                             }
 
-                            boolean isInRange = (marker == null || objectId.compareTo(marker) > 0)
-                                    && (endMarker == null || objectId.compareTo(endMarker) < 0);
 
-                            if (isInRange) {
-                                PersistentObject persistentObject = fromSearchHit(container, searchHit);
-                                Optional<TransientVersion> oTransientVersion = persistentObject.getNewestVersion();
+                            Optional<byte[]> oEtag = transientVersion.calculateMd5();
+                            Calendar lastModified = transientVersion.getUpdateTs();
+                            Optional<Long> oContentLength = transientVersion.calculateLength();
+                            Optional<String> oContentType = transientVersion.getContentType();
 
-                                if (oTransientVersion.isPresent()) {
-                                    TransientVersion transientVersion = oTransientVersion.get();
+                            ListedObject listedObject = new ListedObject(finalObjectId);
 
-                                    boolean finalTrimmed = trimmed;
-                                    String finalObjectId = objectId;
-                                    return authProviderService.canObjectRead(sfsRequest, transientVersion)
-                                            .filter(canDo -> canDo)
-                                            .filter(canDo -> {
-                                                // TODO clean this up!. Make GET object and HEAD object share the same logic
-                                                try {
-                                                    new ValidateVersionNotDeleted().call(transientVersion);
-                                                    new ValidateVersionNotDeleteMarker().call(transientVersion);
-                                                    new ValidateVersionNotExpired().call(transientVersion);
-                                                    new ValidateVersionHasSegments().call(transientVersion);
-                                                    new ValidateVersionSegmentsHasData().call(transientVersion);
-                                                    new ValidateVersionIsReadable().call(transientVersion);
-                                                    return true;
-                                                } catch (HttpRequestValidationException e) {
-                                                    LOGGER.debug("Version " + transientVersion.getId() + " failed validation", e);
-                                                    return false;
-                                                }
-                                            })
-                                            .map(canDo -> {
-                                                Optional<byte[]> oEtag = transientVersion.calculateMd5();
-                                                Calendar lastModified = transientVersion.getUpdateTs();
-                                                Optional<Long> oContentLength = transientVersion.calculateLength();
-                                                Optional<String> oContentType = transientVersion.getContentType();
-
-                                                ListedObject listedObject = new ListedObject(finalObjectId);
-
-                                                if (oEtag.isPresent()) {
-                                                    listedObject.setEtag(oEtag.get());
-                                                } else {
-                                                    listedObject.setEtag(EMPTY_MD5);
-                                                }
-
-                                                listedObject.setLastModified(lastModified);
-
-                                                if (finalTrimmed) {
-                                                    listedObject.setContentType("application/directory");
-                                                } else if (oContentType.isPresent()) {
-                                                    listedObject.setContentType(oContentType.get());
-                                                } else {
-                                                    listedObject.setContentType(OCTET_STREAM.toString());
-                                                }
-
-                                                if (oContentLength.isPresent()) {
-                                                    listedObject.setLength(oContentLength.get());
-                                                } else {
-                                                    listedObject.setLength(0);
-                                                }
-
-                                                return listedObject;
-                                            });
-
-
-                                }
+                            if (oEtag.isPresent()) {
+                                listedObject.setEtag(oEtag.get());
+                            } else {
+                                listedObject.setEtag(EMPTY_MD5);
                             }
-                            return empty();
-                        });
+
+                            listedObject.setLastModified(lastModified);
+
+                            if (finalTrimmed) {
+                                listedObject.setContentType("application/directory");
+                            } else if (oContentType.isPresent()) {
+                                listedObject.setContentType(oContentType.get());
+                            } else {
+                                listedObject.setContentType(OCTET_STREAM.toString());
+                            }
+
+                            if (oContentLength.isPresent()) {
+                                listedObject.setLength(oContentLength.get());
+                            } else {
+                                listedObject.setLength(0);
+                            }
+
+                            return listedObject;
+                        }
+                    }
+                    return null;
+                })
+                .filter(Predicates.notNull());
     }
 
     public static class ListedObject {

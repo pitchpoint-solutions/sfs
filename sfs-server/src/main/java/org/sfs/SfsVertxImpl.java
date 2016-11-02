@@ -44,6 +44,7 @@ import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
 import io.vertx.core.shareddata.SharedData;
 import io.vertx.core.spi.VerticleFactory;
+import org.sfs.rx.Defer;
 import rx.Observable;
 import rx.Subscriber;
 import rx.functions.Func0;

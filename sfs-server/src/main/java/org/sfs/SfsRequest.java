@@ -33,7 +33,8 @@ import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.net.NetSocket;
 import io.vertx.core.net.SocketAddress;
 import org.sfs.auth.UserAndRole;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.util.KeepAliveHttpServerResponse;
 import rx.Observable;
 
@@ -42,6 +43,9 @@ import javax.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.sfs.util.SfsHttpHeaders.X_SFS_KEEP_ALIVE_TIMEOUT;
 
 public class SfsRequest implements HttpServerRequest {
 
@@ -59,6 +63,13 @@ public class SfsRequest implements HttpServerRequest {
         this.responseWrapper = new ResponseWrapper(this);
     }
 
+    public SfsRequest startProxyKeepAlive() {
+        MultiMap headers = httpServerRequest.headers();
+        long keepAliveTimeout = Long.parseLong(headers.contains(X_SFS_KEEP_ALIVE_TIMEOUT) ? headers.get(X_SFS_KEEP_ALIVE_TIMEOUT) : "10000");
+        startProxyKeepAlive(keepAliveTimeout, MILLISECONDS);
+        return this;
+    }
+
     public SfsRequest startProxyKeepAlive(long timeout, TimeUnit timeUnit) {
         Preconditions.checkState(!wroteData, "HttpServerResponse has already been used");
         if (keepAliveHttpServerResponse == null) {
@@ -69,9 +80,9 @@ public class SfsRequest implements HttpServerRequest {
 
     public Observable<Void> stopKeepAlive() {
         if (keepAliveHttpServerResponse != null) {
-            ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
+            ObservableFuture<Void> handler = RxHelper.observableFuture();
             keepAliveHttpServerResponse.stopKeepAlive(handler);
-            return Observable.create(handler.subscribe);
+            return handler;
         } else {
             return Observable.just(null);
         }

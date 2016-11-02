@@ -16,12 +16,12 @@
 
 package org.sfs.integration.java.func;
 
-import io.vertx.core.Handler;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -29,7 +29,6 @@ import static com.google.common.net.HttpHeaders.AUTHORIZATION;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
 import static org.sfs.util.SfsHttpQueryParams.VERSION;
-import static rx.Observable.create;
 
 public class GetObject implements Func1<Void, Observable<HttpClientResponse>> {
 
@@ -72,19 +71,14 @@ public class GetObject implements Func1<Void, Observable<HttpClientResponse>> {
                                     .append("=")
                                     .append(version);
                         }
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         HttpClientRequest httpClientRequest =
-                                httpClient.get(urlBuilder.toString(), handler)
-                                        .exceptionHandler(new Handler<Throwable>() {
-                                            @Override
-                                            public void handle(Throwable event) {
-                                                handler.fail(event);
-                                            }
-                                        })
+                                httpClient.get(urlBuilder.toString(), handler::complete)
+                                        .exceptionHandler(handler::fail)
                                         .setTimeout(5000)
                                         .putHeader(AUTHORIZATION, s);
                         httpClientRequest.end();
-                        return create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

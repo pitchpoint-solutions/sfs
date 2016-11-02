@@ -17,25 +17,37 @@
 package org.sfs.nodes;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.net.HostAndPort;
+import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.VolumeManager;
+import org.sfs.rx.Defer;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.Sleep;
+import org.sfs.util.HttpClientRequestAndResponse;
 import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
+import rx.Scheduler;
+import rx.exceptions.CompositeException;
+import rx.functions.Func1;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.collect.FluentIterable.from;
 import static com.google.common.collect.ImmutableList.copyOf;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.nio.file.Files.createDirectories;
@@ -43,13 +55,12 @@ import static java.nio.file.Files.createFile;
 import static java.nio.file.Files.readAllBytes;
 import static java.nio.file.Files.write;
 import static java.nio.file.Paths.get;
-import static java.util.Collections.singletonList;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class Nodes {
 
     private static final Logger LOGGER = getLogger(Nodes.class);
-    private int numberOfObjectReplicasReplicas = 1;
+    private int numberOfObjectCopies = 1;
     // if true a primary and replica copies of volume data
     // can exist on the same node
     private boolean allowSameNode = false;
@@ -84,12 +95,14 @@ public class Nodes {
             final boolean dataNode,
             final boolean masterNode) {
 
-        checkArgument(numberOfObjectReplicas > 0, "Replicas must be > 0");
+        checkArgument(numberOfObjectReplicas >= 0, "Replicas must be > 0");
         checkArgument(nodeStatsRefreshInterval >= 1000, "RefreshInterval must be greater than 1000");
 
         this.dataNode = dataNode;
         this.masterNode = masterNode;
-        this.numberOfObjectReplicasReplicas = numberOfObjectReplicas;
+        // add one since the parameter asks for the number of replicas and since one copy
+        // always needs to exist the total number of objects copies is 1 + numberOfObjectReplicas
+        this.numberOfObjectCopies = numberOfObjectReplicas + 1;
         this.maxPoolSize = maxPoolSize;
         this.connectTimeout = connectTimeout;
         this.responseTimeout = responseTimeout;
@@ -99,7 +112,7 @@ public class Nodes {
         this.clusterHosts = copyOf(clusterHosts);
         this.nodeStatsRefreshInterval = nodeStatsRefreshInterval;
 
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> initNode(vertxContext)
                         .doOnNext(n -> {
                             nodeId = n;
@@ -108,7 +121,7 @@ public class Nodes {
                     if (dataNode) {
                         return volumeManager.open(vertxContext);
                     } else {
-                        return empty();
+                        return aVoid();
                     }
                 })
                 .single()
@@ -129,12 +142,12 @@ public class Nodes {
         return clusterHosts;
     }
 
-    public int getNumberOfObjectReplicasReplicas() {
-        return numberOfObjectReplicasReplicas;
+    public int getNumberOfObjectCopies() {
+        return numberOfObjectCopies;
     }
 
-    public Nodes setNumberOfObjectReplicasReplicas(int numberOfObjectReplicasReplicas) {
-        this.numberOfObjectReplicasReplicas = numberOfObjectReplicasReplicas;
+    public Nodes setNumberOfObjectCopies(int numberOfObjectCopies) {
+        this.numberOfObjectCopies = numberOfObjectCopies;
         return this;
     }
 
@@ -218,7 +231,7 @@ public class Nodes {
 
     public Observable<Void> close(VertxContext<Server> vertxContext) {
         String aNodeId = nodeId;
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> {
                     VolumeManager v = volumeManager;
                     volumeManager = null;
@@ -226,19 +239,19 @@ public class Nodes {
                         return v.close(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return empty();
+                                    return aVoid();
                                 });
                     }
-                    return empty();
+                    return aVoid();
 
                 })
                 .onErrorResumeNext(throwable -> {
                     LOGGER.warn("Handling Exception", throwable);
-                    return empty();
+                    return aVoid();
                 })
                 .onErrorResumeNext(throwable -> {
                     LOGGER.warn("Handling Exception", throwable);
-                    return empty();
+                    return aVoid();
                 })
                 .doOnNext(aVoid -> {
                     nodeId = null;
@@ -246,28 +259,93 @@ public class Nodes {
                 });
     }
 
-    public Iterable<XNode> createNodes(final VertxContext<Server> vertxContext, TransientServiceDef serviceDef) {
-        boolean localNode = false;
-        for (HostAndPort targetNodeAddress : serviceDef.getPublishAddresses()) {
-            if (publishAddresses.contains(targetNodeAddress)) {
-                localNode = true;
-                break;
-            }
-        }
-        if (localNode) {
-            return singletonList(new LocalNode(vertxContext, volumeManager));
-        } else {
-            return from(serviceDef.getPublishAddresses())
-                    .transform(input -> new RemoteNode(vertxContext, responseTimeout, input));
-        }
+    public Observable<HttpClientRequestAndResponse> connectFirstAvailable(Vertx vertx, Collection<HostAndPort> hostAndPorts, Func1<HostAndPort, Observable<HttpClientRequestAndResponse>> supplier) {
+        Scheduler scheduler = RxHelper.scheduler(vertx.getOrCreateContext());
+        return Observable.defer(() -> {
+            Preconditions.checkArgument(!hostAndPorts.isEmpty(), "hostAndPorts cannot be empty");
+            AtomicReference<HttpClientRequestAndResponse> ref = new AtomicReference<>();
+            List<Throwable> errors = new ArrayList<>();
+            return RxHelper.iterate(
+                    vertx,
+                    hostAndPorts,
+                    hostAndPort ->
+                            Defer.aVoid()
+                                    .flatMap(aVoid -> supplier.call(hostAndPort))
+                                    .onErrorResumeNext(throwable -> {
+                                        errors.clear();
+                                        LOGGER.debug("Retry delay 100ms");
+                                        return Defer.aVoid()
+                                                .delay(100, TimeUnit.MILLISECONDS, scheduler)
+                                                .flatMap(aVoid -> supplier.call(hostAndPort));
+                                    })
+                                    .onErrorResumeNext(throwable -> {
+                                        errors.clear();
+                                        LOGGER.debug("Retry delay 100ms");
+                                        return Defer.aVoid()
+                                                .delay(100, TimeUnit.MILLISECONDS, scheduler)
+                                                .flatMap(aVoid -> supplier.call(hostAndPort));
+                                    })
+                                    .onErrorResumeNext(throwable -> {
+                                        errors.clear();
+                                        LOGGER.debug("Retry delay 200ms");
+                                        return Defer.aVoid()
+                                                .delay(200, TimeUnit.MILLISECONDS, scheduler)
+                                                .flatMap(aVoid -> supplier.call(hostAndPort));
+                                    })
+                                    .onErrorResumeNext(throwable -> {
+                                        errors.clear();
+                                        LOGGER.debug("Retry delay 300ms");
+                                        return Defer.aVoid()
+                                                .delay(300, TimeUnit.MILLISECONDS, scheduler)
+                                                .flatMap(aVoid -> supplier.call(hostAndPort));
+                                    })
+                                    .onErrorResumeNext(throwable -> {
+                                        errors.clear();
+                                        LOGGER.debug("Retry delay 500ms");
+                                        return Defer.aVoid()
+                                                .delay(500, TimeUnit.MILLISECONDS, scheduler)
+                                                .flatMap(aVoid -> supplier.call(hostAndPort));
+                                    })
+                                    .doOnNext(httpClientRequestAndResponseAction1 -> Preconditions.checkState(ref.compareAndSet(null, httpClientRequestAndResponseAction1), "Already set"))
+                                    .map(httpClientRequestAndResponse -> false)
+                                    .onErrorResumeNext(throwable -> {
+                                        LOGGER.warn("Handling connect failure to " + hostAndPort, throwable);
+                                        errors.add(throwable);
+                                        return Defer.just(true);
+                                    }))
+                    .map(_continue -> {
+                        HttpClientRequestAndResponse httpClientRequestAndResponse = ref.get();
+                        if (httpClientRequestAndResponse == null) {
+                            Preconditions.checkState(!errors.isEmpty(), "Errors cannot be empty");
+                            throw new CompositeException(errors);
+                        } else {
+                            return httpClientRequestAndResponse;
+                        }
+                    });
+        });
     }
 
-    public XNode createNode(final VertxContext<Server> vertxContext, HostAndPort hostAndPort) {
-        if (publishAddresses.contains(hostAndPort)) {
-            return new LocalNode(vertxContext, volumeManager);
-        } else {
-            return new RemoteNode(vertxContext, responseTimeout, hostAndPort);
-        }
+    public XNode remoteNode(VertxContext<Server> vertxContext, TransientServiceDef serviceDef) {
+        return remoteNode(vertxContext, serviceDef.getPublishAddresses());
     }
 
+    public XNode remoteNode(VertxContext<Server> vertxContext, HostAndPort hostAndPort) {
+        return remoteNode(vertxContext, Collections.singletonList(hostAndPort));
+    }
+
+    public XNode remoteNode(VertxContext<Server> vertxContext, Collection<HostAndPort> hostAndPorts) {
+        return new RemoteNode(vertxContext, responseTimeout, hostAndPorts);
+    }
+
+    public MasterNode remoteMasterNode(VertxContext<Server> vertxContext, TransientServiceDef serviceDef) {
+        return remoteMasterNode(vertxContext, serviceDef.getPublishAddresses());
+    }
+
+    public MasterNode remoteMasterNode(VertxContext<Server> vertxContext, HostAndPort hostAndPort) {
+        return remoteMasterNode(vertxContext, Collections.singletonList(hostAndPort));
+    }
+
+    public MasterNode remoteMasterNode(VertxContext<Server> vertxContext, Collection<HostAndPort> hostAndPorts) {
+        return new RemoteMasterNode(vertxContext, responseTimeout, hostAndPorts);
+    }
 }

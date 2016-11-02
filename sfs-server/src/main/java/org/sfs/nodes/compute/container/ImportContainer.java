@@ -41,11 +41,10 @@ import org.sfs.io.InflaterEndableWriteStream;
 import org.sfs.io.PipedEndableWriteStream;
 import org.sfs.io.PipedReadStream;
 import org.sfs.nodes.all.segment.AcknowledgeSegment;
-import org.sfs.nodes.all.segment.VerifySegmentQuick;
-import org.sfs.nodes.compute.object.PruneObject;
 import org.sfs.nodes.compute.object.WriteNewSegment;
-import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.ConnectionCloseTerminus;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.HttpRequestValidationException;
 import org.sfs.validate.ValidateActionAdmin;
@@ -89,10 +88,8 @@ import static java.net.HttpURLConnection.HTTP_INTERNAL_ERROR;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static java.nio.file.Paths.get;
 import static java.util.Calendar.getInstance;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.sfs.encryption.AlgorithmDef.fromNameIfExists;
 import static org.sfs.filesystem.containerdump.DumpFileWriter.DUMP_FILE_NAME;
-import static org.sfs.nodes.compute.object.PutObject.validateSegment;
 import static org.sfs.protobuf.XVolume.XDumpFile.CompressionType;
 import static org.sfs.protobuf.XVolume.XDumpFile.CompressionType.DEFLATE;
 import static org.sfs.protobuf.XVolume.XDumpFile.CompressionType.NONE;
@@ -101,7 +98,7 @@ import static org.sfs.protobuf.XVolume.XDumpFile.Header;
 import static org.sfs.protobuf.XVolume.XDumpFile.Header.Type;
 import static org.sfs.protobuf.XVolume.XDumpFile.Header.Type.VERSION_01;
 import static org.sfs.protobuf.XVolume.XDumpFile.Version01;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.rx.RxHelper.combineSinglesDelayError;
 import static org.sfs.util.ExceptionHelper.unwrapCause;
@@ -113,7 +110,6 @@ import static org.sfs.util.SfsHttpHeaders.X_SFS_SRC_DIRECTORY;
 import static org.sfs.vo.ObjectPath.DELIMITER;
 import static org.sfs.vo.ObjectPath.fromPaths;
 import static org.sfs.vo.ObjectPath.fromSfsRequest;
-import static rx.Observable.create;
 import static rx.Observable.error;
 
 public class ImportContainer implements Handler<SfsRequest> {
@@ -125,7 +121,7 @@ public class ImportContainer implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdmin(httpServerRequest))
                 .map(aVoid -> httpServerRequest)
@@ -151,11 +147,11 @@ public class ImportContainer implements Handler<SfsRequest> {
                         skipPositions = new HashSet<>(0);
                     }
 
-                    return empty()
+                    return aVoid()
                             .flatMap(aVoid -> {
-                                AsyncResultMemoizeHandler<Boolean, Boolean> handler = new AsyncResultMemoizeHandler<>();
-                                vertxContext.vertx().fileSystem().exists(importDirectory, handler);
-                                return create(handler.subscribe)
+                                ObservableFuture<Boolean> handler = RxHelper.observableFuture();
+                                vertxContext.vertx().fileSystem().exists(importDirectory, handler.toHandler());
+                                return handler
                                         .map(destDirectoryExists -> {
                                             if (!TRUE.equals(destDirectoryExists)) {
                                                 JsonObject jsonObject = new JsonObject()
@@ -168,9 +164,9 @@ public class ImportContainer implements Handler<SfsRequest> {
                                         });
                             })
                             .flatMap(oVoid -> {
-                                AsyncResultMemoizeHandler<List<String>, List<String>> handler = new AsyncResultMemoizeHandler<>();
-                                vertxContext.vertx().fileSystem().readDir(importDirectory, handler);
-                                return create(handler.subscribe)
+                                ObservableFuture<List<String>> handler = RxHelper.observableFuture();
+                                vertxContext.vertx().fileSystem().readDir(importDirectory, handler.toHandler());
+                                return handler
                                         .map(listing -> {
                                             if (listing.size() <= 0) {
                                                 JsonObject jsonObject = new JsonObject()
@@ -183,6 +179,9 @@ public class ImportContainer implements Handler<SfsRequest> {
                                         });
                             })
                             .flatMap(aVoid -> {
+
+                                LOGGER.info("Importing into container " + targetPersistentContainer.getId() + " from " + importDirectory);
+
                                 JournalFile journalFile = new JournalFile(get(importDirectory).resolve(DUMP_FILE_NAME));
                                 return journalFile.open(vertxContext.vertx())
                                         .map(aVoid1 -> journalFile);
@@ -238,8 +237,7 @@ public class ImportContainer implements Handler<SfsRequest> {
                                 byte[] secret = importStartState.getSecret();
                                 AlgorithmDef algorithmDef = importStartState.getAlgorithmDef();
 
-                                final long keepAliveTimeout = parseLong(headers.contains(X_SFS_KEEP_ALIVE_TIMEOUT) ? headers.get(X_SFS_KEEP_ALIVE_TIMEOUT) : "10000");
-                                httpServerRequest.startProxyKeepAlive(keepAliveTimeout, MILLISECONDS);
+                                httpServerRequest.startProxyKeepAlive();
                                 SfsVertx sfsVertx = vertxContext.vertx();
 
                                 return journalFile.scan(sfsVertx, startPosition, entry -> {
@@ -311,7 +309,7 @@ public class ImportContainer implements Handler<SfsRequest> {
                                                             .flatMap(transientVersion -> {
                                                                 long length = transientVersion.getContentLength().get();
                                                                 if (length > 0 && !transientVersion.isDeleted()) {
-                                                                    return empty()
+                                                                    return aVoid()
                                                                             .flatMap(aVoid -> {
 
                                                                                 PipedReadStream pipedReadStream = new PipedReadStream();
@@ -329,10 +327,6 @@ public class ImportContainer implements Handler<SfsRequest> {
                                                                                         just(transientVersion)
                                                                                                 .flatMap(new WriteNewSegment(vertxContext, pipedReadStream));
                                                                                 return combineSinglesDelayError(oProducer, oConsumer, (aVoid1, transientSegment) -> transientSegment);
-                                                                            })
-                                                                            .map(transientSegment -> {
-                                                                                validateSegment(transientSegment);
-                                                                                return transientSegment;
                                                                             })
                                                                             .map(transientSegment -> transientSegment.getParent());
                                                                 } else {
@@ -362,24 +356,11 @@ public class ImportContainer implements Handler<SfsRequest> {
                                                                     TransientSegment latestSegment = transientVersion.getNewestSegment().get();
                                                                     return just(latestSegment)
                                                                             .flatMap(new AcknowledgeSegment(httpServerRequest.vertxContext()))
-                                                                            .map(modified -> latestSegment)
-                                                                            .flatMap(new VerifySegmentQuick(httpServerRequest.vertxContext()))
-                                                                            .map(verified -> {
-                                                                                checkState(verified, "Segment verification failed");
-                                                                                return (Void) null;
-                                                                            })
-                                                                            .map(aVoid -> latestSegment.getParent());
+                                                                            .map(modified -> latestSegment.getParent());
                                                                 } else {
                                                                     return just(transientVersion);
                                                                 }
                                                             })
-                                                            .flatMap(transientVersion -> {
-                                                                        PersistentObject persistentObject = (PersistentObject) transientVersion.getParent();
-                                                                        return just(persistentObject)
-                                                                                .flatMap(new PruneObject(httpServerRequest.vertxContext(), transientVersion))
-                                                                                .map(modified -> persistentObject.getVersion(transientVersion.getId()).get());
-                                                                    }
-                                                            )
                                                             .flatMap(transientVersion -> {
                                                                 final long versionId = transientVersion.getId();
                                                                 XObject xObject = transientVersion.getParent();
@@ -397,6 +378,7 @@ public class ImportContainer implements Handler<SfsRequest> {
                                             .onErrorResumeNext(throwable -> error(new IgnorePositionRuntimeException(throwable, entry.getHeaderPosition())));
                                 });
                             })
+                            .doOnNext(aVoid -> LOGGER.info("Done importing into container " + targetPersistentContainer.getId() + " from " + importDirectory))
                             .map(new ToVoid<>())
                             .map(aVoid -> {
                                 JsonObject jsonResponse = new JsonObject();
@@ -404,6 +386,7 @@ public class ImportContainer implements Handler<SfsRequest> {
                                 return jsonResponse;
                             })
                             .onErrorResumeNext(throwable -> {
+                                LOGGER.info("Failed importing into container " + targetPersistentContainer.getId() + " from " + importDirectory, throwable);
                                 Optional<IgnorePositionRuntimeException> oIgnorePosition = unwrapCause(IgnorePositionRuntimeException.class, throwable);
                                 if (oIgnorePosition.isPresent()) {
                                     IgnorePositionRuntimeException ignorePositionRuntimeException = oIgnorePosition.get();

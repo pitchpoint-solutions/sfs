@@ -32,9 +32,9 @@ import org.sfs.io.CipherEndableWriteStream;
 import org.sfs.io.CipherReadStream;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.NullEndableWriteStream;
-import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.Holder1;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.util.Buffers;
 import org.sfs.util.MessageDigestFactory;
 import org.sfs.util.PrngRandom;
@@ -61,9 +61,9 @@ public class AlgorithmTest extends BaseTestVerticle {
         final byte[] data = new byte[1024];
 
         PrngRandom random = PrngRandom.getCurrentInstance();
-        random.nextBytes(salt);
-        random.nextBytes(secret);
-        random.nextBytes(data);
+        random.nextBytesBlocking(salt);
+        random.nextBytesBlocking(secret);
+        random.nextBytesBlocking(data);
 
         final CipherWriteStreamValidation cipherWriteStreamValidation = new CipherWriteStreamValidation(secret, salt);
         final byte[] expectedCipherBytes = cipherWriteStreamValidation.encrypt(data);
@@ -122,9 +122,9 @@ public class AlgorithmTest extends BaseTestVerticle {
         final byte[] data = new byte[bufferSize];
 
         PrngRandom random = PrngRandom.getCurrentInstance();
-        random.nextBytes(salt);
-        random.nextBytes(secret);
-        random.nextBytes(data);
+        random.nextBytesBlocking(salt);
+        random.nextBytesBlocking(secret);
+        random.nextBytesBlocking(data);
 
         CipherWriteStreamValidation cipherWriteStreamValidation = new CipherWriteStreamValidation(secret, salt);
         final byte[] expectedCipherBytes = cipherWriteStreamValidation.encrypt(data);
@@ -149,14 +149,14 @@ public class AlgorithmTest extends BaseTestVerticle {
                     public Observable<byte[]> call(final Algorithm algorithm) {
                         final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
                         final BufferEndableWriteStream encryptedWriteStream = algorithm.encrypt(bufferWriteStream);
-                        MemoizeHandler<Void, Void> handler = new MemoizeHandler<>();
-                        encryptedWriteStream.endHandler(handler);
+                        ObservableFuture<Void> handler = RxHelper.observableFuture();
+                        encryptedWriteStream.endHandler(handler::complete);
                         for (Buffer partition : Buffers.partition(Buffer.buffer(data), bufferSize)) {
                             encryptedWriteStream.write(partition);
                         }
                         encryptedWriteStream.end();
 
-                        return Observable.create(handler.subscribe)
+                        return handler
                                 .map(new Func1<Void, byte[]>() {
                                     @Override
                                     public byte[] call(Void aVoid) {
@@ -174,13 +174,13 @@ public class AlgorithmTest extends BaseTestVerticle {
                                     public Observable<byte[]> call(byte[] encrypted) {
                                         final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
                                         final BufferEndableWriteStream decryptedWriteStream = algorithm.decrypt(bufferWriteStream);
-                                        MemoizeHandler<Void, Void> handler = new MemoizeHandler<>();
-                                        decryptedWriteStream.endHandler(handler);
+                                        ObservableFuture<Void> handler = RxHelper.observableFuture();
+                                        decryptedWriteStream.endHandler(handler::complete);
                                         for (Buffer partition : Buffers.partition(Buffer.buffer(encrypted), bufferSize)) {
                                             decryptedWriteStream.write(partition);
                                         }
                                         decryptedWriteStream.end();
-                                        return Observable.create(handler.subscribe)
+                                        return handler
                                                 .map(new Func1<Void, byte[]>() {
                                                     @Override
                                                     public byte[] call(Void aVoid) {
@@ -224,9 +224,9 @@ public class AlgorithmTest extends BaseTestVerticle {
         final byte[] dataBuffer = new byte[64 * 1024 * 1024];
 
         PrngRandom random = PrngRandom.getCurrentInstance();
-        random.nextBytes(salt);
-        random.nextBytes(secret);
-        random.nextBytes(dataBuffer);
+        random.nextBytesBlocking(salt);
+        random.nextBytesBlocking(secret);
+        random.nextBytesBlocking(dataBuffer);
 
         CipherWriteStreamValidation cipherWriteStreamValidation = new CipherWriteStreamValidation(secret, salt);
 
@@ -279,7 +279,7 @@ public class AlgorithmTest extends BaseTestVerticle {
 
         Async async = context.async();
 
-        AsyncResultMemoizeHandler<AsyncFile, AsyncFile> rh = new AsyncResultMemoizeHandler<>();
+        ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
 
         OpenOptions openOptions = new OpenOptions();
         openOptions.setCreate(true)
@@ -287,9 +287,9 @@ public class AlgorithmTest extends BaseTestVerticle {
                 .setWrite(true);
 
         VERTX.fileSystem()
-                .open(encryptedTmpFileVertx.toString(), openOptions, rh);
+                .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
-        Observable.create(rh.subscribe)
+        rh
                 .flatMap(new Func1<AsyncFile, Observable<Void>>() {
                     @Override
                     public Observable<Void> call(AsyncFile asyncFile) {
@@ -298,13 +298,13 @@ public class AlgorithmTest extends BaseTestVerticle {
                         Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
                         CipherEndableWriteStream cipherWriteStream = algorithm.encrypt(encryptedDigestWriteStream);
                         final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(cipherWriteStream, MessageDigestFactory.SHA512);
-                        MemoizeHandler<Void, Void> handler = new MemoizeHandler<>();
-                        clearDigestWriteStream.endHandler(handler);
+                        ObservableFuture<Void> handler = RxHelper.observableFuture();
+                        clearDigestWriteStream.endHandler(handler::complete);
                         for (Buffer buffer : Buffers.partition(Buffer.buffer(dataBuffer), 8192)) {
                             clearDigestWriteStream.write(buffer);
                         }
                         clearDigestWriteStream.end();
-                        return Observable.create(handler.subscribe)
+                        return handler
                                 .map(new Func1<Void, Void>() {
                                     @Override
                                     public Void call(Void aVoid) {
@@ -318,7 +318,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                 .flatMap(new Func1<Void, Observable<AsyncFile>>() {
                     @Override
                     public Observable<AsyncFile> call(Void aVoid) {
-                        AsyncResultMemoizeHandler<AsyncFile, AsyncFile> rh = new AsyncResultMemoizeHandler<>();
+                        ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
 
                         OpenOptions openOptions = new OpenOptions();
                         openOptions.setCreate(true)
@@ -326,9 +326,9 @@ public class AlgorithmTest extends BaseTestVerticle {
                                 .setWrite(true);
 
                         VERTX.fileSystem()
-                                .open(encryptedTmpFileVertx.toString(), openOptions, rh);
+                                .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
-                        return Observable.create(rh.subscribe);
+                        return rh;
                     }
                 })
                 .flatMap(new Func1<AsyncFile, Observable<Void>>() {
@@ -352,7 +352,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                 .flatMap(new Func1<Void, Observable<AsyncFile>>() {
                     @Override
                     public Observable<AsyncFile> call(Void aVoid) {
-                        AsyncResultMemoizeHandler<AsyncFile, AsyncFile> rh = new AsyncResultMemoizeHandler<>();
+                        ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
 
                         OpenOptions openOptions = new OpenOptions();
                         openOptions.setCreate(true)
@@ -360,9 +360,9 @@ public class AlgorithmTest extends BaseTestVerticle {
                                 .setWrite(true);
 
                         VERTX.fileSystem()
-                                .open(encryptedTmpFileVertx.toString(), openOptions, rh);
+                                .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
-                        return Observable.create(rh.subscribe);
+                        return rh;
                     }
                 })
                 .flatMap(new Func1<AsyncFile, Observable<Void>>() {

@@ -16,13 +16,11 @@
 
 package org.sfs.filesystem.volume;
 
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Future;
-import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.SfsVertx;
 import org.sfs.filesystem.ChecksummedPositional;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.Subscriber;
 import rx.functions.Func1;
@@ -38,7 +36,6 @@ import static org.sfs.filesystem.volume.IndexBlockReader.LockType.WRITE;
 import static org.sfs.math.Rounding.up;
 import static org.sfs.protobuf.XVolume.XIndexBlock;
 import static org.sfs.rx.RxHelper.iterate;
-import static rx.Observable.create;
 
 public class IndexScanner {
 
@@ -63,19 +60,19 @@ public class IndexScanner {
     public Observable<Void> scanIndex(SfsVertx vertx, LockType lockType, Func1<ChecksummedPositional<XIndexBlock>, Observable<Void>> transformer) {
         return indexFile.size(vertx)
                 .flatMap(fileSize -> {
-                    AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+                    ObservableFuture<Void> handler = RxHelper.observableFuture();
                     long roundedFileSize = up(fileSize, blockSize);
                     if (isDebugEnabled) {
                         long numberOfBlocks = roundedFileSize / blockSize;
                         LOGGER.debug("Max position is " + roundedFileSize + ". Expecting at most " + numberOfBlocks + " blocks");
                     }
                     scanIndex0(vertx, lockType, transformer, handler, roundedFileSize);
-                    return create(handler.subscribe);
+                    return handler;
                 });
     }
 
 
-    protected void scanIndex0(SfsVertx vertx, LockType lockType, Func1<ChecksummedPositional<XIndexBlock>, Observable<Void>> transformer, Handler<AsyncResult<Void>> handler, long fileSize) {
+    protected void scanIndex0(SfsVertx vertx, LockType lockType, Func1<ChecksummedPositional<XIndexBlock>, Observable<Void>> transformer, ObservableFuture<Void> handler, long fileSize) {
         int bufferSize = batchSize * blockSize;
         if (isDebugEnabled) {
             LOGGER.debug("Reading " + batchSize + " blocks @ position " + position);
@@ -95,7 +92,7 @@ public class IndexScanner {
                     () -> indexFile.getBlocks(vertx, position, batchSize),
                     lockWaitTimeout)
                     .flatMap(checksummedPositionals ->
-                            iterate(
+                            iterate(vertx,
                                     checksummedPositionals,
                                     xIndexBlockChecksummedPositional ->
                                             transformer.call(xIndexBlockChecksummedPositional)
@@ -114,7 +111,7 @@ public class IndexScanner {
                             }
                             position = checkedAdd(position, bufferSize);
                             if (position >= fileSize) {
-                                Future.<Void>succeededFuture().setHandler(handler);
+                                handler.complete(null);
                             } else {
                                 if (!isUnsubscribed()) {
                                     vertx.runOnContext(event -> scanIndex0(vertx, lockType, transformer, handler, fileSize));
@@ -124,7 +121,7 @@ public class IndexScanner {
 
                         @Override
                         public void onError(Throwable e) {
-                            Future.<Void>failedFuture(e).setHandler(handler);
+                            handler.fail(e);
                         }
 
                         @Override
@@ -135,7 +132,7 @@ public class IndexScanner {
         } else {
             indexFile.getBlocks(vertx, position, batchSize)
                     .flatMap(checksummedPositionals ->
-                            iterate(
+                            iterate(vertx,
                                     checksummedPositionals,
                                     xIndexBlockChecksummedPositional ->
                                             transformer.call(xIndexBlockChecksummedPositional)
@@ -151,7 +148,7 @@ public class IndexScanner {
                         public void onCompleted() {
                             position = checkedAdd(position, bufferSize);
                             if (position >= fileSize) {
-                                Future.<Void>succeededFuture().setHandler(handler);
+                                handler.complete(null);
                             } else {
                                 vertx.runOnContext(event -> scanIndex0(vertx, lockType, transformer, handler, fileSize));
                             }
@@ -159,7 +156,7 @@ public class IndexScanner {
 
                         @Override
                         public void onError(Throwable e) {
-                            Future.<Void>failedFuture(e).setHandler(handler);
+                            handler.fail(e);
                         }
 
                         @Override

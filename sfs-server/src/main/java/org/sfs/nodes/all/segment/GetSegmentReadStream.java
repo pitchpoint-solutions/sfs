@@ -17,11 +17,13 @@
 package org.sfs.nodes.all.segment;
 
 import com.google.common.base.Optional;
+import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.ReadStreamBlob;
 import org.sfs.nodes.all.blobreference.GetBlobReferenceReadStream;
+import org.sfs.rx.Defer;
 import org.sfs.rx.Holder2;
 import org.sfs.vo.TransientBlobReference;
 import org.sfs.vo.TransientSegment;
@@ -41,15 +43,11 @@ public class GetSegmentReadStream implements Func1<TransientSegment, Observable<
 
     private static final Logger LOGGER = getLogger(GetSegmentReadStream.class);
     private VertxContext<Server> vertxContext;
-    private boolean verified;
+    private boolean verifyChecksum;
 
-    public GetSegmentReadStream(VertxContext<Server> vertxContext) {
-        this(vertxContext, false);
-    }
-
-    public GetSegmentReadStream(VertxContext<Server> vertxContext, boolean verified) {
+    public GetSegmentReadStream(VertxContext<Server> vertxContext, boolean verifyChecksum) {
         this.vertxContext = vertxContext;
-        this.verified = verified;
+        this.verifyChecksum = verifyChecksum;
     }
 
     @Override
@@ -57,13 +55,30 @@ public class GetSegmentReadStream implements Func1<TransientSegment, Observable<
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("begin getsegmentreadstream object=" + transientSegment.getParent().getParent().getId() + ", version=" + transientSegment.getParent().getId() + ", segment=" + transientSegment.getId());
         }
+        Vertx vertx = vertxContext.vertx();
+        if (verifyChecksum) {
+            return tryVerified(vertx, transientSegment);
+        } else {
+            return tryQuickVerified(vertx, transientSegment)
+                    .flatMap(resultOptional -> {
+                        if (resultOptional.isPresent()) {
+                            return Defer.just(resultOptional);
+                        } else {
+                            return tryVerified(vertx, transientSegment);
+                        }
+                    });
+        }
+    }
+
+    private Observable<Optional<Holder2<TransientBlobReference, ReadStreamBlob>>> tryVerified(Vertx vertx, TransientSegment transientSegment) {
         AtomicReference<Holder2<TransientBlobReference, ReadStreamBlob>> match = new AtomicReference<>();
         return iterate(
+                vertx,
                 // if we're going to be verifying ourselves don't bother looking in the metadata to see if the blob is verified
-                verified ? transientSegment.getBlobs() : transientSegment.verifiedAckdBlobs(),
+                transientSegment.getBlobs(),
                 transientBlobReference ->
                         just(transientBlobReference)
-                                .flatMap(new GetBlobReferenceReadStream(vertxContext, verified))
+                                .flatMap(new GetBlobReferenceReadStream(vertxContext, true))
                                 .map(oReadStreamBlob -> {
                                     if (oReadStreamBlob.isPresent()) {
                                         match.set(new Holder2<>(transientBlobReference, oReadStreamBlob.get()));
@@ -72,11 +87,26 @@ public class GetSegmentReadStream implements Func1<TransientSegment, Observable<
                                         return TRUE;
                                     }
                                 }))
-                .map(aborted -> fromNullable(match.get()))
-                .doOnNext(holder2Optional -> {
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("end getsegmentreadstream object=" + transientSegment.getParent().getParent().getId() + ", version=" + transientSegment.getParent().getId() + ", segment=" + transientSegment.getId());
-                    }
-                });
+                .map(aborted -> fromNullable(match.get()));
+    }
+
+    private Observable<Optional<Holder2<TransientBlobReference, ReadStreamBlob>>> tryQuickVerified(Vertx vertx, TransientSegment transientSegment) {
+        AtomicReference<Holder2<TransientBlobReference, ReadStreamBlob>> match = new AtomicReference<>();
+        return iterate(
+                vertx,
+                // if we're going to be verifying ourselves don't bother looking in the metadata to see if the blob is verified
+                transientSegment.verifiedAckdBlobs(),
+                transientBlobReference ->
+                        just(transientBlobReference)
+                                .flatMap(new GetBlobReferenceReadStream(vertxContext, false))
+                                .map(oReadStreamBlob -> {
+                                    if (oReadStreamBlob.isPresent()) {
+                                        match.set(new Holder2<>(transientBlobReference, oReadStreamBlob.get()));
+                                        return FALSE;
+                                    } else {
+                                        return TRUE;
+                                    }
+                                }))
+                .map(aborted -> fromNullable(match.get()));
     }
 }

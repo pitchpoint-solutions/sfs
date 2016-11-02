@@ -49,7 +49,7 @@ import static java.nio.file.Files.deleteIfExists;
 import static java.nio.file.Files.newOutputStream;
 import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.RxHelper.combineSinglesDelayError;
 import static org.sfs.util.MessageDigestFactory.SHA512;
 import static org.sfs.util.PrngRandom.getCurrentInstance;
@@ -71,7 +71,7 @@ public class PipedStreamTest {
 
         Buffer testBuffer = buffer("test");
         Async async = context.async();
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     PipedReadStream pipedReadStream = new PipedReadStream();
                     PipedEndableWriteStream pipedEndableWriteStream = new PipedEndableWriteStream(pipedReadStream);
@@ -92,7 +92,7 @@ public class PipedStreamTest {
 
         Buffer testBuffer = buffer("test");
         Async async = context.async();
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     PipedReadStream pipedReadStream = new PipedReadStream();
                     PipedEndableWriteStream pipedEndableWriteStream = new PipedEndableWriteStream(pipedReadStream);
@@ -114,7 +114,7 @@ public class PipedStreamTest {
         SfsVertx vertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         byte[] bytes = new byte[256];
-        getCurrentInstance().nextBytes(bytes);
+        getCurrentInstance().nextBytesBlocking(bytes);
         Path path = createTempFile("", "");
 
         try (OutputStream outputStream = newOutputStream(path)) {
@@ -126,7 +126,7 @@ public class PipedStreamTest {
         final byte[] sha512 = hash(path.toFile(), sha512()).asBytes();
 
         Async async = context.async();
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     AsyncFile asyncFile = vertx.fileSystem().openBlocking(path.toString(), new OpenOptions());
                     PipedReadStream pipedReadStream = new PipedReadStream();

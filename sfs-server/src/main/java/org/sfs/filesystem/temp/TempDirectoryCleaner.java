@@ -19,7 +19,8 @@ package org.sfs.filesystem.temp;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 
 import java.io.File;
@@ -31,8 +32,7 @@ import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.System.currentTimeMillis;
 import static java.nio.file.Files.deleteIfExists;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.sfs.rx.Defer.empty;
-import static rx.Observable.create;
+import static org.sfs.rx.Defer.aVoid;
 import static rx.Observable.defer;
 
 public class TempDirectoryCleaner {
@@ -51,10 +51,10 @@ public class TempDirectoryCleaner {
         this.vertxContext = vertxContext;
         this.ioPool = vertxContext.getIoPool();
         return defer(() -> {
-            AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+            ObservableFuture<Void> handler = RxHelper.observableFuture();
             vertxContext.vertx()
                     .fileSystem()
-                    .mkdirs(vertxContext.verticle().sfsFileSystem().tmpDirectory().toString(), null, handler);
+                    .mkdirs(vertxContext.verticle().sfsFileSystem().tmpDirectory().toString(), null, handler.toHandler());
             long id = vertxContext.vertx()
                     .setPeriodic(SECONDS.toMillis(1),
                             event -> vertxContext.executeBlocking(
@@ -72,7 +72,7 @@ public class TempDirectoryCleaner {
 
                                             }));
             periodics.add(id);
-            return create(handler.subscribe);
+            return handler;
         });
     }
 
@@ -83,7 +83,7 @@ public class TempDirectoryCleaner {
                         .cancelTimer(periodic);
             }
             periodics.clear();
-            return empty();
+            return aVoid();
         });
     }
 

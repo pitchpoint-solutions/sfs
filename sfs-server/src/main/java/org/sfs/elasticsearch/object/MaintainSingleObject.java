@@ -23,6 +23,8 @@ import org.sfs.VertxContext;
 import org.sfs.elasticsearch.Elasticsearch;
 import org.sfs.elasticsearch.ScanAndScrollStreamProducer;
 import org.sfs.elasticsearch.SearchHitMaintainObjectEndableWrite;
+import org.sfs.rx.Defer;
+import org.sfs.rx.ToVoid;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -61,9 +63,15 @@ public class MaintainSingleObject implements Func1<Void, Observable<Void>> {
 
         SearchHitMaintainObjectEndableWrite consumer = new SearchHitMaintainObjectEndableWrite(vertxContext);
 
-        LOGGER.info("Starting");
+        LOGGER.info("Starting maintain of object " + objectId);
 
         return pump(producer, consumer)
-                .doOnNext(aVoid1 -> LOGGER.info("Finished"));
+                .doOnNext(aVoid1 -> LOGGER.info("Finished maintain of object " + objectId));
+    }
+
+    public static Observable<Void> repair(VertxContext<Server> vertxContext, String objectId) {
+        return Defer.aVoid()
+                .flatMap(new MaintainSingleObject(vertxContext, objectId))
+                .map(new ToVoid<>());
     }
 }

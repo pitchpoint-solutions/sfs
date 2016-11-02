@@ -35,9 +35,9 @@ import org.sfs.filesystem.BlobFile;
 import org.sfs.filesystem.ChecksummedPositional;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.protobuf.XVolume;
-import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.Defer;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.ExceptionHelper;
 import org.sfs.vo.TransientXAllocatedFile;
@@ -138,7 +138,7 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<TransientXVolume> volumeInfo(SfsVertx vertx) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> {
                     checkStarted();
                 })
@@ -205,7 +205,7 @@ public class VolumeV1 implements Volume {
     @Override
     public Observable<Void> copy(SfsVertx vertx, Path destinationDirectory) {
         Observable<Void> o =
-                Defer.empty()
+                Defer.aVoid()
                         .doOnNext(aVoid -> {
                             checkStarted();
                         })
@@ -229,9 +229,9 @@ public class VolumeV1 implements Volume {
                             if (logger.isDebugEnabled()) {
                                 logger.debug("Creating directory " + destinationDirectory);
                             }
-                            AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
-                            vertx.fileSystem().mkdirs(destinationDirectory.toString(), null, handler);
-                            return Observable.create(handler.subscribe)
+                            ObservableFuture<Void> handler = RxHelper.observableFuture();
+                            vertx.fileSystem().mkdirs(destinationDirectory.toString(), null, handler.toHandler());
+                            return handler
                                     .map(aVoid1 -> {
                                         if (logger.isDebugEnabled()) {
                                             logger.debug("Created directory " + destinationDirectory);
@@ -257,11 +257,7 @@ public class VolumeV1 implements Volume {
                                             scanIndex(vertx, IndexBlockReader.LockType.READ, checksummedPositional -> {
                                                 XVolume.XIndexBlock header = checksummedPositional.getValue();
                                                 return dstIndexFile.setBlock(vertx, checksummedPositional.getPosition(), checksummedPositional.getValue())
-                                                        .flatMap(aVoid2 ->
-                                                                RangeLock.lockedObservable(vertx,
-                                                                        () -> blobFile.tryReadLock(header.getDataPosition(), header.getDataLength()),
-                                                                        () -> blobFile.copy(vertx, header.getDataPosition(), header.getDataLength(), dstBlobFile, header.getDataPosition(), header.getDataLength()),
-                                                                        LOCK_WAIT_TIMEOUT))
+                                                        .flatMap(aVoid2 -> blobFile.copy(vertx, header.getDataPosition(), header.getDataLength(), dstBlobFile, header.getDataPosition(), header.getDataLength()))
                                                         .singleOrDefault(null);
                                             }))
                                     .flatMap(aVoid1 ->
@@ -336,7 +332,7 @@ public class VolumeV1 implements Volume {
     @Override
     public Observable<Void> open(SfsVertx vertx) {
         final VolumeV1 _this = this;
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> Preconditions.checkState(volumeState.compareAndSet(Status.STOPPED, Status.STARTING)))
                 .doOnNext(aVoid -> logger.info("Starting volume " + basePath.toString()))
                 .flatMap(aVoid -> VertxContext.executeBlocking(vertx, () -> {
@@ -473,7 +469,7 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<Void> close(SfsVertx vertx) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> {
                     logger.info("Stopping volume " + basePath.toString());
                     Preconditions.checkState(volumeState.compareAndSet(Status.STARTED, Status.STOPPING));
@@ -527,7 +523,7 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<Optional<ReadStreamBlob>> getDataStream(SfsVertx vertx, final long position, final Optional<Long> oOffset, final Optional<Long> oLength) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> checkStarted())
                 .flatMap(aVoid ->
                         RangeLock.lockedObservable(vertx,
@@ -566,10 +562,7 @@ public class VolumeV1 implements Volume {
                             new ReadStreamBlob(volumeId, position, 0, normalizedLength) {
                                 @Override
                                 public Observable<Void> produce(BufferEndableWriteStream endableWriteStream) {
-                                    return RangeLock.lockedObservable(vertx,
-                                            () -> blobFile.tryReadLock(startPosition, normalizedLength),
-                                            () -> blobFile.produce(vertx, startPosition, normalizedLength, endableWriteStream),
-                                            LOCK_WAIT_TIMEOUT)
+                                    return blobFile.produce(vertx, startPosition, normalizedLength, endableWriteStream)
                                             .onErrorResumeNext(throwable -> {
                                                 Optional<RejectedExecutionException> oException = ExceptionHelper.unwrapCause(RejectedExecutionException.class, throwable);
                                                 if (oException.isPresent()) {
@@ -595,7 +588,7 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<WriteStreamBlob> putDataStream(SfsVertx vertx, final long length) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> {
                     checkStarted();
                     Preconditions.checkArgument(length >= 0, "Length must be >= 0");
@@ -634,10 +627,8 @@ public class VolumeV1 implements Volume {
 
                                                 @Override
                                                 public Observable<Void> consume(ReadStream<Buffer> src) {
-                                                    return RangeLock.lockedObservable(vertx,
-                                                            () -> blobFile.tryWriteLock(dataPosition, length),
-                                                            () -> blobFile.consume(vertx, dataPosition, length, src),
-                                                            LOCK_WAIT_TIMEOUT)
+                                                    return Defer.aVoid()
+                                                            .flatMap(aVoid1 -> blobFile.consume(vertx, dataPosition, length, src))
                                                             .flatMap(aVoid1 -> blobFile.force(vertx, false))
                                                             .onErrorResumeNext(throwable -> {
                                                                 Optional<RejectedExecutionException> oException = ExceptionHelper.unwrapCause(RejectedExecutionException.class, throwable);
@@ -669,13 +660,13 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<Optional<HeaderBlob>> acknowledge(SfsVertx vertx, final long position) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> checkStarted())
                 .flatMap(aVoid ->
                         RangeLock.lockedObservable(
                                 vertx,
                                 () -> indexFile.tryWriteLock(position, indexBlockSize),
-                                () -> Defer.empty()
+                                () -> Defer.aVoid()
                                         .flatMap(aVoid2 -> getIndexBlock0(vertx, position))
                                         .filter(Optional::isPresent)
                                         .map(Optional::get)
@@ -709,7 +700,7 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<Optional<HeaderBlob>> delete(SfsVertx vertx, final long position) {
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> checkStarted())
                 .flatMap(aVoid ->
                         RangeLock.lockedObservable(vertx,
@@ -769,7 +760,7 @@ public class VolumeV1 implements Volume {
 
     protected Observable<Void> garbageCollection(SfsVertx vertx) {
 
-        return Defer.empty()
+        return Defer.aVoid()
                 .doOnNext(aVoid -> checkStarted())
                 .flatMap(aVoid -> {
                     AtomicBoolean stopped = new AtomicBoolean(false);
@@ -808,7 +799,7 @@ public class VolumeV1 implements Volume {
 
                                             return RangeLock.lockedObservable(vertx,
                                                     () -> indexFile.tryWriteLock(headerPosition, indexBlockSize),
-                                                    () -> Defer.empty()
+                                                    () -> Defer.aVoid()
                                                             .flatMap(aVoid1 -> getIndexBlock0(vertx, headerPosition))
                                                             .map(Optional::get)
                                                             .filter(optimisticLockChecksummedPositional -> Arrays.equals(checksummedPositional.getActualChecksum(), optimisticLockChecksummedPositional.getActualChecksum()))
@@ -911,19 +902,19 @@ public class VolumeV1 implements Volume {
 
     protected Observable<Void> waitAndPauseGc(SfsVertx vertx) {
         return Observable.defer(() -> {
-            ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
-            waitAndPauseGc0(vertx, handler);
-            return Observable.create(handler.subscribe);
+            ObservableFuture<Void> observableHandler = RxHelper.observableFuture();
+            waitAndPauseGc0(vertx, observableHandler);
+            return observableHandler;
         });
     }
 
-    protected void waitAndPauseGc0(SfsVertx vertx, Handler<Void> complete) {
+    protected void waitAndPauseGc0(SfsVertx vertx, ObservableFuture<Void> handler) {
         if (gcState.compareAndSet(GcState.EXECUTING, GcState.PAUSED)
                 || gcState.compareAndSet(GcState.STOPPED, GcState.PAUSED)
                 || gcState.compareAndSet(GcState.PAUSED, GcState.PAUSED)) {
-            complete.handle(null);
+            handler.complete(null);
         } else {
-            vertx.setTimer(10, event -> waitAndPauseGc0(vertx, complete));
+            vertx.setTimer(10, event -> waitAndPauseGc0(vertx, handler));
         }
     }
 }

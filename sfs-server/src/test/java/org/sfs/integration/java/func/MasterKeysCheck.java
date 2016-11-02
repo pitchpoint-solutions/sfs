@@ -21,16 +21,22 @@ import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.jobs.Jobs;
+import org.sfs.rx.Defer;
+import org.sfs.rx.HttpClientKeepAliveResponseBodyBuffer;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
+
+import java.util.concurrent.TimeUnit;
 
 import static com.google.common.collect.ArrayListMultimap.create;
 import static com.google.common.net.HttpHeaders.AUTHORIZATION;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
 
-public class MasterKeysCheck implements Func1<Void, Observable<HttpClientResponse>> {
+public class MasterKeysCheck implements Func1<Void, Observable<HttpClientResponseAndBuffer>> {
 
     private static final Logger LOGGER = getLogger(MasterKeysCheck.class);
     private final HttpClient httpClient;
@@ -59,21 +65,25 @@ public class MasterKeysCheck implements Func1<Void, Observable<HttpClientRespons
     }
 
     @Override
-    public Observable<HttpClientResponse> call(Void aVoid) {
+    public Observable<HttpClientResponseAndBuffer> call(Void aVoid) {
         return auth.toHttpAuthorization()
                 .flatMap(s -> {
-                    final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                     HttpClientRequest httpClientRequest =
-                            httpClient.post("/admin/001/master_keys_check", handler)
+                            httpClient.post("/verify_repair_masterkeys", handler::complete)
                                     .exceptionHandler(handler::fail)
                                     .setTimeout(5000)
+                                    .putHeader(Jobs.Parameters.TIMEOUT, String.valueOf(TimeUnit.MINUTES.toMillis(1)))
                                     .putHeader(AUTHORIZATION, s);
                     for (String entry : headers.keySet()) {
                         httpClientRequest = httpClientRequest.putHeader(entry, headers.get(entry));
                     }
                     httpClientRequest.end();
-                    return Observable.create(handler.subscribe)
-                            .single();
+                    return handler
+                            .flatMap(httpClientResponse ->
+                                    Defer.just(httpClientResponse)
+                                            .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
+                                            .map(buffer -> new HttpClientResponseAndBuffer(httpClientResponse, buffer)));
                 });
 
     }

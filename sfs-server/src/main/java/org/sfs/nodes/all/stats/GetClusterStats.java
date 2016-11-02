@@ -28,8 +28,6 @@ import org.sfs.nodes.ClusterInfo;
 import org.sfs.rx.Terminus;
 import org.sfs.rx.ToVoid;
 import org.sfs.validate.ValidateActionAdminOrSystem;
-import org.sfs.validate.ValidateNodeIdMatchesLocalNodeId;
-import org.sfs.validate.ValidateParamExists;
 import org.sfs.vo.TransientServiceDef;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -38,8 +36,7 @@ import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.String.valueOf;
 import static java.net.HttpURLConnection.HTTP_OK;
-import static org.sfs.rx.Defer.empty;
-import static org.sfs.util.SfsHttpQueryParams.NODE;
+import static org.sfs.rx.Defer.aVoid;
 
 public class GetClusterStats implements Handler<SfsRequest> {
 
@@ -50,7 +47,7 @@ public class GetClusterStats implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
                 .map(aVoid -> httpServerRequest)

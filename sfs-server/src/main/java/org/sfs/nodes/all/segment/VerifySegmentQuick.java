@@ -51,7 +51,7 @@ public class VerifySegmentQuick implements Func1<TransientSegment, Observable<Bo
             }
             return just(true);
         } else {
-            int replicas = nodes.getNumberOfObjectReplicasReplicas();
+            int replicas = nodes.getNumberOfObjectCopies();
             boolean allowSameNode = nodes.isAllowSameNode();
 
             VolumeReplicaGroup volumeReplicaGroup =

@@ -23,7 +23,8 @@ import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -115,9 +116,9 @@ public class GetContainer implements Func1<Void, Observable<HttpClientResponse>>
 
                         String query = on('&').join(keyValues);
 
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         HttpClientRequest httpClientRequest =
-                                httpClient.get("/openstackswift001/" + accountName + "/" + containerName + (query.length() > 0 ? "?" + query : ""), handler)
+                                httpClient.get("/openstackswift001/" + accountName + "/" + containerName + (query.length() > 0 ? "?" + query : ""), handler::complete)
                                         .exceptionHandler(handler::fail)
                                         .setTimeout(20000)
                                         .putHeader(AUTHORIZATION, s);
@@ -125,7 +126,7 @@ public class GetContainer implements Func1<Void, Observable<HttpClientResponse>>
                             httpClientRequest = httpClientRequest.putHeader(entry, headerParams.get(entry));
                         }
                         httpClientRequest.end();
-                        return Observable.create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

@@ -16,6 +16,7 @@
 
 package org.sfs.nodes.compute.object;
 
+import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
@@ -33,10 +34,12 @@ public class CopyVersionsReadStreams implements Func1<Iterable<TransientVersion>
     private static final Logger LOGGER = getLogger(CopyVersionsReadStreams.class);
     private final VertxContext<Server> vertxContext;
     private final BufferEndableWriteStream writeStream;
+    private final boolean verifyChecksum;
 
-    public CopyVersionsReadStreams(VertxContext<Server> vertxContext, BufferEndableWriteStream writeStream) {
+    public CopyVersionsReadStreams(VertxContext<Server> vertxContext, BufferEndableWriteStream writeStream, boolean verifyChecksum) {
         this.vertxContext = vertxContext;
         this.writeStream = writeStream;
+        this.verifyChecksum = verifyChecksum;
     }
 
     @Override
@@ -44,13 +47,15 @@ public class CopyVersionsReadStreams implements Func1<Iterable<TransientVersion>
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("begin copy segment version streams");
         }
+        Vertx vertx = vertxContext.vertx();
         return iterate(
+                vertx,
                 transientVersions, transientVersion -> {
                     if (LOGGER.isDebugEnabled()) {
                         LOGGER.debug("begin copy version object=" + transientVersion.getParent().getId() + ", version=" + transientVersion.getId());
                     }
                     return just(transientVersion.getSegments())
-                            .flatMap(new CopySegmentsReadStreams(vertxContext, writeStream))
+                            .flatMap(new CopySegmentsReadStreams(vertxContext, writeStream, verifyChecksum))
                             .map(transientSegments -> {
                                 if (LOGGER.isDebugEnabled()) {
                                     LOGGER.debug("end copy version object=" + transientVersion.getParent().getId() + ", version=" + transientVersion.getId());

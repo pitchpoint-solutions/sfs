@@ -24,6 +24,7 @@ import static java.util.regex.Pattern.compile;
 
 public class SfsHttpQueryParams {
 
+    public static final String DESTROY = "destroy";
     public static final String KEEP_ALIVE_TIMEOUT = "keep_alive_timeout";
     public static final String TEMP_URL_EXPIRES = "temp_url_expires";
     public static final String TEMP_URL_SIG = "temp_url_sig";

@@ -45,7 +45,7 @@ import static java.nio.file.StandardOpenOption.READ;
 import static java.nio.file.StandardOpenOption.WRITE;
 import static java.util.Arrays.fill;
 import static org.sfs.encryption.AlgorithmDef.getPreferred;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.RxHelper.executeBlocking;
 
 public class FileBackedBuffer implements BufferEndableWriteStream {
@@ -53,7 +53,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
     private static final Logger LOGGER = getLogger(FileBackedBuffer.class);
     private static final int MAX_WRITES = 16 * 1024;
     private static final AlgorithmDef ALGORITHM_DEF = getPreferred();
-    private static byte[] SALT = ALGORITHM_DEF.generateSalt();
+    private static byte[] SALT = ALGORITHM_DEF.generateSaltBlocking();
     private int fileThreshold;
     private SfsVertx sfsVertx;
     private Path tempFileDirectory;
@@ -95,11 +95,11 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
         checkReadStreamNotOpen();
         openedReadStream = true;
         if (fileOpen) {
-            AsyncFileReaderImpl asyncFileReaderImpl = new AsyncFileReaderImpl(sfsVertx, 0, 8192, MAX_VALUE, channel, LOGGER);
+            AsyncFileReader asyncFileReader = new AsyncFileReaderImpl(sfsVertx, 0, 8192, MAX_VALUE, channel, LOGGER);
             if (encryptTempFile) {
-                return algorithm.decrypt(asyncFileReaderImpl);
+                return algorithm.decrypt(asyncFileReader);
             } else {
-                return asyncFileReaderImpl;
+                return asyncFileReader;
             }
         } else {
             return new BufferReadStream(memory);
@@ -217,7 +217,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
                 return (Void) null;
             });
         } else {
-            return empty();
+            return aVoid();
         }
     }
 
@@ -265,10 +265,10 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
-                WriteQueueSupport writeQueueSupport = new WriteQueueSupport(MAX_WRITES);
+                WriteQueueSupport<AsyncFileWriter> writeQueueSupport = new WriteQueueSupport<>(MAX_WRITES);
                 fileWriteStreamConsumer = new AsyncFileWriterImpl(0L, writeQueueSupport, sfsVertx, channel, LOGGER);
                 if (encryptTempFile) {
-                    byte[] secret = ALGORITHM_DEF.generateKey();
+                    byte[] secret = ALGORITHM_DEF.generateKeyBlocking();
                     try {
                         algorithm = ALGORITHM_DEF.create(secret, SALT);
                         fileWriteStreamConsumer = algorithm.encrypt(fileWriteStreamConsumer);

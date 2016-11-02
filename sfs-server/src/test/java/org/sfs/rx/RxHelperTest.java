@@ -33,7 +33,6 @@ import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Lists.newArrayListWithCapacity;
 import static org.sfs.rx.RxHelper.iterate;
 import static org.sfs.util.VertxAssert.assertEquals;
-import static rx.Observable.create;
 import static rx.Observable.just;
 
 @RunWith(VertxUnitRunner.class)
@@ -52,21 +51,24 @@ public class RxHelperTest {
         List<Integer> actualList = new ArrayList<>();
         Async async = context.async();
         iterate(
+                vertx,
                 expectedList, integer -> {
                     List<Integer> nestedExpectedList = newArrayList(1, 2, 3, 4, 5, 6);
                     List<Integer> nestedActualList = new ArrayList<>();
                     return iterate(
+                            vertx,
                             nestedExpectedList, integer1 -> {
                                 if (nestedActualList.size() >= 2) {
                                     assertEquals(context, newArrayList(1, 2), nestedActualList);
-                                    ResultMemoizeHandler<Boolean> h = new ResultMemoizeHandler<>();
+                                    ObservableFuture<Boolean> h = RxHelper.observableFuture();
                                     vertx.runOnContext(event -> h.complete(false));
-                                    return create(h.subscribe);
+                                    vertx.runOnContext(event -> h.complete(false));
+                                    return h;
                                 } else {
                                     nestedActualList.add(integer1);
-                                    ResultMemoizeHandler<Boolean> h = new ResultMemoizeHandler<>();
+                                    ObservableFuture<Boolean> h = RxHelper.observableFuture();
                                     vertx.runOnContext(event -> h.complete(true));
-                                    return create(h.subscribe);
+                                    return h;
                                 }
                             });
                 })
@@ -80,10 +82,12 @@ public class RxHelperTest {
 
     @Test
     public void testIterate(TestContext context) {
+        Vertx vertx = rule.vertx();
         List<Integer> expectedList = newArrayList(1, 2, 3, 4, 5, 6);
         List<Integer> actualList = new ArrayList<>();
         Async async = context.async();
         iterate(
+                vertx,
                 expectedList, integer -> {
                     actualList.add(integer);
                     return just(true);
@@ -98,10 +102,12 @@ public class RxHelperTest {
 
     @Test
     public void testException(TestContext context) {
+        Vertx vertx = rule.vertx();
         List<Integer> expectedList = newArrayList(1, 2, 3, 4, 5, 6);
         List<Integer> actualList = new ArrayList<>();
         Async async = context.async();
         iterate(
+                vertx,
                 expectedList, integer -> {
                     if (integer == 3) {
                         throw new RuntimeException("3 is an exception");
@@ -123,10 +129,12 @@ public class RxHelperTest {
 
     @Test
     public void testEarlyExit(TestContext context) {
+        Vertx vertx = rule.vertx();
         List<Integer> expectedList = newArrayList(1, 2, 3, 4, 5, 6);
         List<Integer> actualList = new ArrayList<>();
         Async async = context.async();
         iterate(
+                vertx,
                 expectedList, integer -> {
                     if (integer == 3) {
                         return just(false);
@@ -144,6 +152,7 @@ public class RxHelperTest {
 
     @Test
     public void testIterateManyNoStackOverflow(TestContext context) {
+        Vertx vertx = rule.vertx();
         int size = 100000;
         List<Integer> expectedList = newArrayListWithCapacity(size);
         for (int i = 0; i < size; i++) {
@@ -152,6 +161,7 @@ public class RxHelperTest {
         List<Integer> actualList = new ArrayList<>();
         Async async = context.async();
         iterate(
+                vertx,
                 expectedList, integer -> {
                     actualList.add(integer);
                     return just(true);

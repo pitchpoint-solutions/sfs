@@ -17,7 +17,6 @@
 package org.sfs.integration.java.func;
 
 import com.google.common.collect.ListMultimap;
-import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
@@ -25,7 +24,8 @@ import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.streams.ReadStream;
 import org.sfs.io.HttpClientRequestEndableWriteStream;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -93,15 +93,10 @@ public class PutObjectStream implements Func1<Void, Observable<HttpClientRespons
                 .flatMap(new Func1<String, Observable<HttpClientResponse>>() {
                     @Override
                     public Observable<HttpClientResponse> call(String s) {
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         final HttpClientRequest httpClientRequest =
-                                httpClient.put("/openstackswift001/" + accountName + "/" + containerName + "/" + objectName, handler)
-                                        .exceptionHandler(new Handler<Throwable>() {
-                                            @Override
-                                            public void handle(Throwable event) {
-                                                handler.fail(event);
-                                            }
-                                        })
+                                httpClient.put("/openstackswift001/" + accountName + "/" + containerName + "/" + objectName, handler::complete)
+                                        .exceptionHandler(handler::fail)
                                         .putHeader(AUTHORIZATION, s);
                         for (String entry : headers.keySet()) {
                             httpClientRequest.putHeader(entry, headers.get(entry));
@@ -109,8 +104,7 @@ public class PutObjectStream implements Func1<Void, Observable<HttpClientRespons
 
                         httpClientRequest.setChunked(isChunked());
 
-                        Observable<HttpClientResponse> clientResponse =
-                                Observable.create(handler.subscribe);
+                        Observable<HttpClientResponse> clientResponse = handler;
 
                         HttpClientRequestEndableWriteStream adapter = new HttpClientRequestEndableWriteStream(httpClientRequest);
 

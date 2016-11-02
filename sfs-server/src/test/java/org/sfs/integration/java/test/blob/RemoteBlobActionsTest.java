@@ -33,7 +33,8 @@ import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.nodes.Nodes;
 import org.sfs.nodes.RemoteNode;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import rx.Observable;
 import rx.functions.Func1;
@@ -41,6 +42,7 @@ import rx.functions.Func1;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.Collections;
 
 import static com.google.common.base.Optional.absent;
 import static com.google.common.base.Optional.fromNullable;
@@ -54,14 +56,13 @@ import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.newOutputStream;
 import static java.nio.file.Files.size;
 import static java.nio.file.Files.write;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.MessageDigestFactory.MD5;
 import static org.sfs.util.MessageDigestFactory.SHA512;
 import static org.sfs.util.PrngRandom.getCurrentInstance;
 import static org.sfs.util.VertxAssert.assertArrayEquals;
 import static org.sfs.util.VertxAssert.assertEquals;
 import static org.sfs.util.VertxAssert.assertTrue;
-import static rx.Observable.create;
 import static rx.Observable.just;
 
 public class RemoteBlobActionsTest extends BaseTestVerticle {
@@ -71,7 +72,7 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
     public void testLargeFile(TestContext context) throws IOException {
 
         final byte[] data = new byte[256];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
         int dataSize = 256 * 1024 * 1024;
 
         final Path tempFile = createTempFile(tmpDir, "", "");
@@ -85,14 +86,14 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
         }
 
         Async async = context.async();
-        empty()
+        aVoid()
                 .map(aVoid -> {
                     Nodes nodes = vertxContext().verticle().nodes();
                     RemoteNode remoteNode =
                             new RemoteNode(
                                     vertxContext(),
                                     nodes.getResponseTimeout(),
-                                    nodes.getHostAndPort());
+                                    Collections.singletonList(nodes.getHostAndPort()));
                     return remoteNode;
                 })
                 .flatMap(new Func1<RemoteNode, Observable<Void>>() {
@@ -100,7 +101,7 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                     public Observable<Void> call(final RemoteNode remoteNode) {
                         out.println("ZZZZ1");
                         return just((Void) null)
-                                .flatMap(new PutData(context, remoteNode, tempFile))
+                                .flatMap(new PutData(VERTX_CONTEXT, context, remoteNode, tempFile))
                                 .map(headerBlob -> {
                                     out.println("Done writing");
                                     return headerBlob;
@@ -222,21 +223,21 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
     public void test(TestContext context) throws IOException {
 
         final byte[] data = new byte[256];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
 
         final Path tempFile1 = createTempFile(tmpDir, "", "");
         write(tempFile1, data);
 
 
         Async async = context.async();
-        empty()
+        aVoid()
                 .map(aVoid -> {
                     Nodes nodes = vertxContext().verticle().nodes();
                     RemoteNode remoteNode =
                             new RemoteNode(
                                     vertxContext(),
                                     nodes.getResponseTimeout(),
-                                    nodes.getHostAndPort());
+                                    Collections.singletonList(nodes.getHostAndPort()));
                     return remoteNode;
                 })
                 .flatMap(new Func1<RemoteNode, Observable<Void>>() {
@@ -244,7 +245,7 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                     public Observable<Void> call(final RemoteNode remoteNode) {
                         out.println("A0");
                         return just((Void) null)
-                                .flatMap(new PutData(context, remoteNode, tempFile1))
+                                .flatMap(new PutData(VERTX_CONTEXT, context, remoteNode, tempFile1))
                                 .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
                                     @Override
                                     public Observable<HeaderBlob> call(HeaderBlob blob) {
@@ -367,24 +368,24 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
         private final RemoteNode remoteNode;
         private final Path data;
 
-        public PutData(TestContext testContext, RemoteNode remoteNode, Path data) {
+        public PutData(VertxContext<Server> vertxContext, TestContext testContext, RemoteNode remoteNode, Path data) {
             this.testContext = testContext;
             this.remoteNode = remoteNode;
             this.data = data;
-            this.vertx = remoteNode.getVertxContext();
+            this.vertx = vertxContext;
         }
 
         @Override
         public Observable<HeaderBlob> call(Void aVoid) {
-            return empty()
+            return aVoid()
                     .flatMap(aVoid1 -> {
-                        AsyncResultMemoizeHandler<AsyncFile, AsyncFile> handler = new AsyncResultMemoizeHandler<>();
+                        ObservableFuture<AsyncFile> handler = RxHelper.observableFuture();
                         OpenOptions openOptions = new OpenOptions();
                         openOptions.setCreate(true)
                                 .setRead(true)
                                 .setWrite(true);
-                        vertx.vertx().fileSystem().open(data.toString(), openOptions, handler);
-                        return create(handler.subscribe);
+                        vertx.vertx().fileSystem().open(data.toString(), openOptions, handler.toHandler());
+                        return handler;
                     }).flatMap(asyncFile -> {
                         final long size;
                         final byte[] md5;

@@ -32,7 +32,6 @@ import static io.vertx.core.logging.LoggerFactory.getLogger;
 public class MasterKeyCheckEndableWriteStream extends AbstractBulkUpdateEndableWriteStream {
 
     private static final Logger LOGGER = getLogger(MasterKeyCheckEndableWriteStream.class);
-    private static final byte[] EMPTY_ARRAY = new byte[]{};
     private MasterKeys masterKeys;
 
     public MasterKeyCheckEndableWriteStream(VertxContext<Server> vertxContext) {

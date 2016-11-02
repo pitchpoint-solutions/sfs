@@ -36,17 +36,26 @@ import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
 import static org.elasticsearch.index.query.QueryBuilders.existsQuery;
 import static org.elasticsearch.index.query.QueryBuilders.termsQuery;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class AssignUnassignedDocumentsToNode implements Func1<Void, Observable<Void>> {
 
     private static final Logger LOGGER = getLogger(AssignUnassignedDocumentsToNode.class);
     private final VertxContext<Server> vertxContext;
     private final Map<String, Long> documentCountByNode;
+    private ScanAndScrollStreamProducer producer;
+    private boolean aborted = false;
 
     public AssignUnassignedDocumentsToNode(VertxContext<Server> vertxContext, Map<String, Long> documentCountByNode) {
         this.vertxContext = vertxContext;
         this.documentCountByNode = documentCountByNode;
+    }
+
+    public void abort() {
+        aborted = true;
+        if (producer != null) {
+            producer.abort();
+        }
     }
 
     @Override
@@ -67,16 +76,20 @@ public class AssignUnassignedDocumentsToNode implements Func1<Void, Observable<V
                 .should(c1)
                 .minimumNumberShouldMatch(1);
 
-        return empty()
+        return aVoid()
                 .flatMap(new ListSfsStorageIndexes(vertxContext))
                 .flatMap(index -> {
-                    ScanAndScrollStreamProducer producer =
+                    producer =
                             new ScanAndScrollStreamProducer(vertxContext, query)
                                     .setIndeces(index)
                                     .setTypes(elasticsearch.defaultType())
                                     .setReturnVersion(true);
 
                     SearchHitEndableWriteStreamUpdateNodeId consumer = new SearchHitEndableWriteStreamUpdateNodeId(vertxContext, documentCountByNode);
+
+                    if (aborted) {
+                        producer.abort();
+                    }
 
                     return pump(producer, consumer);
                 })

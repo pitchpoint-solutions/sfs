@@ -40,17 +40,16 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
     private final Context context;
 
     private Handler<Throwable> exceptionHandler;
-    private Handler<Void> drainHandler;
     private Handler<Void> endHandler;
 
-    private WriteQueueSupport writeQueueSupport;
+    private WriteQueueSupport<AsyncFileWriter> writeQueueSupport;
 
     private long startPosition;
     private long writePos;
     private long lastWriteTime;
     private boolean ended = false;
 
-    public AsyncFileWriterImpl(long startPosition, WriteQueueSupport writeQueueSupport, final SfsVertx vertx, AsynchronousFileChannel dataFile, Logger log) {
+    public AsyncFileWriterImpl(long startPosition, WriteQueueSupport<AsyncFileWriter> writeQueueSupport, final SfsVertx vertx, AsynchronousFileChannel dataFile, Logger log) {
         this.log = log;
         this.startPosition = startPosition;
         this.writePos = startPosition;
@@ -82,7 +81,6 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
             lastWriteTime = System.currentTimeMillis();
         } else {
             lastWriteTime = System.currentTimeMillis();
-            handleDrain();
             handleEnd();
         }
     }
@@ -91,7 +89,6 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
     public void end() {
         checkNotEnded();
         ended = true;
-        handleDrain();
         handleEnd();
     }
 
@@ -118,8 +115,6 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
             doWrite(buffer, writePos);
             writePos += length;
             lastWriteTime = System.currentTimeMillis();
-        } else {
-            handleDrain();
         }
         return this;
     }
@@ -128,7 +123,6 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
     private AsyncFileWriterImpl doWrite(Buffer buffer, long position) {
         Handler<AsyncResult<Void>> wrapped = ar -> {
             if (ar.succeeded()) {
-                handleDrain();
                 handleEnd();
             } else {
                 handleException(ar.cause());
@@ -152,7 +146,7 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
 
     @Override
     public boolean writeQueueFull() {
-        return writeQueueSupport.writeQueueFull(this);
+        return writeQueueSupport.writeQueueFull();
     }
 
     @Override
@@ -160,16 +154,8 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
         return writeQueueSupport.writeQueueEmpty(this);
     }
 
-    public boolean writeQueueDrained() {
-        return writeQueueSupport.writeQueueDrained(this);
-    }
-
     public void incrementWritesOutstanding(long delta) {
         writeQueueSupport.incrementWritesOutstanding(this, delta);
-    }
-
-    public void decrementWritesOutstanding(long delta) {
-        writeQueueSupport.decrementWritesOutstanding(this, delta);
     }
 
     protected void removeWritesOutstandingCounter() {
@@ -178,8 +164,7 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
 
     @Override
     public AsyncFileWriterImpl drainHandler(Handler<Void> handler) {
-        this.drainHandler = handler;
-        handleDrain();
+        writeQueueSupport.drainHandler(context, handler);
         return this;
     }
 
@@ -228,16 +213,6 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
         }
     }
 
-    private void handleDrain() {
-        Handler<Void> handler = drainHandler;
-        if (handler != null && writeQueueDrained()) {
-            drainHandler = null;
-            handler.handle(null);
-        }
-
-    }
-
-
     private void doWrite(ByteBuffer buff, long position, long toWrite, Handler<AsyncResult<Void>> handler) {
         if (toWrite == 0) {
             throw new IllegalStateException("Cannot save zero bytes");
@@ -261,10 +236,8 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
                     writeInternal(buff, pos, handler);
                 } else {
                     // It's been fully written
-                    context.runOnContext((v) -> {
-                        decrementWritesOutstanding(buff.limit());
-                        handler.handle(Future.succeededFuture());
-                    });
+                    removeWritesOutstandingCounter();
+                    context.runOnContext((v) -> handler.handle(Future.succeededFuture()));
                 }
             }
 

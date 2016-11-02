@@ -17,14 +17,12 @@
 package org.sfs.elasticsearch;
 
 import com.google.common.base.Optional;
-import com.google.common.cache.Cache;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.elasticsearch.account.LoadAccount;
-import org.sfs.elasticsearch.container.LoadContainer;
+import org.sfs.jobs.VerifyRepairAllContainerObjects;
 import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.all.blobreference.AcknowledgeBlobReference;
 import org.sfs.nodes.all.blobreference.DeleteBlobReference;
@@ -32,26 +30,25 @@ import org.sfs.nodes.all.blobreference.VerifyBlobReference;
 import org.sfs.nodes.all.segment.RebalanceSegment;
 import org.sfs.nodes.compute.object.PruneObject;
 import org.sfs.rx.Defer;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.RxHelper;
+import org.sfs.rx.ToType;
 import org.sfs.vo.PersistentAccount;
 import org.sfs.vo.PersistentContainer;
 import org.sfs.vo.PersistentObject;
 import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
-import rx.Subscriber;
+import rx.Scheduler;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Optional.absent;
 import static com.google.common.base.Optional.of;
-import static com.google.common.cache.CacheBuilder.newBuilder;
 import static com.google.common.collect.FluentIterable.from;
 import static java.lang.Boolean.FALSE;
 import static java.lang.Boolean.TRUE;
 import static java.lang.System.currentTimeMillis;
-import static org.sfs.elasticsearch.object.MaintainObjectsForNode.CONSISTENCY_THRESHOLD;
-import static org.sfs.elasticsearch.object.MaintainObjectsForNode.VERIFY_RETRY_COUNT;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static rx.Observable.defer;
 
@@ -60,17 +57,11 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
     private static final Logger LOGGER = LoggerFactory.getLogger(SearchHitMaintainObjectEndableWrite.class);
     private final ClusterInfo clusterInfo;
 
-    private final Cache<String, PersistentAccount> accountCache =
-            newBuilder()
-                    .maximumSize(100)
-                    .build();
-
-    private final Cache<String, PersistentContainer> containerCache =
-            newBuilder()
-                    .maximumSize(100)
-                    .build();
+    private final CachedAccount cachedAccount;
+    private final CachedContainer cachedContainer;
 
     private List<TransientServiceDef> dataNodes;
+    private final Scheduler scheduler;
 
 
     public SearchHitMaintainObjectEndableWrite(VertxContext<Server> vertxContext) {
@@ -80,24 +71,31 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                 from(clusterInfo.getDataNodes())
                         .transform(TransientServiceDef::copy)
                         .toList();
+        this.scheduler = RxHelper.scheduler(vertxContext.vertx());
+        this.cachedAccount = new CachedAccount(vertxContext);
+        this.cachedContainer = new CachedContainer(vertxContext);
     }
 
     @Override
     protected Observable<Optional<JsonObject>> transform(final JsonObject data, String id, long version) {
         return toPersistentObject(data, id, version)
                 // delete versions that are to old to attempt verification,ack and rebalance
-                .concatMapDelayError(this::deleteOldUnAckdVersions)
+                .flatMap(this::deleteOldUnAckdVersions)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on deleteOldUnAckdVersions " + data.encodePrettily())), scheduler)
                 // attempt to delete versions that need deleting
-                .concatMapDelayError(this::pruneObject)
+                .flatMap(this::pruneObject)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on pruneObject " + data.encodePrettily())), scheduler)
                 // verifyAck before rebalance
                 // so that in cases where the verify/ack
                 // failed to persist to the index
                 // we're able to recreate the state
                 // needed for rebalancing
-                .concatMapDelayError(this::verifyAck)
+                .flatMap(this::verifyAck)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on verifyAck " + data.encodePrettily())), scheduler)
                 // rebalance the objects, including the ones that were just re-verified
                 // disable rebalance because more testing is needed
-                .concatMapDelayError(this::reBalance)
+                .flatMap(this::reBalance)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on reBalance " + data.encodePrettily())), scheduler)
                 .map(persistentObject -> {
                     if (persistentObject.getVersions().isEmpty()) {
                         return absent();
@@ -109,26 +107,25 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
     }
 
     protected Observable<PersistentObject> verifyAck(PersistentObject persistentObject) {
-        ResultMemoizeHandler<PersistentObject> handler = new ResultMemoizeHandler<>();
-        just(persistentObject)
-                .concatMapDelayError(persistentObject1 -> Observable.from(persistentObject1.getVersions()))
+        return just(persistentObject)
+                .flatMap(persistentObject1 -> Observable.from(persistentObject1.getVersions()))
                 .filter(version -> !version.isDeleted())
-                .concatMapDelayError(transientVersion -> Observable.from(transientVersion.getSegments()))
+                .flatMap(transientVersion -> Observable.from(transientVersion.getSegments()))
                 .filter(transientSegment -> !transientSegment.isTinyData())
-                .concatMapDelayError(transientSegment -> Observable.from(transientSegment.getBlobs()))
+                .flatMap(transientSegment -> Observable.from(transientSegment.getBlobs()))
                 .filter(transientBlobReference -> !transientBlobReference.isDeleted())
-                .concatMapDelayError(transientBlobReference -> {
+                .flatMap(transientBlobReference -> {
                             boolean alreadyAckd = transientBlobReference.isAcknowledged();
                             Optional<Integer> oVerifyFailCount = transientBlobReference.getVerifyFailCount();
                             int verifyFailCount = oVerifyFailCount.isPresent() ? oVerifyFailCount.get() : 0;
                             return just(transientBlobReference)
-                                    .concatMapDelayError(new VerifyBlobReference(vertxContext))
+                                    .flatMap(new VerifyBlobReference(vertxContext))
                                     .map(verified -> {
                                         // we do this here to unAck blob refs
                                         // in cases where the referenced volume has somehow
                                         // become corrupted
                                         if (!verified) {
-                                            if (verifyFailCount >= VERIFY_RETRY_COUNT) {
+                                            if (verifyFailCount >= VerifyRepairAllContainerObjects.VERIFY_RETRY_COUNT) {
                                                 transientBlobReference.setAcknowledged(FALSE);
                                             } else {
                                                 transientBlobReference.setVerifyFailCount(verifyFailCount + 1);
@@ -147,92 +144,49 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                                     .flatMap(new AcknowledgeBlobReference(vertxContext));
                         }
                 )
-                .subscribe(new Subscriber<Boolean>() {
-                    @Override
-                    public void onStart() {
-                        request(1);
-                    }
-
-                    @Override
-                    public void onCompleted() {
-                        handler.complete(persistentObject);
-                    }
-
-                    @Override
-                    public void onError(Throwable e) {
-                        handler.fail(e);
-                    }
-
-                    @Override
-                    public void onNext(Boolean aBoolean) {
-                        request(1);
-                    }
-                });
-        return Observable.create(handler.subscribe);
+                .count()
+                .map(new ToType<>(persistentObject));
     }
 
     protected Observable<PersistentObject> reBalance(PersistentObject persistentObject) {
-        ResultMemoizeHandler<PersistentObject> handler = new ResultMemoizeHandler<>();
-        just(persistentObject)
-                .concatMapDelayError(persistentObject1 -> Observable.from(persistentObject1.getVersions()))
+        return just(persistentObject)
+                .flatMap(persistentObject1 -> Observable.from(persistentObject1.getVersions()))
                 .filter(version -> !version.isDeleted())
-                .concatMapDelayError(transientVersion -> Observable.from(transientVersion.getSegments()))
-                .concatMapDelayError(transientSegment ->
+                .flatMap(transientVersion -> Observable.from(transientVersion.getSegments()))
+                .flatMap(transientSegment ->
                         just(transientSegment)
                                 .flatMap(new RebalanceSegment(vertxContext, dataNodes))
                                 .map(reBalanced -> (Void) null))
-                .subscribe(new Subscriber<Void>() {
-
-                    @Override
-                    public void onStart() {
-                        request(1);
-                    }
-
-                    @Override
-                    public void onCompleted() {
-                        handler.complete(persistentObject);
-                    }
-
-                    @Override
-                    public void onError(Throwable e) {
-                        handler.fail(e);
-                    }
-
-                    @Override
-                    public void onNext(Void aVoid) {
-                        request(1);
-                    }
-                });
-        return Observable.create(handler.subscribe);
+                .count()
+                .map(new ToType<>(persistentObject));
     }
 
     protected Observable<PersistentObject> pruneObject(PersistentObject persistentObject) {
         return just(persistentObject)
-                .concatMapDelayError(new PruneObject(vertxContext))
+                .flatMap(new PruneObject(vertxContext))
                 .map(modified -> persistentObject);
     }
 
     protected Observable<PersistentObject> deleteOldUnAckdVersions(PersistentObject persistentObject) {
         return defer(() -> {
             long now = currentTimeMillis();
-            ResultMemoizeHandler<PersistentObject> handler = new ResultMemoizeHandler<>();
-            empty()
-                    .filter(aVoid -> now - persistentObject.getUpdateTs().getTimeInMillis() >= CONSISTENCY_THRESHOLD)
+            return aVoid()
+                    .filter(aVoid -> now - persistentObject.getUpdateTs().getTimeInMillis() >= VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD)
                     .map(aVoid -> persistentObject)
-                    .concatMapDelayError(persistentObject1 -> Observable.from(persistentObject1.getVersions()))
+                    .flatMap(persistentObject1 -> Observable.from(persistentObject1.getVersions()))
                     // don't bother trying to delete old versions that are marked as
                     // deleted since we have another method that will take care of that
                     // at some point in the future
                     .filter(version -> !version.isDeleted())
-                    .concatMapDelayError(transientVersion -> Observable.from(transientVersion.getSegments()))
+                    .flatMap(transientVersion -> Observable.from(transientVersion.getSegments()))
                     .filter(transientSegment -> !transientSegment.isTinyData())
-                    .concatMapDelayError(transientSegment -> Observable.from(transientSegment.getBlobs()))
+                    .flatMap(transientSegment -> Observable.from(transientSegment.getBlobs()))
                     .filter(transientBlobReference -> !transientBlobReference.isAcknowledged())
                     .filter(transientBlobReference -> {
                         Optional<Integer> oVerifyFailCount = transientBlobReference.getVerifyFailCount();
-                        return oVerifyFailCount.isPresent() && oVerifyFailCount.get() >= VERIFY_RETRY_COUNT;
+                        return oVerifyFailCount.isPresent() && oVerifyFailCount.get() >= VerifyRepairAllContainerObjects.VERIFY_RETRY_COUNT;
                     })
-                    .concatMapDelayError(transientBlobReference ->
+                    .flatMap(transientBlobReference ->
                             just(transientBlobReference)
                                     .flatMap(new DeleteBlobReference(vertxContext))
                                     .filter(deleted -> deleted)
@@ -242,31 +196,10 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                                     }))
                     .onErrorResumeNext(throwable -> {
                         LOGGER.warn("Handling Error", throwable);
-                        return Defer.empty();
+                        return Defer.aVoid();
                     })
-                    .subscribe(new Subscriber<Void>() {
-
-                        @Override
-                        public void onStart() {
-                            request(1);
-                        }
-
-                        @Override
-                        public void onCompleted() {
-                            handler.complete(persistentObject);
-                        }
-
-                        @Override
-                        public void onError(Throwable e) {
-                            handler.fail(e);
-                        }
-
-                        @Override
-                        public void onNext(Void aVoid) {
-                            request(1);
-                        }
-                    });
-            return Observable.create(handler.subscribe);
+                    .count()
+                    .map(new ToType<>(persistentObject));
         });
     }
 
@@ -283,45 +216,11 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
         });
     }
 
-    protected Iterable<TransientServiceDef> getDataNodes() {
-        return clusterInfo.getDataNodes();
-    }
-
     protected Observable<PersistentAccount> getAccount(String accountId) {
-        return defer(() -> {
-            final PersistentAccount persistentAccount = accountCache.getIfPresent(accountId);
-            if (persistentAccount == null) {
-                return just(accountId)
-                        .flatMap(new LoadAccount(vertxContext))
-                        .map(oPersistentAccount -> {
-                            if (oPersistentAccount.isPresent()) {
-                                accountCache.put(accountId, oPersistentAccount.get());
-
-                            }
-                            return oPersistentAccount.get();
-                        });
-            } else {
-                return just(persistentAccount);
-            }
-        });
+        return cachedAccount.get(accountId);
     }
 
     protected Observable<PersistentContainer> getContainer(PersistentAccount persistentAccount, String containerId) {
-        return defer(() -> {
-            final PersistentContainer persistentContainer = containerCache.getIfPresent(containerId);
-            if (persistentContainer == null) {
-                return just(containerId)
-                        .flatMap(new LoadContainer(vertxContext, persistentAccount))
-                        .map(oPersistentContainer -> {
-                            if (oPersistentContainer.isPresent()) {
-                                containerCache.put(containerId, oPersistentContainer.get());
-
-                            }
-                            return oPersistentContainer.get();
-                        });
-            } else {
-                return just(persistentContainer);
-            }
-        });
+        return cachedContainer.get(persistentAccount, containerId);
     }
 }

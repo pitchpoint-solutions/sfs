@@ -14,13 +14,24 @@
  * limitations under the License.
  */
 
-package org.sfs.nodes;
+package org.sfs.jobs;
 
-import static java.lang.String.format;
+import io.vertx.core.MultiMap;
+import org.sfs.Server;
+import org.sfs.VertxContext;
+import rx.Observable;
 
-public class InsufficientPrimaryVolumeAvailableException extends RuntimeException {
+import java.util.concurrent.TimeUnit;
 
-    public InsufficientPrimaryVolumeAvailableException(int expected, int available) {
-        super(format("Expected %s, available %d", expected, available));
-    }
+public interface Job {
+
+    String id();
+
+    Observable<Void> waitStopped(VertxContext<Server> vertxContext, long timeout, TimeUnit timeUnit);
+
+    Observable<Void> waitStopped(VertxContext<Server> vertxContext);
+
+    Observable<Void> execute(VertxContext<Server> vertxContext, MultiMap parameters);
+
+    Observable<Void> stop(VertxContext<Server> vertxContext);
 }

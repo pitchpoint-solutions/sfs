@@ -29,7 +29,7 @@ import org.sfs.rx.HandleServerToBusy;
 import org.sfs.rx.Holder2;
 import org.sfs.rx.Terminus;
 import org.sfs.validate.ValidateActionAdminOrSystem;
-import org.sfs.validate.ValidateNodeIdMatchesLocalNodeId;
+import org.sfs.validate.ValidateNodeIsDataNode;
 import org.sfs.validate.ValidateParamBetweenLong;
 import org.sfs.validate.ValidateParamExists;
 
@@ -37,8 +37,7 @@ import static java.lang.Long.MAX_VALUE;
 import static java.lang.Long.parseLong;
 import static java.net.HttpURLConnection.HTTP_NOT_MODIFIED;
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
-import static org.sfs.rx.Defer.empty;
-import static org.sfs.util.SfsHttpQueryParams.NODE;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.SfsHttpQueryParams.POSITION;
 import static org.sfs.util.SfsHttpQueryParams.VOLUME;
 
@@ -49,9 +48,10 @@ public class AckBlob implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
+                .map(new ValidateNodeIsDataNode<>(vertxContext))
                 .map(aVoid -> httpServerRequest)
                 .map(new ValidateParamExists(VOLUME))
                 .map(new ValidateParamExists(POSITION))

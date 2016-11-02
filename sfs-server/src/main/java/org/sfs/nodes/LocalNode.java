@@ -63,16 +63,6 @@ public class LocalNode extends AbstractNode {
     }
 
     @Override
-    public HostAndPort getHostAndPort() {
-        return hostAndPort;
-    }
-
-    @Override
-    public boolean isLocal() {
-        return true;
-    }
-
-    @Override
     public Observable<Optional<TransientServiceDef>> getNodeStats() {
         NodeStats nodeStats = vertxContext.verticle().getNodeStats();
         return Defer.just(nodeStats.getStats());

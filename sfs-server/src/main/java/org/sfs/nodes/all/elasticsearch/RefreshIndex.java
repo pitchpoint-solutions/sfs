@@ -22,13 +22,13 @@ import org.sfs.elasticsearch.IndexRefresh;
 import org.sfs.rx.Terminus;
 
 import static java.net.HttpURLConnection.HTTP_OK;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class RefreshIndex implements Handler<SfsRequest> {
 
     @Override
     public void handle(SfsRequest sfsRequest) {
-        empty()
+        aVoid()
                 .flatMap(new IndexRefresh(sfsRequest.vertxContext()))
                 .subscribe(new Terminus<Void>(sfsRequest) {
                     @Override

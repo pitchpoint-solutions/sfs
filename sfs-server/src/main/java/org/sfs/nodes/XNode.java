@@ -29,10 +29,6 @@ import java.util.List;
 
 public interface XNode {
 
-    boolean isLocal();
-
-    HostAndPort getHostAndPort();
-
     Observable<Optional<TransientServiceDef>> getNodeStats();
 
     Observable<Optional<DigestBlob>> checksum(String volumeId, long position, Optional<Long> oOffset, Optional<Long> oLength, MessageDigestFactory... messageDigestFactories);

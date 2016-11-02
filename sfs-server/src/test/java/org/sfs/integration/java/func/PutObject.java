@@ -17,12 +17,12 @@
 package org.sfs.integration.java.func;
 
 import com.google.common.collect.ListMultimap;
-import io.vertx.core.Handler;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -89,15 +89,10 @@ public class PutObject implements Func1<Void, Observable<HttpClientResponse>> {
                 .flatMap(new Func1<String, Observable<HttpClientResponse>>() {
                     @Override
                     public Observable<HttpClientResponse> call(String s) {
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         HttpClientRequest httpClientRequest =
-                                httpClient.put("/openstackswift001/" + accountName + "/" + containerName + "/" + objectName, handler)
-                                        .exceptionHandler(new Handler<Throwable>() {
-                                            @Override
-                                            public void handle(Throwable event) {
-                                                handler.fail(event);
-                                            }
-                                        })
+                                httpClient.put("/openstackswift001/" + accountName + "/" + containerName + "/" + objectName, handler::complete)
+                                        .exceptionHandler(handler::fail)
                                         .setTimeout(20000)
                                         .putHeader(AUTHORIZATION, s);
                         for (String entry : headers.keySet()) {
@@ -105,7 +100,7 @@ public class PutObject implements Func1<Void, Observable<HttpClientResponse>> {
                         }
                         httpClientRequest.setChunked(isChunked());
                         httpClientRequest.end(buffer(data));
-                        return Observable.create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

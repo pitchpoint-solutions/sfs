@@ -17,13 +17,12 @@
 package org.sfs.block;
 
 import com.google.common.base.Optional;
-import io.vertx.core.AsyncResult;
-import io.vertx.core.AsyncResultHandler;
 import io.vertx.core.logging.Logger;
 import org.sfs.SfsVertx;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.Defer;
 import org.sfs.rx.Holder2;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.Subscriber;
 import rx.functions.Func0;
@@ -44,7 +43,6 @@ import static java.lang.Math.floor;
 import static java.lang.Math.random;
 import static java.lang.System.currentTimeMillis;
 import static org.sfs.math.Rounding.up;
-import static rx.Observable.create;
 import static rx.Observable.just;
 import static rx.Observable.using;
 
@@ -66,11 +64,11 @@ public class RangeLock {
                                                      Func0<? extends Observable<R>> observableFactory,
                                                      long lockWaitTimeoutMs) {
 
-        AsyncResultMemoizeHandler<R, R> handler = new AsyncResultMemoizeHandler<>();
+        ObservableFuture<R> handler = RxHelper.observableFuture();
         long now = currentTimeMillis();
         AtomicBoolean unSubscribed = new AtomicBoolean(false);
         lockedObservable0(vertx, now, lockFactory, observableFactory, lockWaitTimeoutMs, handler, unSubscribed);
-        return create(handler.subscribe)
+        return handler
                 .doOnUnsubscribe(() -> unSubscribed.set(true));
     }
 
@@ -79,15 +77,16 @@ public class RangeLock {
                                               Func0<Optional<Lock>> lockFactory,
                                               Func0<? extends Observable<R>> observableFactory,
                                               long lockWaitTimeoutMs,
-                                              AsyncResultHandler<R> handler,
+                                              ObservableFuture<R> handler,
                                               AtomicBoolean unSubscribed) {
         using(
                 lockFactory::call,
                 oLock -> {
                     if (oLock.isPresent()) {
                         Lock lock = oLock.get();
-                        ResultMemoizeHandler<Holder2<Boolean, R>> innerHandler = new ResultMemoizeHandler<>();
-                        observableFactory.call()
+                        ObservableFuture<Holder2<Boolean, R>> innerHandler = RxHelper.observableFuture();
+                        Defer.aVoid()
+                                .flatMap(aVoid -> observableFactory.call())
                                 .subscribe(new Subscriber<R>() {
 
                                     R value;
@@ -109,7 +108,7 @@ public class RangeLock {
                                         value = r;
                                     }
                                 });
-                        return create(innerHandler.subscribe);
+                        return innerHandler;
                     } else {
                         return just(new Holder2<>(FALSE, (R) null));
                     }
@@ -126,51 +125,11 @@ public class RangeLock {
                     @Override
                     public void onCompleted() {
                         if (TRUE.equals(statusHolder.value0())) {
-                            handler.handle(new AsyncResult<R>() {
-                                @Override
-                                public R result() {
-                                    return statusHolder.value1();
-                                }
-
-                                @Override
-                                public Throwable cause() {
-                                    return null;
-                                }
-
-                                @Override
-                                public boolean succeeded() {
-                                    return true;
-                                }
-
-                                @Override
-                                public boolean failed() {
-                                    return false;
-                                }
-                            });
+                            handler.complete(statusHolder.value1());
                         } else {
                             if (currentTimeMillis() - startTimeMs >= lockWaitTimeoutMs) {
                                 TimedOutException timedOutException = new TimedOutException();
-                                handler.handle(new AsyncResult<R>() {
-                                    @Override
-                                    public R result() {
-                                        return null;
-                                    }
-
-                                    @Override
-                                    public Throwable cause() {
-                                        return timedOutException;
-                                    }
-
-                                    @Override
-                                    public boolean succeeded() {
-                                        return false;
-                                    }
-
-                                    @Override
-                                    public boolean failed() {
-                                        return true;
-                                    }
-                                });
+                                handler.fail(timedOutException);
                             } else {
                                 if (!unSubscribed.get()) {
                                     vertx.setTimer((long) (floor(random() * 100) + 1), event -> lockedObservable0(vertx, startTimeMs, lockFactory, observableFactory, lockWaitTimeoutMs, handler, unSubscribed));
@@ -181,27 +140,7 @@ public class RangeLock {
 
                     @Override
                     public void onError(Throwable e) {
-                        handler.handle(new AsyncResult<R>() {
-                            @Override
-                            public R result() {
-                                return null;
-                            }
-
-                            @Override
-                            public Throwable cause() {
-                                return e;
-                            }
-
-                            @Override
-                            public boolean succeeded() {
-                                return false;
-                            }
-
-                            @Override
-                            public boolean failed() {
-                                return true;
-                            }
-                        });
+                        handler.fail(e);
                     }
 
                     @Override

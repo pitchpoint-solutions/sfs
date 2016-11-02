@@ -17,7 +17,6 @@
 package org.sfs.filesystem;
 
 import com.google.common.base.Optional;
-import io.vertx.core.Context;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.impl.ConcurrentHashSet;
 import io.vertx.core.logging.Logger;
@@ -33,7 +32,8 @@ import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.WaitForActiveWriters;
 import org.sfs.io.WaitForEmptyWriteQueue;
 import org.sfs.io.WriteQueueSupport;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func0;
 
@@ -66,9 +66,8 @@ import static org.sfs.io.AsyncIO.end;
 import static org.sfs.io.AsyncIO.pump;
 import static org.sfs.io.Block.decodeFrame;
 import static org.sfs.io.Block.encodeFrame;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.Buffers.partition;
-import static rx.Observable.create;
 import static rx.Observable.defer;
 import static rx.Observable.just;
 import static rx.Observable.using;
@@ -88,7 +87,7 @@ public class BlockFile {
     private final int blockSize;
     private final RangeLock lock;
     private AsynchronousFileChannel channel;
-    private final WriteQueueSupport writeQueueSupport = new WriteQueueSupport(MAX_WRITES);
+    private final WriteQueueSupport<AsyncFileWriter> writeQueueSupport = new WriteQueueSupport<>(MAX_WRITES);
     private final Set<BufferEndableWriteStream> activeWriters = new ConcurrentHashSet<>();
     private AtomicBoolean readOnly = new AtomicBoolean(true);
     private final AtomicReference<Status> status = new AtomicReference<>(STOPPED);
@@ -106,7 +105,7 @@ public class BlockFile {
 
     public Observable<Void> open(SfsVertx vertx, StandardOpenOption openOption, StandardOpenOption... openOptions) {
         executorService = vertx.getIoPool();
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STOPPED, STARTING)))
                 .flatMap(aVoid -> executeBlocking(vertx, () -> {
                     try {
@@ -156,7 +155,7 @@ public class BlockFile {
     }
 
     public Observable<Void> disableWrites(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkOpen())
                 .doOnNext(aVoid -> readOnly.compareAndSet(false, true))
                 .flatMap(new WaitForActiveWriters(vertx, activeWriters))
@@ -164,13 +163,13 @@ public class BlockFile {
     }
 
     public Observable<Void> enableWrites(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkOpen())
                 .doOnNext(aVoid -> readOnly.compareAndSet(true, false));
     }
 
     public Observable<Void> close(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STARTED, STOPPING)))
                 .doOnNext(aVoid -> readOnly.compareAndSet(false, true))
                 .flatMap(new WaitForActiveWriters(vertx, activeWriters))
@@ -187,7 +186,7 @@ public class BlockFile {
     }
 
     public Observable<Long> size(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkOpen())
                 .flatMap(aVoid -> executeBlocking(vertx, () -> {
                     try {
@@ -300,17 +299,23 @@ public class BlockFile {
         long length = data.length();
         // this should never happen but in case things ever get crazy this will prevent corruption
         checkState(length <= blockSize, "Frame size was %s, expected %s", length, blockSize);
-
-        return using(
-                () -> {
-                    AsyncFileWriter writer = createWriteStream(vertx, position);
-                    activeWriters.add(writer);
-                    return writer;
-                },
-                writer ->
-                        end(data, writer)
-                                .doOnNext(aVoid -> activeWriters.remove(writer)),
-                activeWriters::remove);
+        ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
+        if (writeQueueSupport.writeQueueFull()) {
+            writeQueueSupport.drainHandler(vertx, drainHandler::complete);
+        } else {
+            drainHandler.complete(null);
+        }
+        return drainHandler.flatMap(aVoid ->
+                using(
+                        () -> {
+                            AsyncFileWriter writer = createWriteStream(vertx, position);
+                            activeWriters.add(writer);
+                            return writer;
+                        },
+                        writer ->
+                                end(data, writer)
+                                        .doOnNext(aVoid1 -> activeWriters.remove(writer)),
+                        activeWriters::remove));
     }
 
     public Observable<Void> force(SfsVertx vertx, boolean metaData) {
@@ -351,17 +356,7 @@ public class BlockFile {
     }
 
     protected <T> Observable<T> executeBlocking(SfsVertx vertx, Func0<T> func0) {
-        Context context = vertx.getOrCreateContext();
-        ResultMemoizeHandler<T> handler = new ResultMemoizeHandler<T>();
-        executorService.execute(() -> {
-            try {
-                T result = func0.call();
-                context.runOnContext(event -> handler.complete(result));
-            } catch (Throwable e) {
-                context.runOnContext(event -> handler.fail(e));
-            }
-        });
-        return create(handler.subscribe);
+        return RxHelper.executeBlocking(vertx, executorService, func0);
     }
 
     protected void checkAligned(long value, int blockSize) {

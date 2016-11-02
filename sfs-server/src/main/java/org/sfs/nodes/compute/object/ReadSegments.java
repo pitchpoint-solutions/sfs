@@ -19,7 +19,11 @@ package org.sfs.nodes.compute.object;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
+import org.sfs.elasticsearch.object.MaintainSingleObject;
 import org.sfs.io.BufferEndableWriteStream;
+import org.sfs.rx.Defer;
+import org.sfs.rx.ToVoid;
+import org.sfs.util.ExceptionHelper;
 import org.sfs.vo.TransientVersion;
 import rx.Observable;
 import rx.functions.Func1;
@@ -31,18 +35,23 @@ public class ReadSegments implements Func1<Iterable<TransientVersion>, Observabl
 
     private static final Logger LOGGER = getLogger(ReadSegments.class);
     private final VertxContext<Server> vertxContext;
-    private BufferEndableWriteStream bufferStreamConsumer;
+    private final BufferEndableWriteStream bufferStreamConsumer;
+    private final boolean verifyChecksum;
 
-
-    public ReadSegments(VertxContext<Server> vertxContext, BufferEndableWriteStream bufferStreamConsumer) {
+    public ReadSegments(VertxContext<Server> vertxContext, BufferEndableWriteStream bufferStreamConsumer, boolean verifyChecksum) {
         this.vertxContext = vertxContext;
         this.bufferStreamConsumer = bufferStreamConsumer;
+        this.verifyChecksum = verifyChecksum;
+    }
+
+    public ReadSegments(VertxContext<Server> vertxContext, BufferEndableWriteStream bufferStreamConsumer) {
+        this(vertxContext, bufferStreamConsumer, false);
     }
 
     @Override
     public Observable<Iterable<TransientVersion>> call(Iterable<TransientVersion> transientVersions) {
         return just(transientVersions)
-                .flatMap(new CopyVersionsReadStreams(vertxContext, bufferStreamConsumer));
+                .flatMap(new CopyVersionsReadStreams(vertxContext, bufferStreamConsumer, verifyChecksum));
     }
 
 }

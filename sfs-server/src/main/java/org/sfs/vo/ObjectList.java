@@ -16,14 +16,16 @@
 
 package org.sfs.vo;
 
+import java.util.Collection;
+
 import static org.sfs.elasticsearch.container.ListObjects.ListedObject;
 
 public class ObjectList {
 
     private final PersistentContainer persistentContainer;
-    private final Iterable<ListedObject> objects;
+    private final Collection<ListedObject> objects;
 
-    public ObjectList(PersistentContainer persistentContainer, Iterable<ListedObject> objects) {
+    public ObjectList(PersistentContainer persistentContainer, Collection<ListedObject> objects) {
         this.persistentContainer = persistentContainer;
         this.objects = objects;
     }
@@ -32,7 +34,11 @@ public class ObjectList {
         return persistentContainer;
     }
 
-    public Iterable<ListedObject> getObjects() {
+    public Collection<ListedObject> getObjects() {
         return objects;
+    }
+
+    public void clear() {
+        objects.clear();
     }
 }

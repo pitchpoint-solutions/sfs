@@ -42,7 +42,7 @@ import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.primitives.Longs.tryParse;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static java.util.Collections.emptyList;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.SfsHttpQueryParams.VERSION;
 import static org.sfs.vo.ObjectPath.fromSfsRequest;
@@ -58,7 +58,7 @@ public class HeadObject implements Handler<SfsRequest> {
         MultiMap queryParams = httpServerRequest.params();
         final String versionAsString = queryParams.get(VERSION);
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAuthenticated(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))
@@ -108,7 +108,7 @@ public class HeadObject implements Handler<SfsRequest> {
                                                 .map(new WriteHttpServerResponseHeaders(httpServerRequest, transientVersion, transientVersions))
                                                 .map(aVoid -> transientVersions));
                     } else {
-                        return empty()
+                        return aVoid()
                                 .doOnNext(aVoid -> httpServerRequest.response().setStatusCode(HTTP_OK))
                                 .map(new WriteHttpServerResponseHeaders(httpServerRequest, transientVersion, emptyList()));
                     }

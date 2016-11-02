@@ -46,28 +46,39 @@ import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.NodeStats;
 import org.sfs.nodes.Nodes;
 import org.sfs.nodes.all.elasticsearch.RefreshIndex;
-import org.sfs.nodes.all.masterkey.MasterKeysCheck;
 import org.sfs.nodes.all.stats.GetClusterStats;
 import org.sfs.nodes.all.stats.GetNodeStats;
 import org.sfs.nodes.compute.account.DeleteAccount;
 import org.sfs.nodes.compute.account.GetAccount;
+import org.sfs.nodes.compute.account.GetAccountMeta;
 import org.sfs.nodes.compute.account.HeadAccount;
 import org.sfs.nodes.compute.account.PostAccount;
-import org.sfs.nodes.compute.container.DeleteContainer;
+import org.sfs.nodes.compute.container.DeleteOrDestroyContainer;
 import org.sfs.nodes.compute.container.ExportContainer;
 import org.sfs.nodes.compute.container.GetContainer;
+import org.sfs.nodes.compute.container.GetContainerMeta;
 import org.sfs.nodes.compute.container.HeadContainer;
 import org.sfs.nodes.compute.container.ImportContainer;
 import org.sfs.nodes.compute.container.PostContainer;
 import org.sfs.nodes.compute.container.PutContainer;
+import org.sfs.nodes.compute.container.VerifyRepairAllContainersExecute;
+import org.sfs.nodes.compute.container.VerifyRepairAllContainersStop;
+import org.sfs.nodes.compute.container.VerifyRepairAllContainersWait;
+import org.sfs.nodes.compute.container.VerifyRepairContainerExecute;
+import org.sfs.nodes.compute.container.VerifyRepairContainerStop;
+import org.sfs.nodes.compute.container.VerifyRepairContainerWait;
+import org.sfs.nodes.compute.containerkeys.ReEncryptContainerKeys;
 import org.sfs.nodes.compute.identity.PostTokens;
+import org.sfs.nodes.compute.masterkey.ReEncryptMasterKeys;
+import org.sfs.nodes.compute.masterkey.VerifyRepairMasterKeys;
 import org.sfs.nodes.compute.object.DeleteObject;
 import org.sfs.nodes.compute.object.GetObject;
 import org.sfs.nodes.compute.object.GetObjectMeta;
 import org.sfs.nodes.compute.object.HeadObject;
 import org.sfs.nodes.compute.object.PostObject;
 import org.sfs.nodes.compute.object.PutObject;
-import org.sfs.nodes.compute.object.RepairObject;
+import org.sfs.nodes.compute.object.VerifyRepairObjectExecute;
+import org.sfs.nodes.compute.object.VerifyRepairObjectStop;
 import org.sfs.nodes.data.AckBlob;
 import org.sfs.nodes.data.CanReadVolume;
 import org.sfs.nodes.data.CanWriteVolume;
@@ -75,9 +86,11 @@ import org.sfs.nodes.data.ChecksumBlob;
 import org.sfs.nodes.data.DeleteBlob;
 import org.sfs.nodes.data.GetBlob;
 import org.sfs.nodes.data.PutBlob;
-import org.sfs.nodes.master.RunNodeJobs;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.nodes.master.MasterNodeExecuteJob;
+import org.sfs.nodes.master.MasterNodeStopJob;
+import org.sfs.nodes.master.MasterNodeWaitForJob;
 import org.sfs.rx.Defer;
+import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.Terminus;
 import org.sfs.rx.ToVoid;
@@ -86,6 +99,8 @@ import org.sfs.thread.NamedThreadFactory;
 import org.sfs.util.ConfigHelper;
 import org.sfs.util.FileSystemLock;
 import rx.Observable;
+import rx.plugins.RxJavaHooks;
+import rx.plugins.RxJavaSchedulersHook;
 
 import java.net.HttpURLConnection;
 import java.nio.file.Path;
@@ -148,6 +163,8 @@ public class SfsSingletonServer extends Server implements Shareable {
 
         LOGGER.info("Starting verticle " + _this);
 
+        initRxSchedulers(vertx);
+
         JsonObject config = config();
 
         String fsHome = ConfigHelper.getFieldOrEnv(config, "fs.home");
@@ -182,8 +199,10 @@ public class SfsSingletonServer extends Server implements Shareable {
             clusterHosts.add(HostAndPort.fromString(jsonClusterHost));
         }
 
-        // adds itself to the list if it wasn't added
-        clusterHosts.addAll(parsedPublishAddresses);
+        // adds itself to the list if the list is empty
+        if (clusterHosts.isEmpty()) {
+            clusterHosts.addAll(parsedPublishAddresses);
+        }
 
         int threadPoolIoQueueSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.io.queuesize", "10000"));
         Preconditions.checkArgument(threadPoolIoQueueSize > 0, "threadpool.io.queuesize must be greater than 0");
@@ -240,20 +259,19 @@ public class SfsSingletonServer extends Server implements Shareable {
         Preconditions.checkArgument(strRemoteNodeSecret != null, "remotenode.secret is required");
         remoteNodeSecret = BaseEncoding.base64().decode(strRemoteNodeSecret);
 
-        int numberOfObjectReplicas = new Integer(ConfigHelper.getFieldOrEnv(config, "number_of_object_replicas", "1"));
-        Preconditions.checkArgument(numberOfObjectReplicas > 0, "number_of_object_replicas must be greater or equal to 1");
+        int numberOfObjectReplicas = new Integer(ConfigHelper.getFieldOrEnv(config, "number_of_object_replicas", "0"));
+        Preconditions.checkArgument(numberOfObjectReplicas >= 0, "number_of_object_replicas must be greater or equal to 0");
 
         int tempFileTtl = new Integer(ConfigHelper.getFieldOrEnv(config, "temp_file_ttl", "86400000"));
-        Preconditions.checkArgument(tempFileTtl >= 0, "tempFileTtl must be greater or equal to 0");
+        Preconditions.checkArgument(tempFileTtl >= 0, "temp_file_ttl must be greater or equal to 0");
 
         final boolean dataNode = Boolean.valueOf(ConfigHelper.getFieldOrEnv(config, "node.data", "true"));
         final boolean masterNode = Boolean.valueOf(ConfigHelper.getFieldOrEnv(config, "node.master", "true"));
 
-
         this.httpsClient = createHttpClient(vertx, true);
         this.httpClient = createHttpClient(vertx, false);
 
-        Defer.empty()
+        Defer.aVoid()
                 .flatMap(aVoid -> sfsFileSystem.open(vertxContext, fileSystem))
                 .flatMap(aVoid -> fileSystemLock.lock(vertxContext))
                 .flatMap(aVoid -> authProviderService.open(vertxContext))
@@ -276,7 +294,7 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .flatMap(aVoid -> clusterInfo.open(vertxContext))
                 .flatMap(aVoid -> masterKeys.start(vertxContext))
                 .flatMap(aVoid -> containerKeys.start(vertxContext))
-                .flatMap(aVoid -> jobs.start(vertxContext, config))
+                .flatMap(aVoid -> jobs.open(vertxContext, config))
                 .flatMap(aVoid -> initHttpListeners(vertxContext, true))
                 .doOnNext(httpServers1 -> httpServers.addAll(httpServers))
                 .subscribe(
@@ -299,28 +317,28 @@ public class SfsSingletonServer extends Server implements Shareable {
         final Server _this = this;
         LOGGER.info("Stopping verticle " + _this);
 
-        Defer.empty()
+        Defer.aVoid()
                 .flatMap(aVoid ->
-                        RxHelper.iterate(httpServers, httpServer -> {
-                            AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
-                            httpServer.close(handler);
-                            return Observable.create(handler.subscribe)
+                        RxHelper.iterate(vertx, httpServers, httpServer -> {
+                            ObservableFuture<Void> handler = RxHelper.observableFuture();
+                            httpServer.close(handler.toHandler());
+                            return handler
                                     .onErrorResumeNext(throwable -> {
                                         LOGGER.error("Unhandled Exception", throwable);
-                                        return Defer.empty();
+                                        return Defer.aVoid();
                                     })
                                     .map(aVoid1 -> Boolean.TRUE);
                         }).map(new ToVoid<>()))
                 .flatMap(aVoid -> {
                     if (jobs != null) {
                         return jobs
-                                .stop(vertxContext)
+                                .close(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     }
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .flatMap(aVoid -> {
                     if (tempDirectoryCleaner != null) {
@@ -328,10 +346,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .stop()
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     }
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .flatMap(aVoid -> {
                     if (containerKeys != null) {
@@ -339,10 +357,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .stop(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     } else {
-                        return Defer.empty();
+                        return Defer.aVoid();
                     }
                 })
                 .flatMap(aVoid -> {
@@ -351,10 +369,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .stop(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     } else {
-                        return Defer.empty();
+                        return Defer.aVoid();
                     }
                 })
                 .flatMap(aVoid -> {
@@ -362,10 +380,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                         return clusterInfo.close(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     } else {
-                        return Defer.empty();
+                        return Defer.aVoid();
                     }
                 })
                 .flatMap(aVoid -> {
@@ -373,10 +391,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                         return nodeStats.close(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     } else {
-                        return Defer.empty();
+                        return Defer.aVoid();
                     }
                 })
                 .flatMap(aVoid -> {
@@ -385,10 +403,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .close(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     } else {
-                        return Defer.empty();
+                        return Defer.aVoid();
                     }
                 })
                 .flatMap(aVoid -> {
@@ -397,10 +415,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .stop(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     } else {
-                        return Defer.empty();
+                        return Defer.aVoid();
                     }
                 })
                 .flatMap(aVoid -> {
@@ -409,10 +427,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .stop(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     }
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .flatMap(aVoid -> {
                     if (awsKms != null) {
@@ -420,10 +438,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .stop(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     }
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .flatMap(aVoid -> {
                     if (authProviderService != null) {
@@ -431,10 +449,10 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 .close(vertxContext)
                                 .onErrorResumeNext(throwable -> {
                                     LOGGER.error("Unhandled Exception", throwable);
-                                    return Defer.empty();
+                                    return Defer.aVoid();
                                 });
                     }
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .doOnNext(aVoid -> {
                     if (ioPool != null) {
@@ -443,7 +461,7 @@ public class SfsSingletonServer extends Server implements Shareable {
                 })
                 .onErrorResumeNext(throwable -> {
                     LOGGER.error("Unhandled Exception", throwable);
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .doOnNext(aVoid -> {
                     if (backgroundPool != null) {
@@ -452,7 +470,7 @@ public class SfsSingletonServer extends Server implements Shareable {
                 })
                 .onErrorResumeNext(throwable -> {
                     LOGGER.error("Unhandled Exception", throwable);
-                    return Defer.empty();
+                    return Defer.aVoid();
                 })
                 .flatMap(new WaitForEmptyQueue(vertxContext, ioQueue))
                 .flatMap(new WaitForEmptyQueue(vertxContext, backgroundQueue))
@@ -582,7 +600,7 @@ public class SfsSingletonServer extends Server implements Shareable {
         // to initialize the rest of the application
         Set<HostAndPort> listeningHostAddresses = new HashSet<>();
         List<HttpServer> httpServers = new ArrayList<>();
-        return RxHelper.iterate(parsedListenAddresses, hostAndPort -> {
+        return RxHelper.iterate(vertx, parsedListenAddresses, hostAndPort -> {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("Parsed listen ports " + parsedListenAddresses);
             }
@@ -613,18 +631,18 @@ public class SfsSingletonServer extends Server implements Shareable {
     }
 
     protected Observable<HttpServer> createHttpServer(VertxContext<Server> vertxContext, HostAndPort hostAndPort, int verticleMaxHeaderSize, Router router) {
-        AsyncResultMemoizeHandler<HttpServer, HttpServer> handler = new AsyncResultMemoizeHandler<>();
+        ObservableFuture<HttpServer> handler = RxHelper.observableFuture();
         HttpServerOptions httpServerOptions = new HttpServerOptions()
                 .setMaxHeaderSize(verticleMaxHeaderSize)
                 .setCompressionSupported(false)
                 .setUsePooledBuffers(true)
                 .setAcceptBacklog(10000)
                 .setReuseAddress(true)
-                .setHandle100ContinueAutomatically(false);
+                .setHandle100ContinueAutomatically(true);
         vertxContext.vertx().createHttpServer(httpServerOptions)
                 .requestHandler(router::accept)
-                .listen(hostAndPort.getPort(), hostAndPort.getHostText(), handler);
-        return Observable.create(handler.subscribe);
+                .listen(hostAndPort.getPort(), hostAndPort.getHostText(), handler.toHandler());
+        return handler;
     }
 
     protected HttpClient createHttpClient(Vertx v, boolean https) {
@@ -636,6 +654,7 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .setPipelining(false)
                 .setMaxWaitQueueSize(200)
                 .setReuseAddress(true)
+                .setIdleTimeout(30)
                 .setSsl(https);
 
         return v.createHttpClient(httpClientOptions);
@@ -650,53 +669,90 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .response()
                 .setStatusCode(HttpURLConnection.HTTP_OK)
                 .end());
-        // admin methods
-        router.post("/admin/001/run_jobs").handler(new SfsRequestHandler(vertxContext, new RunNodeJobs()));
-        router.post("/admin/001/master_keys_check").handler(new SfsRequestHandler(vertxContext, new MasterKeysCheck()));
+
+        // cluster stats
+        router.get("/stats").handler(new SfsRequestHandler(vertxContext, new GetClusterStats()));
+
 
         // object admin method
-        router.getWithRegex("\\/admin_objectmetadata\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new GetObjectMeta()));
-        router.postWithRegex("\\/admin_objectrepair\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new RepairObject()));
+        router.get("/metadata_accounts/*").handler(new SfsRequestHandler(vertxContext, new GetAccountMeta()));
+        router.get("/metadata_containers/*").handler(new SfsRequestHandler(vertxContext, new GetContainerMeta()));
+        router.get("/metadata_objects/*").handler(new SfsRequestHandler(vertxContext, new GetObjectMeta()));
+
+        //re encrypt
+        router.post("/reencrypt_masterkeys").handler(new SfsRequestHandler(vertxContext, new ReEncryptMasterKeys()));
+        router.post("/reencrypt_containerkeys").handler(new SfsRequestHandler(vertxContext, new ReEncryptContainerKeys()));
+
+        //repair
+        router.post("/verify_repair_masterkeys").handler(new SfsRequestHandler(vertxContext, new VerifyRepairMasterKeys()));
+        router.postWithRegex("\\/verify_repair_objects\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new VerifyRepairObjectExecute()));
+        router.deleteWithRegex("\\/verify_repair_objects\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new VerifyRepairObjectStop()));
+        router.getWithRegex("\\/verify_repair_objects\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new VerifyRepairObjectStop()));
+
+        router.postWithRegex("\\/verify_repair_containers\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new VerifyRepairContainerExecute()));
+        router.deleteWithRegex("\\/verify_repair_containers\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new VerifyRepairContainerStop()));
+        router.getWithRegex("\\/verify_repair_containers\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new VerifyRepairContainerWait()));
+
+        router.post("/verify_repair_containers").handler(new SfsRequestHandler(vertxContext, new VerifyRepairAllContainersExecute()));
+        router.delete("/verify_repair_containers").handler(new SfsRequestHandler(vertxContext, new VerifyRepairAllContainersStop()));
+        router.get("/verify_repair_containers").handler(new SfsRequestHandler(vertxContext, new VerifyRepairAllContainersWait()));
+
+
         // container admin method
-        router.postWithRegex("\\/admin_containerexport\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new ExportContainer()));
-        router.postWithRegex("\\/admin_containerimport\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new ImportContainer()));
+        router.post("/export_container/*").handler(new SfsRequestHandler(vertxContext, new ExportContainer()));
+        router.post("/import_container/*").handler(new SfsRequestHandler(vertxContext, new ImportContainer()));
+
         // openstack keystone
         router.post("/v2.0/tokens").handler(new SfsRequestHandler(vertxContext, new PostTokens()));
-        // cluster methods
-        router.get("/cluster/stats").handler(new SfsRequestHandler(vertxContext, new GetClusterStats()));
-        // node methods
-        router.get("/node/stats").handler(new SfsRequestHandler(vertxContext, new GetNodeStats()));
-        // blob store methods
-        router.delete("/blob/001").handler(new SfsRequestHandler(vertxContext, new DeleteBlob()));
-        router.get("/blob/001").handler(new SfsRequestHandler(vertxContext, new GetBlob()));
-        router.put("/blob/001").handler(new SfsRequestHandler(vertxContext, new PutBlob()));
-        router.get("/blob/001/canwrite").handler(new SfsRequestHandler(vertxContext, new CanWriteVolume()));
-        router.get("/blob/001/canread").handler(new SfsRequestHandler(vertxContext, new CanReadVolume()));
-        router.put("/blob/001/ack").handler(new SfsRequestHandler(vertxContext, new AckBlob()));
-        router.get("/blob/001/checksum").handler(new SfsRequestHandler(vertxContext, new ChecksumBlob()));
+
+
         // openstack swift object methods
         router.getWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new GetObject()));
         router.headWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new HeadObject()));
         router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new DeleteObject()));
         router.putWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new PutObject()));
         router.postWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+\\/.+").handler(new SfsRequestHandler(vertxContext, new PostObject()));
+
+
         // openstack swift container methods
         router.getWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new GetContainer()));
         router.headWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new HeadContainer()));
         router.putWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PutContainer()));
         router.postWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PostContainer()));
-        router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new DeleteContainer()));
+        router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new DeleteOrDestroyContainer()));
+
+
         // openstack swift account methods
         router.getWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new GetAccount()));
         router.headWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new HeadAccount()));
         router.postWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new PostAccount()));
         router.deleteWithRegex("\\/openstackswift001\\/[^\\/]+").handler(new SfsRequestHandler(vertxContext, new DeleteAccount()));
 
+
+        // node specific calls below. ie. A call to any node that requires a master will get routed to the master node
+
+        // commands that must run on the master node
+        router.post("/_internal_node_master_execute_job").handler(new SfsRequestHandler(vertxContext, new MasterNodeExecuteJob()));
+        router.post("/_internal_node_master_wait_for_job").handler(new SfsRequestHandler(vertxContext, new MasterNodeWaitForJob()));
+        router.post("/_internal_node_master_stop_job").handler(new SfsRequestHandler(vertxContext, new MasterNodeStopJob()));
+
+        // node stats methods
+        router.get("/_internal_node/stats").handler(new SfsRequestHandler(vertxContext, new GetNodeStats()));
+
+        // data node blob store methods
+        router.delete("/_internal_node_data/blob").handler(new SfsRequestHandler(vertxContext, new DeleteBlob()));
+        router.get("/_internal_node_data/blob").handler(new SfsRequestHandler(vertxContext, new GetBlob()));
+        router.put("/_internal_node_data/blob").handler(new SfsRequestHandler(vertxContext, new PutBlob()));
+        router.get("/_internal_node_data/blob/canwrite").handler(new SfsRequestHandler(vertxContext, new CanWriteVolume()));
+        router.get("/_internal_node_data/blob/canread").handler(new SfsRequestHandler(vertxContext, new CanReadVolume()));
+        router.put("/_internal_node_data/blob/ack").handler(new SfsRequestHandler(vertxContext, new AckBlob()));
+        router.get("/_internal_node_data/blob/checksum").handler(new SfsRequestHandler(vertxContext, new ChecksumBlob()));
+
         if (testMode) {
             router.post("/admin/001/refresh_index").handler(new SfsRequestHandler(vertxContext, new RefreshIndex()));
             router.get("/admin/001/is_online").handler(new SfsRequestHandler(vertxContext,
                     sfsRequest ->
-                            Defer.empty()
+                            Defer.aVoid()
                                     .flatMap(aVoid1 -> sfsRequest.vertxContext().verticle().getClusterInfo().isOnline())
                                     .doOnNext(isOnline -> {
                                         if (Boolean.TRUE.equals(isOnline)) {
@@ -732,6 +788,13 @@ public class SfsSingletonServer extends Server implements Shareable {
             SfsRequest sfsRequest = new SfsRequest(vertxContext, routingContext.request());
             delegate.handle(sfsRequest);
         }
+    }
+
+    public void initRxSchedulers(Vertx vertx) {
+        RxJavaSchedulersHook hook = RxHelper.schedulerHook(vertx);
+        RxJavaHooks.setOnIOScheduler(f -> hook.getIOScheduler());
+        RxJavaHooks.setOnNewThreadScheduler(f -> hook.getNewThreadScheduler());
+        RxJavaHooks.setOnComputationScheduler(f -> hook.getComputationScheduler());
     }
 }
 

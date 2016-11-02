@@ -39,6 +39,7 @@ import org.sfs.util.HttpBodyLogger;
 import org.sfs.util.HttpClientResponseHeaderLogger;
 import org.sfs.vo.PersistentMasterKey;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -86,11 +87,8 @@ public class MasterKeysCheckTest extends BaseTestVerticle {
                     return (Void) null;
                 })
                 .flatMap(new MasterKeysCheck(HTTP_CLIENT, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new BufferToJsonObject())
-                .map(jsonObject -> {
+                .map(httpClientResponseAndBuffer -> {
+                    JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
                     assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
                     assertEquals(context, "Success", jsonObject.getString("message"));
                     return jsonObject;
@@ -161,11 +159,8 @@ public class MasterKeysCheckTest extends BaseTestVerticle {
                 .map(new ToType<>((Void) null))
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
                 .flatMap(new MasterKeysCheck(HTTP_CLIENT, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new BufferToJsonObject())
-                .map(jsonObject -> {
+                .map(httpClientResponseAndBuffer -> {
+                    JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
                     assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
                     assertEquals(context, "Success", jsonObject.getString("message"));
                     return jsonObject;
@@ -237,11 +232,8 @@ public class MasterKeysCheckTest extends BaseTestVerticle {
                 .map(new ToType<>((Void) null))
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
                 .flatMap(new MasterKeysCheck(HTTP_CLIENT, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new BufferToJsonObject())
-                .map(jsonObject -> {
+                .map(httpClientResponseAndBuffer -> {
+                    JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
                     assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
                     assertEquals(context, "Success", jsonObject.getString("message"));
                     return jsonObject;

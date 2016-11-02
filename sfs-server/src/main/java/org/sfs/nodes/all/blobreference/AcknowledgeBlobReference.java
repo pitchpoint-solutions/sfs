@@ -16,22 +16,19 @@
 
 package org.sfs.nodes.all.blobreference;
 
+import com.google.common.base.Optional;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.XNode;
+import org.sfs.rx.Defer;
 import org.sfs.vo.TransientBlobReference;
 import rx.Observable;
 import rx.functions.Func1;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.collect.Iterables.isEmpty;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static org.sfs.rx.Defer.just;
-import static org.sfs.rx.RxHelper.iterate;
 
 public class AcknowledgeBlobReference implements Func1<TransientBlobReference, Observable<Boolean>> {
 
@@ -53,30 +50,25 @@ public class AcknowledgeBlobReference implements Func1<TransientBlobReference, O
                 .flatMap(transientBlobReference1 -> {
                     String volumeId = transientBlobReference1.getVolumeId().get();
                     long position = transientBlobReference1.getPosition().get();
-                    Iterable<XNode> xNodes = clusterInfo.getNodesForVolume(vertxContext, volumeId);
-                    if (isEmpty(xNodes)) {
+                    Optional<XNode> oXNode = clusterInfo.getNodesForVolume(vertxContext, volumeId);
+                    if (!oXNode.isPresent()) {
                         LOGGER.warn("No nodes contain volume " + volumeId);
-                    }
-                    AtomicBoolean found = new AtomicBoolean(false);
-                    return iterate(
-                            xNodes,
-                            xNode -> xNode.acknowledge(volumeId, position)
-                                    .map(headerBlobOptional -> {
-                                        if (headerBlobOptional.isPresent()) {
-                                            checkState(found.compareAndSet(false, true), "Modified more than once");
-                                            // stop iterating
-                                            return false;
-                                        }
+                        return Defer.just(false);
+                    } else {
+                        XNode xNode = oXNode.get();
+                        return xNode.acknowledge(volumeId, position)
+                                .map(headerBlobOptional -> {
+                                    if (headerBlobOptional.isPresent()) {
                                         return true;
-                                    })
-
-                                    .onErrorResumeNext(throwable -> {
-                                        LOGGER.error("Handling Connect Failure " + xNode.getHostAndPort() + ". acknowledge blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition(), throwable);
-                                        // continue iterating
-                                        return just(true);
-                                    })
-                    )
-                            .map(aBoolean -> found.get());
+                                    } else {
+                                        return false;
+                                    }
+                                });
+                    }
+                })
+                .onErrorResumeNext(throwable -> {
+                    LOGGER.error("Acknowledge fail blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition(), throwable);
+                    return Defer.just(false);
                 })
                 .singleOrDefault(false)
                 .map(modified -> {

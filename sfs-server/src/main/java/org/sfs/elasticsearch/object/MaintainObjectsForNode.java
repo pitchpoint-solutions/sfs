@@ -29,20 +29,19 @@ import rx.Observable;
 import rx.functions.Func1;
 
 import java.util.Calendar;
+import java.util.concurrent.TimeUnit;
 
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static java.util.Calendar.MILLISECOND;
-import static java.util.Calendar.getInstance;
 import static org.elasticsearch.index.query.QueryBuilders.rangeQuery;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.DateFormatter.toDateTimeString;
 
 public class MaintainObjectsForNode implements Func1<Void, Observable<Void>> {
 
     private static final Logger LOGGER = getLogger(MaintainObjectsForNode.class);
     private final VertxContext<Server> vertxContext;
-    public static final int CONSISTENCY_THRESHOLD = 86400000;
+    public static final long CONSISTENCY_THRESHOLD = TimeUnit.MINUTES.toMillis(5);
     public static final int VERIFY_RETRY_COUNT = 3;
     private String nodeId;
 
@@ -55,11 +54,12 @@ public class MaintainObjectsForNode implements Func1<Void, Observable<Void>> {
     public Observable<Void> call(final Void aVoid) {
         final Elasticsearch elasticSearch = vertxContext.verticle().elasticsearch();
 
-        return empty()
+        return aVoid()
                 .flatMap(new ListSfsObjectIndexes(vertxContext))
                 .flatMap(index -> {
-                    Calendar consistencyThreshold = getInstance();
-                    consistencyThreshold.add(MILLISECOND, -CONSISTENCY_THRESHOLD);
+                    long now = System.currentTimeMillis() - CONSISTENCY_THRESHOLD;
+                    Calendar consistencyThreshold = Calendar.getInstance();
+                    consistencyThreshold.setTimeInMillis(now);
 
                     RangeQueryBuilder query = rangeQuery("update_ts").lte(toDateTimeString(consistencyThreshold));
 

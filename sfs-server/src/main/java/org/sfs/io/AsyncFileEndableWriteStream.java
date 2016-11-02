@@ -21,12 +21,12 @@ import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.file.AsyncFile;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Subscriber;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static rx.Observable.create;
 
 public class AsyncFileEndableWriteStream implements BufferEndableWriteStream {
 
@@ -101,9 +101,9 @@ public class AsyncFileEndableWriteStream implements BufferEndableWriteStream {
     }
 
     private void endInternal() {
-        AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
-        delegate.close(handler);
-        create(handler.subscribe)
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        delegate.close(handler.toHandler());
+        handler
                 .subscribe(new Subscriber<Void>() {
                     @Override
                     public void onCompleted() {

@@ -22,7 +22,7 @@ import org.sfs.VertxContext;
 import rx.Observable;
 import rx.functions.Func1;
 
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class IndexRefresh implements Func1<Void, Observable<Void>> {
 
@@ -35,7 +35,7 @@ public class IndexRefresh implements Func1<Void, Observable<Void>> {
     @Override
     public Observable<Void> call(Void aVoid) {
         Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-        return empty()
+        return aVoid()
                 .flatMap(new ListSfsIndexes(vertxContext))
                 .toList()
                 .flatMap(names -> {

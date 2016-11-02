@@ -17,11 +17,12 @@
 package org.sfs.nodes;
 
 import com.google.common.base.Optional;
+import com.google.common.base.Preconditions;
 import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.Defer;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.vo.TransientServiceDef;
@@ -31,13 +32,14 @@ import rx.Subscriber;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static com.google.common.base.Optional.fromNullable;
 import static com.google.common.base.Preconditions.checkState;
@@ -48,7 +50,7 @@ import static java.lang.Boolean.TRUE;
 import static java.util.Collections.emptyList;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.sfs.filesystem.volume.Volume.Status;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class ClusterInfo {
 
@@ -60,19 +62,20 @@ public class ClusterInfo {
     private Map<String, TransientServiceDef> nodesByStartedVolume;
     private NavigableMap<Long, Set<String>> startedVolumeIdByUseableSpace;
     private int numberOfObjectReplicas;
-    private TransientServiceDef maintainerNode;
+    private TransientServiceDef currentMaintainerNode;
+    private List<TransientServiceDef> masterNodes;
     private Long timerId;
 
     public Observable<Void> open(VertxContext<Server> vertxContext) {
         this.vertxContext = vertxContext;
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> updateClusterInfo(vertxContext))
                 .doOnNext(aVoid -> startTimer())
                 .doOnNext(aVoid -> started = true);
     }
 
     public Observable<Void> close(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> started = false)
                 .doOnNext(aVoid -> stopTimer())
                 .doOnNext(aVoid -> {
@@ -80,7 +83,8 @@ public class ClusterInfo {
                         nodesByStartedVolume.clear();
                         nodesByStartedVolume = null;
                     }
-                    maintainerNode = null;
+                    currentMaintainerNode = null;
+                    masterNodes = null;
                 });
     }
 
@@ -101,7 +105,7 @@ public class ClusterInfo {
     }
 
     public Observable<Void> forceRefresh(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkStarted())
                 .flatMap(aVoid -> updateClusterInfo(vertxContext));
     }
@@ -125,13 +129,13 @@ public class ClusterInfo {
         });
     }
 
-    public Iterable<XNode> getNodesForVolume(VertxContext<Server> vertxContext, String volumeId) {
+    public Optional<XNode> getNodesForVolume(VertxContext<Server> vertxContext, String volumeId) {
         Nodes nodes = vertxContext.verticle().nodes();
         TransientServiceDef serviceDef = nodesByStartedVolume.get(volumeId);
         if (serviceDef != null) {
-            return nodes.createNodes(vertxContext, serviceDef);
+            return Optional.of(nodes.remoteNode(vertxContext, serviceDef));
         } else {
-            return Collections.emptyList();
+            return Optional.absent();
         }
     }
 
@@ -142,16 +146,18 @@ public class ClusterInfo {
 
     public Optional<TransientServiceDef> getCurrentMaintainerNode() {
         checkStarted();
-        return fromNullable(maintainerNode);
+        return fromNullable(currentMaintainerNode);
     }
 
-    public Iterable<TransientServiceDef> getMasterNodes() {
+    public TransientServiceDef getCurrentMasterNode() {
         checkStarted();
-        return from(getNodesWithStartedVolumes())
-                .filter(input -> {
-                    Boolean masterNode = input.getMaster().orNull();
-                    return TRUE.equals(masterNode);
-                });
+        if (masterNodes.isEmpty()) {
+            Preconditions.checkState(masterNodes.isEmpty(), "no elected master node");
+        }
+        if (masterNodes.size() > 1) {
+            Preconditions.checkState(masterNodes.size() > 1, "more than one elected master node");
+        }
+        return masterNodes.get(0);
     }
 
     public Iterable<TransientServiceDef> getDataNodes() {
@@ -206,8 +212,8 @@ public class ClusterInfo {
     protected Observable<Void> updateClusterInfo(VertxContext<Server> vertxContext) {
         Nodes nodes = vertxContext.verticle().nodes();
         List<TransientServiceDef> transientServiceDefs = new ArrayList<>();
-        return RxHelper.iterate(nodes.getClusterHosts(), hostAndPort -> {
-            XNode xNode = nodes.createNode(vertxContext, hostAndPort);
+        return RxHelper.iterate(vertxContext.vertx(), nodes.getClusterHosts(), hostAndPort -> {
+            XNode xNode = nodes.remoteNode(vertxContext, hostAndPort);
             return xNode.getNodeStats()
                     .doOnNext(transientServiceDefOptional -> {
                         if (transientServiceDefOptional.isPresent()) {
@@ -217,22 +223,25 @@ public class ClusterInfo {
                     .map(transientServiceDefOptional -> true)
                     .onErrorResumeNext(throwable -> {
                         LOGGER.warn("Handling Connect Error", throwable);
-                        ResultMemoizeHandler<Boolean> handler = new ResultMemoizeHandler<>();
-                        vertxContext.vertx().runOnContext(event -> handler.complete(true));
-                        return Observable.create(handler.subscribe);
+                        return Defer.just(true);
                     });
         })
                 .map(new ToVoid<>())
                 .doOnNext(aVoid -> {
+
                     int updatedReplicaCount = 0;
 
-                    Map<String, TransientServiceDef> updatedNodesByStartedVolume = new HashMap<>();
-                    NavigableMap<Long, Set<String>> updatedStartedVolumeIdByUseableSpace = new TreeMap<>();
+                    Map<String, TransientServiceDef> updatedNodesByStartedVolume = new ConcurrentHashMap<>();
+                    NavigableMap<Long, Set<String>> updatedStartedVolumeIdByUseableSpace = new ConcurrentSkipListMap<>();
+                    List<TransientServiceDef> updatedMasterNodes = new CopyOnWriteArrayList<>();
 
                     TransientServiceDef candidateMaintainerNode = null;
 
                     for (TransientServiceDef transientServiceDef : transientServiceDefs) {
 
+                        if (Boolean.TRUE.equals(transientServiceDef.getMaster().orNull())) {
+                            updatedMasterNodes.add(transientServiceDef);
+                        }
 
                         if (candidateMaintainerNode == null) {
                             candidateMaintainerNode = transientServiceDef;
@@ -267,16 +276,17 @@ public class ClusterInfo {
 
 
                                     updatedNodesByStartedVolume.put(volumeId, transientServiceDef);
-
-                                    numberOfObjectReplicas = updatedReplicaCount;
-                                    startedVolumeIdByUseableSpace = updatedStartedVolumeIdByUseableSpace;
-                                    nodesByStartedVolume = updatedNodesByStartedVolume;
-                                    maintainerNode = candidateMaintainerNode;
-                                    allNodes = transientServiceDefs;
                                 }
                             }
                         }
                     }
+
+                    numberOfObjectReplicas = updatedReplicaCount;
+                    startedVolumeIdByUseableSpace = updatedStartedVolumeIdByUseableSpace;
+                    nodesByStartedVolume = updatedNodesByStartedVolume;
+                    currentMaintainerNode = candidateMaintainerNode;
+                    allNodes = transientServiceDefs;
+                    masterNodes = updatedMasterNodes;
                 });
     }
 }

@@ -17,14 +17,19 @@
 package org.sfs.nodes.compute.object;
 
 import com.google.common.base.Optional;
+import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
+import org.sfs.elasticsearch.object.MaintainSingleObject;
 import org.sfs.encryption.ContainerKeys;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.NoEndEndableWriteStream;
 import org.sfs.nodes.all.segment.GetSegmentReadStream;
+import org.sfs.rx.Defer;
+import org.sfs.rx.NullSubscriber;
+import org.sfs.rx.ToVoid;
 import org.sfs.vo.Segment;
 import org.sfs.vo.TransientBlobReference;
 import org.sfs.vo.TransientSegment;
@@ -33,10 +38,8 @@ import rx.Observable;
 import rx.functions.Func1;
 
 import static com.google.common.base.Preconditions.checkState;
-import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Boolean.TRUE;
-import static java.lang.String.format;
 import static org.sfs.io.AsyncIO.end;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.rx.RxHelper.iterate;
@@ -47,10 +50,12 @@ public class CopySegmentsReadStreams implements Func1<Iterable<TransientSegment>
     private static final Logger LOGGER = getLogger(CopySegmentsReadStreams.class);
     private final VertxContext<Server> vertxContext;
     private final BufferEndableWriteStream writeStream;
+    private final boolean verifyChecksum;
 
-    public CopySegmentsReadStreams(VertxContext<Server> vertxContext, BufferEndableWriteStream writeStream) {
+    public CopySegmentsReadStreams(VertxContext<Server> vertxContext, BufferEndableWriteStream writeStream, boolean verifyChecksum) {
         this.vertxContext = vertxContext;
         this.writeStream = writeStream;
+        this.verifyChecksum = verifyChecksum;
     }
 
     @Override
@@ -58,15 +63,17 @@ public class CopySegmentsReadStreams implements Func1<Iterable<TransientSegment>
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("begin copy segment read streams");
         }
+        Vertx vertx = vertxContext.vertx();
         return iterate(
+                vertx,
                 transientSegments,
                 transientSegment -> {
                     if (!transientSegment.isTinyData()) {
                         return just(transientSegment)
-                                .flatMap(new GetSegmentReadStream(vertxContext))
+                                .flatMap(new GetSegmentReadStream(vertxContext, verifyChecksum))
                                 .doOnNext(oHolder -> {
                                     if (!oHolder.isPresent()) {
-                                        checkState(oHolder.isPresent(), format("Failed to find ReadStream for segment %d from object %s", transientSegment.getId(), transientSegment.getParent().getParent().toJsonObject().encodePrettily()));
+                                        throw new SegmentReadStreamNotFoundException(String.format("Failed to find ReadStream for segment %d from object %s %s", transientSegment.getId(), transientSegment.getParent().getParent().getId(), transientSegment.getParent().getParent().toJsonObject().encodePrettily()));
                                     }
                                 })
                                 .map(Optional::get)
@@ -85,7 +92,7 @@ public class CopySegmentsReadStreams implements Func1<Iterable<TransientSegment>
                                 })
                                 .map(aVoid -> true);
                     } else {
-                        Buffer tinyData = buffer(transientSegment.getTinyData());
+                        Buffer tinyData = Buffer.buffer(transientSegment.getTinyData());
                         if (LOGGER.isDebugEnabled()) {
                             LOGGER.debug("begin copy of blob reference object=" + transientSegment.getParent().getParent().getId() + ", version=" + transientSegment.getParent().getId() + ", segment=" + transientSegment.getId());
                         }
@@ -134,6 +141,12 @@ public class CopySegmentsReadStreams implements Func1<Iterable<TransientSegment>
                     .map(keyResponse -> keyResponse.getData().decrypt(delegateWriteStream));
         } else {
             return Observable.just(delegateWriteStream);
+        }
+    }
+
+    public static class SegmentReadStreamNotFoundException extends RuntimeException {
+        public SegmentReadStreamNotFoundException(String message) {
+            super(message);
         }
     }
 }

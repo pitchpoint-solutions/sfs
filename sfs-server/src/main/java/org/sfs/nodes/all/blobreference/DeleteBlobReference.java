@@ -16,11 +16,14 @@
 
 package org.sfs.nodes.all.blobreference;
 
+import com.google.common.base.Optional;
+import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.XNode;
+import org.sfs.rx.Defer;
 import org.sfs.vo.TransientBlobReference;
 import rx.Observable;
 import rx.functions.Func1;
@@ -53,31 +56,25 @@ public class DeleteBlobReference implements Func1<TransientBlobReference, Observ
                 .flatMap(transientBlobReference1 -> {
                     String volumeId = transientBlobReference1.getVolumeId().get();
                     long position = transientBlobReference1.getPosition().get();
-                    Iterable<XNode> xNodes = clusterInfo.getNodesForVolume(vertxContext, volumeId);
-                    if (isEmpty(xNodes)) {
+                    Optional<XNode> oXNode = clusterInfo.getNodesForVolume(vertxContext, volumeId);
+                    if (!oXNode.isPresent()) {
                         LOGGER.warn("No nodes contain volume " + volumeId);
+                        return Defer.just(false);
+                    } else {
+                        XNode xNode = oXNode.get();
+                        return xNode.delete(volumeId, position)
+                                .map(headerBlobOptional -> {
+                                    if (headerBlobOptional.isPresent()) {
+                                        return true;
+                                    } else {
+                                        return false;
+                                    }
+                                });
                     }
-                    AtomicBoolean found = new AtomicBoolean(false);
-                    return iterate(
-                            xNodes,
-                            xNode ->
-                                    xNode.delete(volumeId, position)
-                                            .map(headerBlobOptional -> {
-                                                if (headerBlobOptional.isPresent()) {
-                                                    checkState(found.compareAndSet(false, true), "Modified more than once");
-                                                    // stop iterating
-                                                    return false;
-                                                }
-                                                return true;
-                                            })
-                                            .onErrorResumeNext(throwable -> {
-                                                LOGGER.error("Handling Connect Failure " + xNode.getHostAndPort() + ". delete blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition(), throwable);
-                                                // continue iterating
-                                                return just(true);
-                                            })
-                    )
-                            .map(aBoolean -> found.get());
-
+                })
+                .onErrorResumeNext(throwable -> {
+                    LOGGER.error("Delete fail blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition(), throwable);
+                    return Defer.just(false);
                 })
                 .singleOrDefault(false)
                 .map(modified -> {

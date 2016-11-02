@@ -42,7 +42,7 @@ import static java.lang.System.currentTimeMillis;
 import static java.nio.file.Files.createTempDirectory;
 import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.PrngRandom.getCurrentInstance;
 import static org.sfs.util.VertxAssert.assertArrayEquals;
 import static org.sfs.util.VertxAssert.assertEquals;
@@ -71,7 +71,7 @@ public class FileBackedBufferTest {
 
         Buffer testBuffer = buffer("test");
         Async async = context.async();
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     FileBackedBuffer fileBackedBuffer = new FileBackedBuffer(sfsVertx, 2, encrypt, tmpDir);
                     ReadStream<Buffer> readStream = new BufferReadStream(testBuffer);
@@ -109,10 +109,10 @@ public class FileBackedBufferTest {
         Path tmpDir = createTempDirectory(valueOf(currentTimeMillis()));
 
         byte[] data = new byte[1024 * 1024 * 10];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
         Buffer testBuffer = buffer(data);
         Async async = context.async();
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     FileBackedBuffer fileBackedBuffer = new FileBackedBuffer(sfsVertx, 1024, encrypt, tmpDir);
                     ReadStream<Buffer> readStream = new BufferReadStream(testBuffer);
@@ -150,7 +150,7 @@ public class FileBackedBufferTest {
 
         Buffer testBuffer = buffer("test");
         Async async = context.async();
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     FileBackedBuffer fileBackedBuffer = new FileBackedBuffer(sfsVertx, 1024, encrypt, tmpDir);
                     ReadStream<Buffer> readStream = new BufferReadStream(testBuffer);

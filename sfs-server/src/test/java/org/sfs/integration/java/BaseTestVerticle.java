@@ -40,7 +40,8 @@ import org.sfs.SfsServer;
 import org.sfs.TestSubscriber;
 import org.sfs.VertxContext;
 import org.sfs.integration.java.func.WaitForCluster;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import rx.Observable;
 
@@ -61,8 +62,7 @@ import static java.nio.file.Files.createTempDirectory;
 import static org.elasticsearch.common.settings.Settings.Builder;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.node.NodeBuilder.nodeBuilder;
-import static org.sfs.rx.Defer.empty;
-import static rx.Observable.create;
+import static org.sfs.rx.Defer.aVoid;
 import static rx.Observable.from;
 import static rx.Observable.just;
 
@@ -90,7 +90,7 @@ public class BaseTestVerticle {
     @Before
     public void before(TestContext context) {
         Async async = context.async();
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     VERTX = rule.vertx();
                     String clusteruuid = UUID.randomUUID().toString();
@@ -170,13 +170,13 @@ public class BaseTestVerticle {
 
                     SfsServer sfsServer = new SfsServer();
 
-                    AsyncResultMemoizeHandler<String, String> handler = new AsyncResultMemoizeHandler<>();
+                    ObservableFuture<String> handler = RxHelper.observableFuture();
                     VERTX.deployVerticle(
                             sfsServer,
                             new DeploymentOptions()
                                     .setConfig(verticleConfig),
-                            handler);
-                    return create(handler.subscribe)
+                            handler.toHandler());
+                    return handler
                             .map(new ToVoid<>())
                             .doOnNext(aVoid1 -> {
                                 VERTX_CONTEXT = sfsServer.vertxContext();
@@ -198,9 +198,9 @@ public class BaseTestVerticle {
         Set<String> deploymentIds = VERTX.deploymentIDs();
         return from(deploymentIds)
                 .flatMap(deploymentId -> {
-                    AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
-                    VERTX.undeploy(deploymentId, handler);
-                    return create(handler.subscribe);
+                    ObservableFuture<Void> handler = RxHelper.observableFuture();
+                    VERTX.undeploy(deploymentId, handler.toHandler());
+                    return handler;
                 })
                 .onErrorResumeNext(throwable -> {
                     throwable.printStackTrace();

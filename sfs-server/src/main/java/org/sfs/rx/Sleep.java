@@ -21,8 +21,6 @@ import org.sfs.VertxContext;
 import rx.Observable;
 import rx.functions.Func1;
 
-import static rx.Observable.create;
-
 public class Sleep implements Func1<Void, Observable<Void>> {
 
     private final VertxContext<Server> vertxContext;
@@ -35,9 +33,9 @@ public class Sleep implements Func1<Void, Observable<Void>> {
 
     @Override
     public Observable<Void> call(Void aVoid) {
-        final MemoizeHandler<Long, Long> handler = new MemoizeHandler<>();
-        vertxContext.vertx().setTimer(timeout, handler::handle);
-        return create(handler.subscribe)
+        ObservableFuture<Long> handler = RxHelper.observableFuture();
+        vertxContext.vertx().setTimer(timeout, handler::complete);
+        return handler
                 .map(aLong -> null);
     }
 }

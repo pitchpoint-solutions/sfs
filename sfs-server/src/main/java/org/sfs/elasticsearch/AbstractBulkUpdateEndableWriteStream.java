@@ -29,6 +29,7 @@ import org.elasticsearch.search.SearchHit;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.io.EndableWriteStream;
+import org.sfs.rx.Defer;
 import org.sfs.rx.Sleep;
 import rx.Observable;
 import rx.Subscriber;
@@ -37,7 +38,6 @@ import static com.google.common.base.Objects.equal;
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.String.format;
-import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.elasticsearch.common.unit.TimeValue.timeValueMillis;
 import static rx.Observable.just;
 
@@ -73,7 +73,8 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
         checkWriteQueueNotFull();
         checkNotEnded();
         writeQueueFull = true;
-        write0(data)
+        Defer.aVoid()
+                .flatMap(aVoid -> write0(data))
                 .subscribe(new Subscriber<Void>() {
                     @Override
                     public void onCompleted() {
@@ -124,7 +125,8 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
         checkWriteQueueNotFull();
         checkNotEnded();
         ended = true;
-        write0(data)
+        Defer.aVoid()
+                .flatMap(aVoid -> write0(data))
                 .subscribe(new Subscriber<Void>() {
                     @Override
                     public void onCompleted() {
@@ -246,7 +248,6 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
                         }
                         return (Void) null;
                     })
-                    .timeout(120, SECONDS, vertxContext.rxVertx().contextScheduler())
                     .onErrorResumeNext(throwable -> {
                         LOGGER.warn("Handling Error", throwable);
                         return just(null);

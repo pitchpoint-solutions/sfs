@@ -16,12 +16,10 @@
 
 package org.sfs.filesystem;
 
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Future;
-import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.SfsVertx;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.Subscriber;
 import rx.functions.Func1;
@@ -31,7 +29,6 @@ import static java.lang.Boolean.TRUE;
 import static org.sfs.filesystem.JournalFile.Entry;
 import static org.sfs.math.Rounding.up;
 import static org.sfs.rx.Defer.just;
-import static rx.Observable.create;
 
 public class JournalScanner {
 
@@ -51,19 +48,19 @@ public class JournalScanner {
     public Observable<Void> scan(SfsVertx vertx, Func1<Entry, Observable<Boolean>> transformer) {
         return journalFile.size(vertx)
                 .flatMap(fileSize -> {
-                    AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+                    ObservableFuture<Void> handler = RxHelper.observableFuture();
                     long roundedFileSize = up(fileSize, blockSize);
                     if (isDebugEnabled) {
                         long numberOfBlocks = roundedFileSize / blockSize;
                         LOGGER.debug("Max position is " + roundedFileSize + ". Expecting at most " + numberOfBlocks + " blocks");
                     }
                     scan0(vertx, transformer, handler, roundedFileSize);
-                    return create(handler.subscribe);
+                    return handler;
                 });
     }
 
 
-    protected void scan0(SfsVertx vertx, Func1<Entry, Observable<Boolean>> transformer, Handler<AsyncResult<Void>> handler, long fileSize) {
+    protected void scan0(SfsVertx vertx, Func1<Entry, Observable<Boolean>> transformer, ObservableFuture<Void> handler, long fileSize) {
         if (isDebugEnabled) {
             LOGGER.debug("Reading 1 blocks @ position " + position);
         }
@@ -98,7 +95,7 @@ public class JournalScanner {
                     @Override
                     public void onCompleted() {
                         if (!TRUE.equals(result) || position >= fileSize) {
-                            Future.<Void>succeededFuture().setHandler(handler);
+                            handler.complete(null);
                         } else {
                             vertx.runOnContext(event -> scan0(vertx, transformer, handler, fileSize));
                         }
@@ -106,7 +103,7 @@ public class JournalScanner {
 
                     @Override
                     public void onError(Throwable e) {
-                        Future.<Void>failedFuture(e).setHandler(handler);
+                        handler.fail(e);
                     }
 
                     @Override

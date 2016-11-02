@@ -16,13 +16,13 @@
 
 package org.sfs.integration.java.func;
 
-import io.vertx.core.Handler;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -68,15 +68,10 @@ public class KeystoneAuth implements Func1<Void, Observable<HttpClientResponse>>
                 .flatMap(new Func1<Void, Observable<HttpClientResponse>>() {
                     @Override
                     public Observable<HttpClientResponse> call(Void aVoid) {
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         HttpClientRequest httpClientRequest =
-                                httpClient.post("/v2.0/tokens", handler)
-                                        .exceptionHandler(new Handler<Throwable>() {
-                                            @Override
-                                            public void handle(Throwable event) {
-                                                handler.fail(event);
-                                            }
-                                        })
+                                httpClient.post("/v2.0/tokens", handler::complete)
+                                        .exceptionHandler(handler::fail)
                                         .setTimeout(10000);
 
                         JsonObject requestJson =
@@ -92,7 +87,7 @@ public class KeystoneAuth implements Func1<Void, Observable<HttpClientResponse>>
                                         );
 
                         httpClientRequest.end(requestJson.encode(), UTF_8.toString());
-                        return create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

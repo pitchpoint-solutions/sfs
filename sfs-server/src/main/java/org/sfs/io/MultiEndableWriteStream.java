@@ -19,12 +19,12 @@ package org.sfs.io;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Subscriber;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static rx.Observable.create;
 import static rx.Observable.from;
 
 public class MultiEndableWriteStream implements BufferEndableWriteStream {
@@ -122,9 +122,9 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
             delegateDrainHandler = null;
             from(delegateWriteStreams)
                     .flatMap(endableWriteStream -> {
-                        ResultMemoizeHandler<Void> h = new ResultMemoizeHandler<>();
-                        endableWriteStream.drainHandler(h);
-                        return create(h.subscribe);
+                        ObservableFuture<Void> h = RxHelper.observableFuture();
+                        endableWriteStream.drainHandler(h::complete);
+                        return h;
                     })
                     .subscribe(new Subscriber<Void>() {
                         @Override
@@ -150,8 +150,8 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
             delegateEndHandler = null;
             from(delegateWriteStreams)
                     .flatMap(endableWriteStream -> {
-                        ResultMemoizeHandler<Void> h = new ResultMemoizeHandler<>();
-                        endableWriteStream.endHandler(h);
+                        ObservableFuture<Void> h = RxHelper.observableFuture();
+                        endableWriteStream.endHandler(h::complete);
                         if (endBuffer != null) {
                             Buffer data = endBuffer;
                             endBuffer = null;
@@ -159,7 +159,7 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
                         } else {
                             endableWriteStream.end();
                         }
-                        return create(h.subscribe);
+                        return h;
                     })
                     .subscribe(new Subscriber<Void>() {
                         @Override

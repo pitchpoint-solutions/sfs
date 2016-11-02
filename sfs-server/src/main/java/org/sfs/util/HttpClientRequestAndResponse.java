@@ -14,24 +14,26 @@
  * limitations under the License.
  */
 
-package org.sfs.integration.java.func;
+package org.sfs.util;
 
-import org.sfs.Server;
-import org.sfs.VertxContext;
-import rx.Observable;
-import rx.functions.Func1;
+import io.vertx.core.http.HttpClientRequest;
+import io.vertx.core.http.HttpClientResponse;
 
-public class RunJobs implements Func1<Void, Observable<Void>> {
+public class HttpClientRequestAndResponse {
 
-    private final VertxContext<Server> vertxContext;
+    private final HttpClientRequest request;
+    private final HttpClientResponse response;
 
-    public RunJobs(VertxContext<Server> vertxContext) {
-        this.vertxContext = vertxContext;
+    public HttpClientRequestAndResponse(HttpClientRequest request, HttpClientResponse response) {
+        this.request = request;
+        this.response = response;
     }
 
-    @Override
-    public Observable<Void> call(Void aVoid) {
-        return vertxContext.verticle().jobs().run(vertxContext);
+    public HttpClientRequest getRequest() {
+        return request;
+    }
+
+    public HttpClientResponse getResponse() {
+        return response;
     }
 }
-

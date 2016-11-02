@@ -39,7 +39,7 @@ import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static org.elasticsearch.common.unit.TimeValue.timeValueMillis;
 import static org.elasticsearch.search.sort.SortOrder.ASC;
 import static org.elasticsearch.search.sort.SortParseElement.DOC_FIELD_NAME;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static rx.Observable.defer;
 
@@ -64,12 +64,18 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
     private boolean queried = false;
     private final Context context;
     private long count = 0;
+    private boolean aborted = false;
 
     public ScanAndScrollStreamProducer(VertxContext<Server> vertxContext, QueryBuilder query) {
         this.vertxContext = vertxContext;
         this.elasticsearch = vertxContext.verticle().elasticsearch();
         this.query = query;
         this.context = vertxContext.vertx().getOrCreateContext();
+    }
+
+    @Override
+    public void abort() {
+        aborted = true;
     }
 
     public String[] getTypes() {
@@ -95,6 +101,11 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
         for (int i = 0; i < indeces.length; i++) {
             this.indeces[i + 1] = indeces[i];
         }
+        return this;
+    }
+
+    public ScanAndScrollStreamProducer setIndeces(String[] indeces) {
+        this.indeces = indeces;
         return this;
     }
 
@@ -142,11 +153,31 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
 
     protected void handleEnd() {
         if (ended) {
-            if (endHandler != null) {
-                Handler<Void> handler = endHandler;
-                endHandler = null;
-                vertxContext.vertx().runOnContext(event -> handler.handle(null));
-            }
+            clearScroll().subscribe(
+                    new Subscriber<Void>() {
+                        @Override
+                        public void onCompleted() {
+                            if (endHandler != null) {
+                                Handler<Void> handler = endHandler;
+                                endHandler = null;
+                                vertxContext.vertx().runOnContext(event -> handler.handle(null));
+                            }
+                        }
+
+                        @Override
+                        public void onError(Throwable e) {
+                            if (exceptionHandler != null) {
+                                exceptionHandler.handle(e);
+                            } else {
+                                LOGGER.error("Unhandled Exception", e);
+                            }
+                        }
+
+                        @Override
+                        public void onNext(Void aVoid) {
+
+                        }
+                    });
         }
     }
 
@@ -183,7 +214,7 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
         if (handler == null || paused || emitting) {
             return;
         }
-        if (scrollNoHit) {
+        if (scrollNoHit || aborted) {
             ended = true;
             handleEnd();
             return;
@@ -218,9 +249,9 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
                             @Override
                             public void onCompleted() {
                                 queried = true;
+                                emitting = false;
                                 scrollId = searchResponse.getScrollId();
                                 searchHits = searchResponse.getHits().iterator();
-                                emitting = false;
                                 emit();
                             }
 
@@ -331,7 +362,7 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
     protected Observable<Void> clearScroll() {
         return defer(() -> {
             if (scrollId == null) {
-                return empty();
+                return aVoid();
             }
             ClearScrollRequestBuilder request = elasticsearch.get().prepareClearScroll()
                     .addScrollId(scrollId);

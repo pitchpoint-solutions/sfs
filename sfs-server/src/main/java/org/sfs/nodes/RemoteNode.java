@@ -19,6 +19,7 @@ package org.sfs.nodes;
 import com.google.common.base.Optional;
 import com.google.common.escape.Escaper;
 import com.google.common.net.HostAndPort;
+import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
@@ -37,11 +38,14 @@ import org.sfs.rx.BufferToJsonObject;
 import org.sfs.rx.Defer;
 import org.sfs.rx.HttpClientKeepAliveResponseBodyBuffer;
 import org.sfs.rx.HttpClientResponseBodyBuffer;
-import org.sfs.rx.MemoizeHandler;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
+import org.sfs.util.HttpClientRequestAndResponse;
 import org.sfs.util.MessageDigestFactory;
 import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
+
+import java.util.Collection;
 
 import static com.google.common.base.Optional.absent;
 import static com.google.common.base.Optional.of;
@@ -64,72 +68,59 @@ import static org.sfs.util.SfsHttpQueryParams.OFFSET;
 import static org.sfs.util.SfsHttpQueryParams.POSITION;
 import static org.sfs.util.SfsHttpQueryParams.VOLUME;
 import static org.sfs.util.SfsHttpQueryParams.X_CONTENT_COMPUTED_DIGEST_PREFIX;
-import static rx.Observable.create;
 import static rx.Observable.just;
 
 public class RemoteNode extends AbstractNode {
 
     private static final Logger LOGGER = getLogger(RemoteNode.class);
-    private final VertxContext<Server> vertxContext;
-    private final HostAndPort hostAndPort;
+    private final Vertx vertx;
+    private final Collection<HostAndPort> hostAndPorts;
     private final int responseTimeout;
     private final String remoteNodeSecret;
+    private final HttpClient httpClient;
+    private final Nodes nodes;
 
-    public RemoteNode(VertxContext<Server> vertxContext, int responseTimeout, HostAndPort hostAndPort) {
-        this.vertxContext = vertxContext;
-        this.hostAndPort = hostAndPort;
+    public RemoteNode(VertxContext<Server> vertxContext, int responseTimeout, Collection<HostAndPort> hostAndPorts) {
+        this.hostAndPorts = hostAndPorts;
         this.responseTimeout = responseTimeout;
         this.remoteNodeSecret = base64().encode(vertxContext.verticle().getRemoteNodeSecret());
+        this.httpClient = vertxContext.verticle().httpClient(false);
+        this.nodes = vertxContext.verticle().nodes();
+        this.vertx = vertxContext.vertx();
     }
 
-    public VertxContext<Server> getVertxContext() {
-        return vertxContext;
-    }
-
-    @Override
-    public HostAndPort getHostAndPort() {
-        return hostAndPort;
-    }
-
-    @Override
-    public boolean isLocal() {
-        return false;
-    }
-
-    protected Observable<HttpClient> getHttpClient() {
-        return just(vertxContext.verticle().httpClient(false));
-    }
 
     @Override
     public Observable<Optional<TransientServiceDef>> getNodeStats() {
-        return getHttpClient()
-                .flatMap(httpClient -> {
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    String url =
+                                            format("http://%s/_internal_node/stats", hostAndPort.toString());
 
-                    final String url =
-                            format("http://%s/node/stats", hostAndPort.toString());
+                                    if (LOGGER.isDebugEnabled()) {
+                                        LOGGER.debug("getNodeStats " + url);
+                                    }
 
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("getNodeStats " + url);
-                    }
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
-                    ClusterInfo clusterInfo = vertxContext.verticle().getClusterInfo();
-                    long refreshInterval = clusterInfo.getRefreshInterval();
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient
+                                                    .getAbs(url, httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.end();
 
-                    ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
-
-                    HttpClientRequest httpClientRequest =
-                            httpClient
-                                    .getAbs(url, httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        handler.handle(httpClientResponse);
-                                    })
-                                    .exceptionHandler(handler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .setTimeout(refreshInterval - 100);
-                    httpClientRequest.end();
-
-                    return create(handler.subscribe);
-                })
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(HttpClientRequestAndResponse::getResponse)
                 .flatMap(httpClientResponse ->
                         Defer.just(httpClientResponse)
                                 .flatMap(new HttpClientResponseBodyBuffer(HTTP_OK))
@@ -148,58 +139,63 @@ public class RemoteNode extends AbstractNode {
 
     @Override
     public Observable<Optional<DigestBlob>> checksum(String volumeId, long position, Optional<Long> oOffset, Optional<Long> oLength, MessageDigestFactory... messageDigestFactories) {
-        return getHttpClient()
-                .flatMap(httpClient -> {
-                    Escaper escaper = urlFragmentEscaper();
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    Escaper escaper = urlFragmentEscaper();
 
-                    StringBuilder urlBuilder =
-                            new StringBuilder("http://")
-                                    .append(hostAndPort.toString());
-                    urlBuilder = urlBuilder.append("/blob/001/checksum?");
-                    urlBuilder = urlBuilder.append(KEEP_ALIVE_TIMEOUT);
-                    urlBuilder = urlBuilder.append('=');
-                    urlBuilder = urlBuilder.append(responseTimeout / 2);
-                    urlBuilder = urlBuilder.append('&');
-                    urlBuilder = urlBuilder.append(VOLUME);
-                    urlBuilder = urlBuilder.append('=');
-                    urlBuilder = urlBuilder.append(escaper.escape(volumeId));
-                    urlBuilder = urlBuilder.append('&');
-                    urlBuilder = urlBuilder.append(escaper.escape(POSITION));
-                    urlBuilder = urlBuilder.append('=');
-                    urlBuilder = urlBuilder.append(position);
+                                    StringBuilder urlBuilder =
+                                            new StringBuilder("http://")
+                                                    .append(hostAndPort.toString());
+                                    urlBuilder = urlBuilder.append("/_internal_node_data/blob/checksum?");
+                                    urlBuilder = urlBuilder.append(KEEP_ALIVE_TIMEOUT);
+                                    urlBuilder = urlBuilder.append('=');
+                                    urlBuilder = urlBuilder.append(responseTimeout / 2);
+                                    urlBuilder = urlBuilder.append('&');
+                                    urlBuilder = urlBuilder.append(VOLUME);
+                                    urlBuilder = urlBuilder.append('=');
+                                    urlBuilder = urlBuilder.append(escaper.escape(volumeId));
+                                    urlBuilder = urlBuilder.append('&');
+                                    urlBuilder = urlBuilder.append(escaper.escape(POSITION));
+                                    urlBuilder = urlBuilder.append('=');
+                                    urlBuilder = urlBuilder.append(position);
 
-                    if (messageDigestFactories.length > 0) {
-                        for (MessageDigestFactory instance : messageDigestFactories) {
-                            urlBuilder = urlBuilder.append('&');
-                            urlBuilder =
-                                    urlBuilder
-                                            .append(escaper.escape(format("%s%s", X_CONTENT_COMPUTED_DIGEST_PREFIX, instance.getValue())))
-                                            .append('=')
-                                            .append("true");
-                        }
-                    }
+                                    if (messageDigestFactories.length > 0) {
+                                        for (MessageDigestFactory instance : messageDigestFactories) {
+                                            urlBuilder = urlBuilder.append('&');
+                                            urlBuilder =
+                                                    urlBuilder
+                                                            .append(escaper.escape(format("%s%s", X_CONTENT_COMPUTED_DIGEST_PREFIX, instance.getValue())))
+                                                            .append('=')
+                                                            .append("true");
+                                        }
+                                    }
 
-                    final String url = urlBuilder.toString();
+                                    final String url = urlBuilder.toString();
 
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("get " + url);
-                    }
+                                    if (LOGGER.isDebugEnabled()) {
+                                        LOGGER.debug("get " + url);
+                                    }
 
-                    final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
-                    HttpClientRequest httpClientRequest =
-                            httpClient
-                                    .getAbs(url, httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        handler.handle(httpClientResponse);
-                                    })
-                                    .exceptionHandler(handler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .setTimeout(responseTimeout);
-                    httpClientRequest.end();
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient
+                                                    .getAbs(url, httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.end();
 
-                    return create(handler.subscribe);
-                })
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(HttpClientRequestAndResponse::getResponse)
                 .flatMap(httpClientResponse ->
                         just(httpClientResponse)
                                 .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
@@ -234,38 +230,43 @@ public class RemoteNode extends AbstractNode {
     }
 
     @Override
-    public Observable<Optional<HeaderBlob>> delete(final String volumeId, final long position) {
-        return getHttpClient()
-                .flatMap(httpClient -> {
-                    Escaper escaper = urlFragmentEscaper();
+    public Observable<Optional<HeaderBlob>> delete(String volumeId, final long position) {
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    Escaper escaper = urlFragmentEscaper();
 
-                    final String url =
-                            format("http://%s/blob/001?%s=%s&%s=%d",
-                                    hostAndPort.toString(),
-                                    escaper.escape(VOLUME),
-                                    escaper.escape(volumeId),
-                                    escaper.escape(POSITION),
-                                    position);
+                                    String url =
+                                            format("http://%s/_internal_node_data/blob?%s=%s&%s=%d",
+                                                    hostAndPort.toString(),
+                                                    escaper.escape(VOLUME),
+                                                    escaper.escape(volumeId),
+                                                    escaper.escape(POSITION),
+                                                    position);
 
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("delete " + url);
-                    }
+                                    if (LOGGER.isDebugEnabled()) {
+                                        LOGGER.debug("delete " + url);
+                                    }
 
-                    final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
-                    HttpClientRequest httpClientRequest =
-                            httpClient
-                                    .deleteAbs(url, httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        handler.handle(httpClientResponse);
-                                    })
-                                    .exceptionHandler(handler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .setTimeout(responseTimeout);
-                    httpClientRequest.end();
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient
+                                                    .deleteAbs(url, httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.end();
 
-                    return create(handler.subscribe);
-                })
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(HttpClientRequestAndResponse::getResponse)
                 .flatMap(httpClientResponse ->
                         Defer.just(httpClientResponse)
                                 .flatMap(new HttpClientResponseBodyBuffer())
@@ -285,38 +286,42 @@ public class RemoteNode extends AbstractNode {
     }
 
     @Override
-    public Observable<Optional<HeaderBlob>> acknowledge(final String volumeId, final long position) {
+    public Observable<Optional<HeaderBlob>> acknowledge(String volumeId, final long position) {
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    Escaper escaper = urlFragmentEscaper();
+                                    final String url =
+                                            format("http://%s/_internal_node_data/blob/ack?%s=%s&%s=%d",
+                                                    hostAndPort.toString(),
+                                                    escaper.escape(VOLUME),
+                                                    escaper.escape(volumeId),
+                                                    escaper.escape(POSITION),
+                                                    position);
 
-        return getHttpClient()
-                .flatMap(httpClient -> {
-                    Escaper escaper = urlFragmentEscaper();
-                    final String url =
-                            format("http://%s/blob/001/ack?%s=%s&%s=%d",
-                                    hostAndPort.toString(),
-                                    escaper.escape(VOLUME),
-                                    escaper.escape(volumeId),
-                                    escaper.escape(POSITION),
-                                    position);
+                                    if (LOGGER.isDebugEnabled()) {
+                                        LOGGER.debug("acknowledge " + url);
+                                    }
 
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("acknowledge " + url);
-                    }
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
-                    final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient
+                                                    .putAbs(url, httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.end();
 
-                    HttpClientRequest httpClientRequest =
-                            httpClient
-                                    .putAbs(url, httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        handler.handle(httpClientResponse);
-                                    })
-                                    .exceptionHandler(handler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .setTimeout(responseTimeout);
-                    httpClientRequest.end();
-
-                    return create(handler.subscribe);
-                })
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(HttpClientRequestAndResponse::getResponse)
                 .flatMap(httpClientResponse ->
                         Defer.just(httpClientResponse)
                                 .flatMap(new HttpClientResponseBodyBuffer())
@@ -336,65 +341,69 @@ public class RemoteNode extends AbstractNode {
     }
 
     @Override
-    public Observable<Optional<ReadStreamBlob>> createReadStream(final String volumeId, final long position, final Optional<Long> oOffset, final Optional<Long> oLength) {
+    public Observable<Optional<ReadStreamBlob>> createReadStream(String volumeId, final long position, final Optional<Long> oOffset, final Optional<Long> oLength) {
 
-        return getHttpClient()
-                .flatMap(httpClient -> {
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    Escaper escaper = urlFragmentEscaper();
 
-                    Escaper escaper = urlFragmentEscaper();
+                                    StringBuilder urlBuilder =
+                                            new StringBuilder("http://")
+                                                    .append(hostAndPort.toString())
+                                                    .append("/_internal_node_data/blob")
+                                                    .append('?')
+                                                    .append(escaper.escape(VOLUME))
+                                                    .append('=')
+                                                    .append(escaper.escape(volumeId))
+                                                    .append('&')
+                                                    .append(escaper.escape(POSITION))
+                                                    .append('=')
+                                                    .append(position);
 
-                    StringBuilder urlBuilder =
-                            new StringBuilder("http://")
-                                    .append(hostAndPort.toString())
-                                    .append("/blob/001")
-                                    .append('?')
-                                    .append(escaper.escape(VOLUME))
-                                    .append('=')
-                                    .append(escaper.escape(volumeId))
-                                    .append('&')
-                                    .append(escaper.escape(POSITION))
-                                    .append('=')
-                                    .append(position);
+                                    if (oOffset.isPresent()) {
+                                        long offset = oOffset.get();
+                                        urlBuilder =
+                                                urlBuilder.append('&')
+                                                        .append(escaper.escape(OFFSET))
+                                                        .append('=')
+                                                        .append(offset);
+                                    }
 
-                    if (oOffset.isPresent()) {
-                        long offset = oOffset.get();
-                        urlBuilder =
-                                urlBuilder.append('&')
-                                        .append(escaper.escape(OFFSET))
-                                        .append('=')
-                                        .append(offset);
-                    }
+                                    if (oLength.isPresent()) {
+                                        long length = oLength.get();
+                                        urlBuilder =
+                                                urlBuilder.append('&')
+                                                        .append(escaper.escape(LENGTH))
+                                                        .append('=')
+                                                        .append(length);
+                                    }
 
-                    if (oLength.isPresent()) {
-                        long length = oLength.get();
-                        urlBuilder =
-                                urlBuilder.append('&')
-                                        .append(escaper.escape(LENGTH))
-                                        .append('=')
-                                        .append(length);
-                    }
+                                    String url = urlBuilder.toString();
 
-                    String url = urlBuilder.toString();
+                                    if (LOGGER.isDebugEnabled()) {
+                                        LOGGER.debug("createReadStream " + url);
+                                    }
 
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("createReadStream " + url);
-                    }
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
-                    final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient
+                                                    .getAbs(url, httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.end();
 
-                    HttpClientRequest httpClientRequest =
-                            httpClient
-                                    .getAbs(url, httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        handler.handle(httpClientResponse);
-                                    })
-                                    .exceptionHandler(handler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .setTimeout(responseTimeout);
-                    httpClientRequest.end();
-
-                    return create(handler.subscribe);
-                })
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(HttpClientRequestAndResponse::getResponse)
                 .flatMap(httpClientResponse -> {
 
                     int status = httpClientResponse.statusCode();
@@ -423,186 +432,193 @@ public class RemoteNode extends AbstractNode {
 
     @Override
     public Observable<Boolean> canReadVolume(String volumeId) {
-        return getHttpClient()
-                .flatMap(httpClient -> {
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    Escaper escaper = urlFragmentEscaper();
 
-                    Escaper escaper = urlFragmentEscaper();
-
-                    String url = format("http://%s/blob/001/canread?%s=%s",
-                            hostAndPort.toString(),
-                            escaper.escape(VOLUME),
-                            escaper.escape(escaper.escape(volumeId)));
+                                    String url = format("http://%s/_internal_node_data/blob/canread?%s=%s",
+                                            hostAndPort.toString(),
+                                            escaper.escape(VOLUME),
+                                            escaper.escape(escaper.escape(volumeId)));
 
 
-                    ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
-                    HttpClientRequest httpClientRequest =
-                            httpClient.getAbs(url,
-                                    httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        handler.handle(httpClientResponse);
-                                    })
-                                    .exceptionHandler(handler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .setTimeout(responseTimeout);
-                    httpClientRequest.end();
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient.getAbs(url,
+                                                    httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.end();
 
-                    return create(handler.subscribe)
-                            .flatMap(httpClientResponse ->
-                                    just(httpClientResponse)
-                                            .flatMap(new HttpClientResponseBodyBuffer())
-                                            .map(buffer -> {
-                                                int status = httpClientResponse.statusCode();
-                                                if (status >= 400) {
-                                                    throw new HttpClientResponseException(httpClientResponse, buffer);
-                                                }
-                                                return true;
-                                            }));
-
-                });
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(HttpClientRequestAndResponse::getResponse)
+                .flatMap(httpClientResponse ->
+                        just(httpClientResponse)
+                                .flatMap(new HttpClientResponseBodyBuffer())
+                                .map(buffer -> {
+                                    int status = httpClientResponse.statusCode();
+                                    if (status >= 400) {
+                                        throw new HttpClientResponseException(httpClientResponse, buffer);
+                                    }
+                                    return true;
+                                }));
     }
 
     @Override
     public Observable<Boolean> canWriteVolume(String volumeId) {
-        return getHttpClient()
-                .flatMap(httpClient -> {
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    Escaper escaper = urlFragmentEscaper();
 
-                    Escaper escaper = urlFragmentEscaper();
-
-                    String url = format("http://%s/blob/001/canwrite?%s=%s",
-                            hostAndPort.toString(),
-                            escaper.escape(VOLUME),
-                            escaper.escape(escaper.escape(volumeId)));
+                                    String url = format("http://%s/_internal_node_data/blob/canwrite?%s=%s",
+                                            hostAndPort.toString(),
+                                            escaper.escape(VOLUME),
+                                            escaper.escape(escaper.escape(volumeId)));
 
 
-                    ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
-                    HttpClientRequest httpClientRequest =
-                            httpClient.getAbs(url,
-                                    httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        handler.handle(httpClientResponse);
-                                    })
-                                    .exceptionHandler(handler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .setTimeout(responseTimeout);
-                    httpClientRequest.end();
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient.getAbs(url,
+                                                    httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.end();
 
-                    return create(handler.subscribe)
-                            .flatMap(httpClientResponse ->
-                                    just(httpClientResponse)
-                                            .flatMap(new HttpClientResponseBodyBuffer())
-                                            .map(buffer -> {
-                                                int status = httpClientResponse.statusCode();
-                                                if (status >= 400) {
-                                                    throw new HttpClientResponseException(httpClientResponse, buffer);
-                                                }
-                                                return true;
-                                            }));
-
-                });
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(HttpClientRequestAndResponse::getResponse)
+                .flatMap(httpClientResponse ->
+                        just(httpClientResponse)
+                                .flatMap(new HttpClientResponseBodyBuffer())
+                                .map(buffer -> {
+                                    int status = httpClientResponse.statusCode();
+                                    if (status >= 400) {
+                                        throw new HttpClientResponseException(httpClientResponse, buffer);
+                                    }
+                                    return true;
+                                }));
     }
 
     @Override
     public Observable<NodeWriteStreamBlob> createWriteStream(final String volumeId, final long length, final MessageDigestFactory... messageDigestFactories) {
         final XNode _this = this;
 
-        return getHttpClient()
-                .flatMap(httpClient -> {
+        return Defer.aVoid()
+                .flatMap(aVoid ->
+                        nodes.connectFirstAvailable(
+                                vertx,
+                                hostAndPorts,
+                                hostAndPort -> {
+                                    Escaper escaper = urlFragmentEscaper();
 
-                    Escaper escaper = urlFragmentEscaper();
+                                    StringBuilder urlBuilder =
+                                            new StringBuilder("http://")
+                                                    .append(hostAndPort.toString());
+                                    urlBuilder = urlBuilder.append("/_internal_node_data/blob?");
+                                    urlBuilder = urlBuilder.append(KEEP_ALIVE_TIMEOUT);
+                                    urlBuilder = urlBuilder.append('=');
+                                    urlBuilder = urlBuilder.append(responseTimeout / 2);
+                                    urlBuilder = urlBuilder.append('&');
+                                    urlBuilder = urlBuilder.append(VOLUME);
+                                    urlBuilder = urlBuilder.append('=');
+                                    urlBuilder = urlBuilder.append(escaper.escape(volumeId));
 
-                    StringBuilder urlBuilder =
-                            new StringBuilder("http://")
-                                    .append(hostAndPort.toString());
-                    urlBuilder = urlBuilder.append("/blob/001?");
-                    urlBuilder = urlBuilder.append(KEEP_ALIVE_TIMEOUT);
-                    urlBuilder = urlBuilder.append('=');
-                    urlBuilder = urlBuilder.append(responseTimeout / 2);
-                    urlBuilder = urlBuilder.append('&');
-                    urlBuilder = urlBuilder.append(VOLUME);
-                    urlBuilder = urlBuilder.append('=');
-                    urlBuilder = urlBuilder.append(escaper.escape(volumeId));
-
-                    if (messageDigestFactories.length > 0) {
-                        for (MessageDigestFactory instance : messageDigestFactories) {
-                            urlBuilder = urlBuilder.append('&');
-                            urlBuilder =
-                                    urlBuilder
-                                            .append(escaper.escape(format("%s%s", X_CONTENT_COMPUTED_DIGEST_PREFIX, instance.getValue())))
-                                            .append('=')
-                                            .append("true");
-                        }
-                    }
-
-                    final String url = urlBuilder.toString();
-
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("createWriteStream " + url);
-                    }
-
-                    ResultMemoizeHandler<HttpClientResponse> httpClientResponseHandler = new ResultMemoizeHandler<>();
-
-                    HttpClientRequest httpClientRequest =
-                            httpClient
-                                    .putAbs(url, httpClientResponse -> {
-                                        httpClientResponse.pause();
-                                        httpClientResponseHandler.complete(httpClientResponse);
-                                    })
-                                    .exceptionHandler(httpClientResponseHandler::fail)
-                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                    .putHeader(CONTENT_LENGTH, valueOf(length))
-                                    .setTimeout(5000);
-                    httpClientRequest.sendHead();
-
-                    // this observable depends on the server sending the response header immediately then keepalive pings
-                    // and then ending once the stream has been written via NodeWriteStreamBlob.consume(...)
-
-                    return Observable.create(httpClientResponseHandler.subscribe)
-                            .doOnNext(httpClientResponse -> {
-                                if (HTTP_OK != httpClientResponse.statusCode()) {
-                                    httpClientResponse.resume();
-                                    throw new HttpClientResponseException(httpClientResponse, Buffer.buffer());
-                                }
-                            })
-                            .map(httpClientResponse -> {
-                                Observable<DigestBlob> oResponse =
-                                        Defer.just(httpClientResponse)
-                                                .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
-                                                .map(new BufferToJsonObject())
-                                                .map(jsonObject -> {
-                                                    Integer code = jsonObject.getInteger("code");
-                                                    if (code == null || HTTP_OK != code) {
-                                                        throw new HttpClientResponseException(httpClientResponse, jsonObject);
-                                                    }
-                                                    return jsonObject;
-                                                })
-                                                .map(jsonObject -> {
-                                                    JsonObject blob = jsonObject.getJsonObject("blob");
-                                                    return new DigestBlob(blob);
-                                                });
-                                NodeWriteStreamBlob writeStreamBlob = new NodeWriteStreamBlob(_this) {
-                                    @Override
-                                    public Observable<DigestBlob> consume(ReadStream<Buffer> src) {
-
-                                        return combineSinglesDelayError(
-                                                pump(src, new HttpClientRequestEndableWriteStream(httpClientRequest)),
-                                                oResponse,
-                                                (aVoid1, digestBlob) -> digestBlob);
-
-
+                                    if (messageDigestFactories.length > 0) {
+                                        for (MessageDigestFactory instance : messageDigestFactories) {
+                                            urlBuilder = urlBuilder.append('&');
+                                            urlBuilder =
+                                                    urlBuilder
+                                                            .append(escaper.escape(format("%s%s", X_CONTENT_COMPUTED_DIGEST_PREFIX, instance.getValue())))
+                                                            .append('=')
+                                                            .append("true");
+                                        }
                                     }
-                                };
-                                return writeStreamBlob;
-                            });
 
+                                    final String url = urlBuilder.toString();
+
+                                    if (LOGGER.isDebugEnabled()) {
+                                        LOGGER.debug("createWriteStream " + url);
+                                    }
+
+                                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
+
+                                    HttpClientRequest httpClientRequest =
+                                            httpClient
+                                                    .putAbs(url, httpClientResponse -> {
+                                                        httpClientResponse.pause();
+                                                        handler.complete(httpClientResponse);
+                                                    })
+                                                    .exceptionHandler(handler::fail)
+                                                    .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
+                                                    .putHeader(CONTENT_LENGTH, valueOf(length))
+                                                    .setTimeout(responseTimeout);
+                                    httpClientRequest.sendHead();
+
+                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                }))
+                .map(httpClientRequestAndResponse -> {
+
+                    HttpClientRequest httpClientRequest = httpClientRequestAndResponse.getRequest();
+                    HttpClientResponse httpClientResponse = httpClientRequestAndResponse.getResponse();
+
+                    if (HTTP_OK != httpClientResponse.statusCode()) {
+                        httpClientResponse.resume();
+                        throw new HttpClientResponseException(httpClientResponse, Buffer.buffer());
+                    }
+                    Observable<DigestBlob> oResponse =
+                            Defer.just(httpClientResponse)
+                                    .flatMap(new HttpClientKeepAliveResponseBodyBuffer())
+                                    .map(new BufferToJsonObject())
+                                    .map(jsonObject -> {
+                                        Integer code = jsonObject.getInteger("code");
+                                        if (code == null || HTTP_OK != code) {
+                                            throw new HttpClientResponseException(httpClientResponse, jsonObject);
+                                        }
+                                        return jsonObject;
+                                    })
+                                    .map(jsonObject -> {
+                                        JsonObject blob = jsonObject.getJsonObject("blob");
+                                        return new DigestBlob(blob);
+                                    });
+                    NodeWriteStreamBlob writeStreamBlob = new NodeWriteStreamBlob(_this) {
+                        @Override
+                        public Observable<DigestBlob> consume(ReadStream<Buffer> src) {
+
+                            return combineSinglesDelayError(
+                                    pump(src, new HttpClientRequestEndableWriteStream(httpClientRequest)),
+                                    oResponse,
+                                    (aVoid1, digestBlob) -> digestBlob);
+
+
+                        }
+                    };
+                    return writeStreamBlob;
                 });
     }
 
     @Override
     public String toString() {
         return "RemoteNode{" +
-                "hostAndPort=" + hostAndPort +
+                "hostAndPorts=" + hostAndPorts +
                 '}';
     }
 }

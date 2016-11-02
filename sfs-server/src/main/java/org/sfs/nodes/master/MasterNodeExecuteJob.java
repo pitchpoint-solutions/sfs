@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.sfs.nodes.all.masterkey;
+package org.sfs.nodes.master;
 
 import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
@@ -24,56 +24,63 @@ import org.sfs.Server;
 import org.sfs.SfsRequest;
 import org.sfs.VertxContext;
 import org.sfs.auth.Authenticate;
-import org.sfs.encryption.MasterKeyCheckEndableWriteStream;
-import org.sfs.encryption.MasterKeyCheckStreamProducer;
+import org.sfs.jobs.Jobs;
+import org.sfs.rx.Defer;
+import org.sfs.rx.NullSubscriber;
 import org.sfs.rx.Terminus;
+import org.sfs.rx.ToVoid;
 import org.sfs.validate.ValidateActionAdminOrSystem;
-import rx.Observable;
+import org.sfs.validate.ValidateHeaderBetweenLong;
+import org.sfs.validate.ValidateHeaderExists;
+import org.sfs.validate.ValidateNodeIsMasterNode;
 
-import static com.google.common.base.Charsets.UTF_8;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
+
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static java.lang.Long.parseLong;
 import static java.net.HttpURLConnection.HTTP_OK;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.jobs.Jobs.Parameters.JOB_ID;
 import static org.sfs.util.KeepAliveHttpServerResponse.DELIMITER_BUFFER;
-import static org.sfs.util.SfsHttpHeaders.X_SFS_KEEP_ALIVE_TIMEOUT;
 
-public class MasterKeysCheck implements Handler<SfsRequest> {
+public class MasterNodeExecuteJob implements Handler<SfsRequest> {
 
-    private static final Logger LOGGER = getLogger(MasterKeysCheck.class);
+    private static final Logger LOGGER = getLogger(MasterNodeExecuteJob.class);
 
     @Override
     public void handle(SfsRequest httpServerRequest) {
 
-        httpServerRequest.pause();
-
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        Defer.aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
+                .map(new ValidateNodeIsMasterNode<>(vertxContext))
+                .map(aVoid -> httpServerRequest)
+                .map(new ValidateHeaderExists(Jobs.Parameters.JOB_ID))
+                .map(new ValidateHeaderBetweenLong(Jobs.Parameters.TIMEOUT, 100, Long.MAX_VALUE))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
 
                     MultiMap headers = httpServerRequest.headers();
+                    String jobId = headers.get(JOB_ID);
 
-                    final long keepAliveTimeout = headers.contains(X_SFS_KEEP_ALIVE_TIMEOUT) ? parseLong(headers.get(X_SFS_KEEP_ALIVE_TIMEOUT)) : SECONDS.toMillis(10);
+                    long timeout = headers.contains(Jobs.Parameters.TIMEOUT) ? Long.parseLong(headers.get(Jobs.Parameters.TIMEOUT)) : -1;
 
-                    // let the client know we're alive by sending pings on the response stream
-                    httpServerRequest.startProxyKeepAlive(keepAliveTimeout, MILLISECONDS);
+                    httpServerRequest.startProxyKeepAlive();
 
-                    MasterKeyCheckStreamProducer producer = new MasterKeyCheckStreamProducer(vertxContext);
-                    MasterKeyCheckEndableWriteStream consumer = new MasterKeyCheckEndableWriteStream(vertxContext);
-
-                    return pump(producer, consumer);
-
+                    Jobs jobs = vertxContext.verticle().jobs();
+                    return Defer.aVoid()
+                            .doOnNext(aVoid1 ->
+                                    jobs.execute(vertxContext, jobId, headers)
+                                            .subscribe(new NullSubscriber<>()))
+                            .flatMap(aVoid1 -> {
+                                if (timeout >= 0) {
+                                    return jobs.waitStopped(vertxContext, jobId, timeout, TimeUnit.MILLISECONDS);
+                                } else {
+                                    return Defer.aVoid();
+                                }
+                            });
                 })
-                .flatMap(aVoid -> httpServerRequest.stopKeepAlive())
-                .onErrorResumeNext(throwable ->
-                        httpServerRequest.stopKeepAlive()
-                                .flatMap(aVoid -> Observable.<Void>error(throwable)))
                 .single()
                 .subscribe(new Terminus<Void>(httpServerRequest) {
 
@@ -83,10 +90,9 @@ public class MasterKeysCheck implements Handler<SfsRequest> {
                                 .put("code", HTTP_OK)
                                 .put("message", "Success");
                         httpServerRequest.response()
-                                .write(responseJson.encode(), UTF_8.toString())
+                                .write(responseJson.encode(), StandardCharsets.UTF_8.toString())
                                 .write(DELIMITER_BUFFER);
                     }
                 });
     }
 }
-

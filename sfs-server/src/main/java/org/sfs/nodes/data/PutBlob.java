@@ -41,6 +41,7 @@ import org.sfs.util.MessageDigestFactory;
 import org.sfs.validate.ValidateActionAdminOrSystem;
 import org.sfs.validate.ValidateHeaderBetweenLong;
 import org.sfs.validate.ValidateHeaderExists;
+import org.sfs.validate.ValidateNodeIsDataNode;
 import org.sfs.validate.ValidateParamComputedDigest;
 import org.sfs.validate.ValidateParamExists;
 import rx.Observable;
@@ -59,12 +60,10 @@ import static java.lang.Long.parseLong;
 import static java.net.HttpURLConnection.HTTP_INTERNAL_ERROR;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static java.net.HttpURLConnection.HTTP_UNAVAILABLE;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.KeepAliveHttpServerResponse.DELIMITER_BUFFER;
 import static org.sfs.util.MessageDigestFactory.fromValueIfExists;
 import static org.sfs.util.SfsHttpQueryParams.COMPUTED_DIGEST;
-import static org.sfs.util.SfsHttpQueryParams.KEEP_ALIVE_TIMEOUT;
 import static org.sfs.util.SfsHttpQueryParams.VOLUME;
 
 public class PutBlob implements Handler<SfsRequest> {
@@ -78,9 +77,10 @@ public class PutBlob implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAdminOrSystem(httpServerRequest))
+                .map(new ValidateNodeIsDataNode<>(vertxContext))
                 .map(aVoid -> httpServerRequest)
                 .map(new ValidateParamExists(VOLUME))
                 .map(new ValidateHeaderExists(CONTENT_LENGTH))
@@ -129,10 +129,8 @@ public class PutBlob implements Handler<SfsRequest> {
 
                     long length = parseLong(headers.get(CONTENT_LENGTH));
 
-                    long keepAliveTimeout = parseLong(params.get(KEEP_ALIVE_TIMEOUT));
 
-                    // let the client know we're alive by sending pings on the response stream
-                    httpServerRequest1.startProxyKeepAlive(keepAliveTimeout, MILLISECONDS);
+                    httpServerRequest1.startProxyKeepAlive();
 
 
                     return volume.putDataStream(httpServerRequest1.vertxContext().vertx(), length)

@@ -17,7 +17,6 @@
 package org.sfs.encryption;
 
 import com.google.common.base.Optional;
-import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
@@ -36,7 +35,6 @@ import org.sfs.vo.PersistentContainerKey;
 import org.sfs.vo.TransientContainerKey;
 import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
-import rx.Subscriber;
 
 import java.util.Calendar;
 import java.util.Iterator;
@@ -54,9 +52,8 @@ import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.fill;
 import static java.util.Calendar.getInstance;
 import static java.util.concurrent.TimeUnit.DAYS;
-import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.sfs.encryption.AlgorithmDef.getPreferred;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.vo.ObjectPath.fromPaths;
 import static rx.Observable.defer;
@@ -74,50 +71,17 @@ public class ContainerKeys {
 
 
     public Observable<Void> start(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .filter(aVoid -> closed.compareAndSet(true, false))
                 .map(aVoid -> {
                     startedVertxContext = vertxContext;
-                    return (Void) null;
-                })
-                .map(aVoid -> {
-                    Handler<Long> handler = new Handler<Long>() {
-
-                        Handler<Long> _this = this;
-
-                        @Override
-                        public void handle(Long event) {
-                            timerIds.remove(event);
-                            maintain(startedVertxContext)
-                                    .subscribe(new Subscriber<Void>() {
-                                        @Override
-                                        public void onCompleted() {
-                                            timerIds.add(startedVertxContext.vertx().setTimer(MINUTES.toMillis(1), _this));
-                                        }
-
-                                        @Override
-                                        public void onError(Throwable e) {
-                                            LOGGER.warn("Unhandled Exception", e);
-                                            timerIds.add(startedVertxContext.vertx().setTimer(MINUTES.toMillis(1), _this));
-                                        }
-
-                                        @Override
-                                        public void onNext(Void aVoid) {
-
-                                        }
-                                    });
-
-                        }
-                    };
-
-                    timerIds.add(startedVertxContext.vertx().setTimer(MINUTES.toMillis(1), handler));
                     return (Void) null;
                 })
                 .singleOrDefault(null);
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .filter(aVoid -> closed.compareAndSet(false, true))
                 .map(aVoid -> {
                     Iterator<Long> i = timerIds.iterator();
@@ -186,34 +150,36 @@ public class ContainerKeys {
                                         persistentContainerKey.getCipherSalt().get(),
                                         persistentContainerKey.getEncryptedKey().get()))
                                 .map(Optional::get)
-                                .map(clearContainerKey -> {
-                                    try {
-                                        AlgorithmDef algorithmDef = persistentContainerKey.getAlgorithmDef().get();
-                                        byte[] salt = algorithmDef.generateSalt();
-                                        Algorithm algorithm = algorithmDef.create(clearContainerKey, salt);
-                                        return new KeyResponse(persistentContainerKey.getId(), salt, algorithm);
-                                    } finally {
-                                        fill(clearContainerKey, (byte) 0);
-                                    }
-                                });
+                                .flatMap(clearContainerKey ->
+                                        Observable.using(
+                                                () -> null,
+                                                aVoid -> {
+                                                    AlgorithmDef algorithmDef = persistentContainerKey.getAlgorithmDef().get();
+                                                    return algorithmDef.generateSalt(vertxContext.vertx())
+                                                            .map(salt -> {
+                                                                Algorithm algorithm = algorithmDef.create(clearContainerKey, salt);
+                                                                return new KeyResponse(persistentContainerKey.getId(), salt, algorithm);
+                                                            });
+                                                },
+                                                resource -> fill(clearContainerKey, (byte) 0)));
                     });
         });
 
     }
 
-    protected Observable<Void> maintain(VertxContext<Server> vertxContext) {
+    public Observable<Void> maintain(VertxContext<Server> vertxContext) {
         return defer(() -> {
             if (vertxContext.verticle().nodes().isDataNode()) {
                 Calendar threshold = getInstance();
                 threshold.setTimeInMillis(currentTimeMillis() - DEFAULT_RE_ENCRYPT_AGE);
-                return empty()
-                        .flatMap(new ListReEncryptableContainerKeys(vertxContext, vertxContext.verticle().nodes().getNodeId(), threshold))
+                return aVoid()
+                        .flatMap(new ListReEncryptableContainerKeys(vertxContext, threshold))
                         .flatMap(pck -> reEncrypt(vertxContext, pck))
                         .count()
                         .map(new ToVoid<>())
                         .singleOrDefault(null);
             } else {
-                return empty();
+                return aVoid();
             }
         });
     }
@@ -284,52 +250,54 @@ public class ContainerKeys {
 
                 MasterKeys masterKeys = vertxContext.verticle().masterKeys();
 
-                byte[] clearContainerSecret = preferredAlgorithmDef.generateKey();
+                return preferredAlgorithmDef.generateKey(vertxContext.vertx())
+                        .flatMap(clearContainerSecret ->
+                                using(
+                                        () -> clearContainerSecret,
+                                        bytes -> masterKeys.encrypt(vertxContext, bytes),
+                                        bytes -> fill(bytes, (byte) 0))
+                                        .map(encrypted -> {
 
-                return using(
-                        () -> clearContainerSecret,
-                        bytes -> masterKeys.encrypt(vertxContext, bytes),
-                        bytes -> fill(bytes, (byte) 0))
-                        .map(encrypted -> {
+                                            TransientContainerKey containerKey =
+                                                    new TransientContainerKey(persistentContainer, id);
 
-                            TransientContainerKey containerKey =
-                                    new TransientContainerKey(persistentContainer, id);
+                                            containerKey.setAlgorithmDef(preferredAlgorithmDef)
+                                                    .setCipherSalt(encrypted.getSalt())
+                                                    .setEncryptedKey(encrypted.getData())
+                                                    .setKeyStoreKeyId(encrypted.getKeyId())
+                                                    .setReEncryptTs(getInstance())
+                                                    .setCreateTs(getInstance())
+                                                    .setUpdateTs(getInstance());
 
-                            containerKey.setAlgorithmDef(preferredAlgorithmDef)
-                                    .setCipherSalt(encrypted.getSalt())
-                                    .setEncryptedKey(encrypted.getData())
-                                    .setKeyStoreKeyId(encrypted.getKeyId())
-                                    .setReEncryptTs(getInstance())
-                                    .setCreateTs(getInstance())
-                                    .setUpdateTs(getInstance());
+                                            return containerKey;
+                                        })
+                                        .doOnNext(transientContainerKey -> {
+                                            Optional<TransientServiceDef> currentMaintainerNode = vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode();
+                                            if (currentMaintainerNode.isPresent()) {
+                                                transientContainerKey.setNodeId(currentMaintainerNode.get().getId());
+                                            }
+                                        })
+                                        .flatMap(new PersistContainerKey(vertxContext))
+                                        .map(Holder2::value1)
+                                        .map(newPersistentContainerKeyOptional -> {
+                                            // if this failed to persist another thread
+                                            // rotated the key so return the original
+                                            // since next time the key persisted by another
+                                            // thread will be used
+                                            if (newPersistentContainerKeyOptional.isPresent()) {
+                                                if (isDebugEnabled) {
+                                                    LOGGER.debug("Finished Rotate of key " + existingPersistentContainerKey.getId() + ". New key is " + newPersistentContainerKeyOptional.get().getId());
+                                                }
+                                                return newPersistentContainerKeyOptional.get();
+                                            } else {
+                                                if (isDebugEnabled) {
+                                                    LOGGER.debug("Finished Rotate of key " + existingPersistentContainerKey.getId() + ". Another thread completed the rotation");
+                                                }
+                                                return existingPersistentContainerKey;
+                                            }
+                                        }));
 
-                            return containerKey;
-                        })
-                        .doOnNext(transientContainerKey -> {
-                            Optional<TransientServiceDef> currentMaintainerNode = vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode();
-                            if (currentMaintainerNode.isPresent()) {
-                                transientContainerKey.setNodeId(currentMaintainerNode.get().getId());
-                            }
-                        })
-                        .flatMap(new PersistContainerKey(vertxContext))
-                        .map(Holder2::value1)
-                        .map(newPersistentContainerKeyOptional -> {
-                            // if this failed to persist another thread
-                            // rotated the key so return the original
-                            // since next time the key persisted by another
-                            // thread will be used
-                            if (newPersistentContainerKeyOptional.isPresent()) {
-                                if (isDebugEnabled) {
-                                    LOGGER.debug("Finished Rotate of key " + existingPersistentContainerKey.getId() + ". New key is " + newPersistentContainerKeyOptional.get().getId());
-                                }
-                                return newPersistentContainerKeyOptional.get();
-                            } else {
-                                if (isDebugEnabled) {
-                                    LOGGER.debug("Finished Rotate of key " + existingPersistentContainerKey.getId() + ". Another thread completed the rotation");
-                                }
-                                return existingPersistentContainerKey;
-                            }
-                        });
+
             } else {
                 return just(existingPersistentContainerKey);
             }
@@ -353,52 +321,52 @@ public class ContainerKeys {
                             persistentContainer.getId(),
                             firstKey());
 
-            byte[] clearContainerSecret = preferredAlgorithmDef.generateKey();
-
             MasterKeys masterKeys = vertxContext.verticle().masterKeys();
 
-            return using(
-                    () -> clearContainerSecret,
-                    bytes -> masterKeys.encrypt(vertxContext, bytes),
-                    bytes -> fill(bytes, (byte) 0))
-                    .map(encrypted -> {
-                        TransientContainerKey containerKey =
-                                new TransientContainerKey(persistentContainer, id);
+            return preferredAlgorithmDef.generateKey(vertxContext.vertx())
+                    .flatMap(clearContainerSecret ->
+                            using(
+                                    () -> clearContainerSecret,
+                                    bytes -> masterKeys.encrypt(vertxContext, bytes),
+                                    bytes -> fill(bytes, (byte) 0))
+                                    .map(encrypted -> {
+                                        TransientContainerKey containerKey =
+                                                new TransientContainerKey(persistentContainer, id);
 
-                        containerKey.setAlgorithmDef(preferredAlgorithmDef)
-                                .setCipherSalt(encrypted.getSalt())
-                                .setEncryptedKey(encrypted.getData())
-                                .setKeyStoreKeyId(encrypted.getKeyId())
-                                .setReEncryptTs(getInstance())
-                                .setCreateTs(getInstance())
-                                .setUpdateTs(getInstance());
+                                        containerKey.setAlgorithmDef(preferredAlgorithmDef)
+                                                .setCipherSalt(encrypted.getSalt())
+                                                .setEncryptedKey(encrypted.getData())
+                                                .setKeyStoreKeyId(encrypted.getKeyId())
+                                                .setReEncryptTs(getInstance())
+                                                .setCreateTs(getInstance())
+                                                .setUpdateTs(getInstance());
 
-                        return containerKey;
-                    })
-                    .doOnNext(transientContainerKey -> {
-                        Optional<TransientServiceDef> currentMaintainerNode = vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode();
-                        if (currentMaintainerNode.isPresent()) {
-                            transientContainerKey.setNodeId(currentMaintainerNode.get().getId());
-                        }
-                    })
-                    .flatMap(new PersistContainerKey(vertxContext))
-                    .map(Holder2::value1)
-                    .flatMap(newPersistentContainerKey -> {
-                        if (newPersistentContainerKey.isPresent()) {
-                            return just(newPersistentContainerKey.get());
-                        } else {
-                            return just(new Holder2<>(persistentContainer, id.objectPath().get()))
-                                    .flatMap(new LoadContainerKey(vertxContext))
-                                    .map(Holder3::value2)
-                                    .map(Optional::get);
-                        }
-                    })
-                    .map(newPersistentMasterKey -> {
-                        if (isDebugEnabled) {
-                            LOGGER.debug("Finished Create of key " + newPersistentMasterKey.getId());
-                        }
-                        return newPersistentMasterKey;
-                    });
+                                        return containerKey;
+                                    })
+                                    .doOnNext(transientContainerKey -> {
+                                        Optional<TransientServiceDef> currentMaintainerNode = vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode();
+                                        if (currentMaintainerNode.isPresent()) {
+                                            transientContainerKey.setNodeId(currentMaintainerNode.get().getId());
+                                        }
+                                    })
+                                    .flatMap(new PersistContainerKey(vertxContext))
+                                    .map(Holder2::value1)
+                                    .flatMap(newPersistentContainerKey -> {
+                                        if (newPersistentContainerKey.isPresent()) {
+                                            return just(newPersistentContainerKey.get());
+                                        } else {
+                                            return just(new Holder2<>(persistentContainer, id.objectPath().get()))
+                                                    .flatMap(new LoadContainerKey(vertxContext))
+                                                    .map(Holder3::value2)
+                                                    .map(Optional::get);
+                                        }
+                                    })
+                                    .map(newPersistentMasterKey -> {
+                                        if (isDebugEnabled) {
+                                            LOGGER.debug("Finished Create of key " + newPersistentMasterKey.getId());
+                                        }
+                                        return newPersistentMasterKey;
+                                    }));
         });
     }
 

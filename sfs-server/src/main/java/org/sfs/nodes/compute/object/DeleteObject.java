@@ -51,7 +51,7 @@ import static java.lang.Boolean.TRUE;
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
 import static java.util.Calendar.getInstance;
 import static java.util.Collections.emptySet;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.util.NullSafeAscii.equalsIgnoreCase;
 import static org.sfs.util.SfsHttpQueryParams.VERSION;
@@ -70,7 +70,7 @@ public class DeleteObject implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAuthenticated(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))

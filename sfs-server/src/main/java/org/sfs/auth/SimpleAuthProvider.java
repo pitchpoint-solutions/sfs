@@ -71,7 +71,7 @@ import static org.sfs.auth.Role.ADMIN;
 import static org.sfs.auth.Role.USER;
 import static org.sfs.auth.Role.fromValueIfExists;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.DateFormatter.toDateTimeString;
 import static org.sfs.util.JsonHelper.getField;
 import static org.sfs.util.Limits.MAX_AUTH_REQUEST_SIZE;
@@ -105,7 +105,7 @@ public class SimpleAuthProvider implements AuthProvider {
         } else {
             roles.clear();
         }
-        return empty();
+        return aVoid();
     }
 
     @Override
@@ -116,12 +116,12 @@ public class SimpleAuthProvider implements AuthProvider {
     @Override
     public Observable<Void> close(VertxContext<Server> vertxContext) {
         roles.clear();
-        return empty();
+        return aVoid();
     }
 
     @Override
     public Observable<Void> authenticate(SfsRequest sfsRequest) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> {
                     UserAndRole userAndRole = getUserByCredentials(sfsRequest);
                     sfsRequest.setUserAndRole(userAndRole);
@@ -138,7 +138,7 @@ public class SimpleAuthProvider implements AuthProvider {
         httpServerRequest.pause();
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
-        empty()
+        aVoid()
                 .flatMap(aVoid -> {
                     final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
                     LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(bufferWriteStream, MAX_AUTH_REQUEST_SIZE);
@@ -253,85 +253,85 @@ public class SimpleAuthProvider implements AuthProvider {
 
     @Override
     public Observable<Boolean> canObjectUpdate(SfsRequest sfsRequest, TransientVersion version) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canObjectDelete(SfsRequest sfsRequest, TransientVersion version) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canObjectCreate(SfsRequest sfsRequest, TransientVersion version) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canObjectRead(SfsRequest sfsRequest, TransientVersion version) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canContainerUpdate(SfsRequest sfsRequest, PersistentContainer container) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canContainerDelete(SfsRequest sfsRequest, PersistentContainer container) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canContainerCreate(SfsRequest sfsRequest, TransientContainer container) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canContainerRead(SfsRequest sfsRequest, PersistentContainer container) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canAccountUpdate(SfsRequest sfsRequest, PersistentAccount account) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdmin(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canAccountDelete(SfsRequest sfsRequest, PersistentAccount account) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdmin(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canAccountCreate(SfsRequest sfsRequest, TransientAccount account) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdmin(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canAccountRead(SfsRequest sfsRequest, PersistentAccount account) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdmin(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canAdmin(SfsRequest sfsRequest) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdmin(sfsRequest));
     }
 
     @Override
     public Observable<Boolean> canContainerListObjects(SfsRequest sfsRequest, PersistentContainer container) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> isAdminOrUser(sfsRequest));
     }
 

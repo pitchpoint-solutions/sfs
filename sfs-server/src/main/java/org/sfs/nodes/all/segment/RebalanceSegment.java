@@ -17,6 +17,7 @@
 package org.sfs.nodes.all.segment;
 
 import com.google.common.base.Optional;
+import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
@@ -45,13 +46,11 @@ import static com.google.common.collect.FluentIterable.from;
 import static com.google.common.collect.Iterables.concat;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Math.abs;
-import static org.sfs.rx.Defer.empty;
 import static org.sfs.rx.RxHelper.combineSinglesDelayError;
 import static org.sfs.rx.RxHelper.iterate;
 import static org.sfs.util.Limits.NOT_SET;
 import static org.sfs.util.MessageDigestFactory.SHA512;
 import static rx.Observable.just;
-import static rx.Observable.zip;
 
 public class RebalanceSegment implements Func1<TransientSegment, Observable<Boolean>> {
 
@@ -59,11 +58,13 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
     private VertxContext<Server> vertxContext;
     private Nodes nodes;
     private List<TransientServiceDef> dataNodes;
+    private Vertx vertx;
 
     public RebalanceSegment(VertxContext<Server> vertxContext, List<TransientServiceDef> copyOfDataNodes) {
         this.vertxContext = vertxContext;
         this.nodes = vertxContext.verticle().nodes();
         this.dataNodes = copyOfDataNodes;
+        this.vertx = vertxContext.vertx();
     }
 
     @Override
@@ -71,7 +72,8 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
         if (transientSegment.isTinyData()) {
             return just(true);
         } else {
-            return reBalance(transientSegment);
+            return Defer.aVoid()
+                    .flatMap(aVoid -> reBalance(transientSegment));
         }
     }
 
@@ -87,7 +89,7 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
 
         int numberOfObjectReplicasRequestedOnContainer = transientSegment.getParent().getParent().getParent().getObjectReplicas();
 
-        int numberOfExpectedReplicas = NOT_SET == numberOfObjectReplicasRequestedOnContainer ? nodes.getNumberOfObjectReplicasReplicas() : numberOfObjectReplicasRequestedOnContainer;
+        int numberOfExpectedReplicas = NOT_SET == numberOfObjectReplicasRequestedOnContainer ? nodes.getNumberOfObjectCopies() : numberOfObjectReplicasRequestedOnContainer;
 
         checkState(numberOfExpectedReplicas > 0, "Number of replica volumes must be greater than zero");
 
@@ -95,37 +97,34 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
 
         int numberOfReplicasNeeded = numberOfExpectedReplicas - numberOfExistingReplicas;
 
-        Observable<Boolean> oBalanceDownReplicas =
-                empty()
-                        .filter(aVoid -> numberOfReplicasNeeded < 0)
-                        .flatMap(aVoid -> balanceDown(replicas, abs(numberOfReplicasNeeded)))
-                        .onErrorResumeNext(throwable -> {
-                            LOGGER.error("Handling Balance Down Replicas Exception", throwable);
-                            return Defer.just(false);
-                        })
-                        .singleOrDefault(false);
-
-        Observable<Boolean> oBalanceUp =
-                empty()
-                        .filter(aVoid -> numberOfReplicasNeeded > 0)
-                        .flatMap(aVoid -> {
-                            Set<String> usedVolumeIds =
-                                    from(concat(replicas))
-                                            .transform(input -> input.getVolumeId().get())
-                                            .toSet();
-                            return balanceUp(transientSegment, usedVolumeIds, numberOfReplicasNeeded);
-                        })
-                        .onErrorResumeNext(throwable -> {
-                            LOGGER.error("Handling Balance Up Exception", throwable);
-                            return Defer.just(false);
-                        })
-                        .singleOrDefault(false);
-
-        return zip(
-                oBalanceUp,
-                oBalanceDownReplicas,
-                (balanceDownReplicas, balanceUp) ->
-                        balanceDownReplicas || balanceUp);
+        return Defer.aVoid()
+                .flatMap(aVoid -> {
+                    if (numberOfReplicasNeeded < 0) {
+                        return balanceDown(replicas, abs(numberOfReplicasNeeded))
+                                .onErrorResumeNext(throwable -> {
+                                    LOGGER.error("Handling Balance Down Replicas Exception", throwable);
+                                    return Defer.just(false);
+                                });
+                    } else {
+                        return Defer.just(false);
+                    }
+                })
+                .flatMap(balancedDown -> {
+                    if (numberOfReplicasNeeded > 0) {
+                        Set<String> usedVolumeIds =
+                                from(concat(replicas))
+                                        .transform(input -> input.getVolumeId().get())
+                                        .toSet();
+                        return balanceUp(transientSegment, usedVolumeIds, numberOfReplicasNeeded)
+                                .map(balancedUp -> balancedDown || balancedUp)
+                                .onErrorResumeNext(throwable -> {
+                                    LOGGER.error("Handling Balance Up Exception", throwable);
+                                    return Defer.just(balancedDown);
+                                });
+                    } else {
+                        return Defer.just(balancedDown);
+                    }
+                });
     }
 
     protected Observable<Boolean> balanceDown(List<TransientBlobReference> blobs, int delta) {
@@ -134,6 +133,7 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
 
         AtomicInteger counter = new AtomicInteger(0);
         return iterate(
+                vertx,
                 blobs,
                 transientBlobReference ->
                         just(transientBlobReference)

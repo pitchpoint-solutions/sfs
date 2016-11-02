@@ -37,7 +37,8 @@ import org.sfs.integration.java.func.PostContainer;
 import org.sfs.integration.java.func.PutContainer;
 import org.sfs.integration.java.func.PutObject;
 import org.sfs.integration.java.func.RefreshIndex;
-import org.sfs.integration.java.func.RunJobs;
+import org.sfs.integration.java.func.VerifyRepairAllContainersExecute;
+import org.sfs.jobs.VerifyRepairAllContainerObjects;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.HttpClientResponseHeaderLogger;
 import rx.Observable;
@@ -50,10 +51,7 @@ import static java.lang.String.valueOf;
 import static java.lang.System.currentTimeMillis;
 import static java.net.HttpURLConnection.HTTP_CREATED;
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
-import static java.util.Calendar.MILLISECOND;
 import static java.util.Calendar.getInstance;
-import static org.sfs.elasticsearch.object.MaintainObjectsForNode.CONSISTENCY_THRESHOLD;
-import static org.sfs.elasticsearch.object.MaintainObjectsForNode.VERIFY_RETRY_COUNT;
 import static org.sfs.filesystem.volume.VolumeV1.TINY_DATA_THRESHOLD;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
 import static org.sfs.integration.java.help.AuthorizationFactory.httpBasic;
@@ -78,6 +76,8 @@ public class PurgeTest extends BaseTestVerticle {
 
     protected Observable<Void> prepareContainer(TestContext context) {
         return just((Void) null)
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
                 .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
@@ -93,7 +93,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeExpiredTwoVersionsNoVersionsRemaining(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
         final long currentTimeInMillis = currentTimeMillis();
 
         Async async = context.async();
@@ -126,7 +126,7 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .flatMap(jsonObject -> {
                     Calendar past = getInstance();
-                    past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
@@ -143,7 +143,8 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<JsonObject>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
@@ -165,7 +166,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeExpiredTwoVersionsOneVersionRemaining(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
         final long currentTimeInMillis = currentTimeMillis();
 
         Async async = context.async();
@@ -197,7 +198,7 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .flatMap(jsonObject -> {
                     Calendar past = getInstance();
-                    past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
@@ -215,7 +216,8 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<JsonObject>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
@@ -243,7 +245,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeDeletedTwoVersionsNoVersionsRemaining(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
 
 
         Async async = context.async();
@@ -275,7 +277,7 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .flatMap(jsonObject -> {
                     Calendar past = getInstance();
-                    past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
@@ -292,7 +294,8 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<JsonObject>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
@@ -314,7 +317,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeDeletedTwoVersionsOneVersionRemaining(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
 
         Async async = context.async();
         prepareContainer(context)
@@ -342,7 +345,7 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .flatMap(jsonObject -> {
                     Calendar past = getInstance();
-                    past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
@@ -360,7 +363,8 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<JsonObject>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(aVoid -> {
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
@@ -385,7 +389,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeNotVerifiedTwoVersionsNoVersionsRemaining(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
 
         Async async = context.async();
         prepareContainer(context)
@@ -413,7 +417,7 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .flatMap(jsonObject -> {
                     Calendar past = getInstance();
-                    past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                     Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
@@ -433,7 +437,7 @@ public class PurgeTest extends BaseTestVerticle {
                             for (Object q : blobs) {
                                 JsonObject jsonBlob = (JsonObject) q;
                                 jsonBlob.put("acknowledged", false);
-                                jsonBlob.put("verify_fail_count", VERIFY_RETRY_COUNT);
+                                jsonBlob.put("verify_fail_count", VerifyRepairAllContainerObjects.VERIFY_RETRY_COUNT);
                             }
                         }
                     }
@@ -444,7 +448,8 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<JsonObject>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
@@ -469,7 +474,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeNoVerifiedTwoVersionsTwoVersionRemaining(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
 
         Async async = context.async();
         prepareContainer(context)
@@ -509,7 +514,7 @@ public class PurgeTest extends BaseTestVerticle {
                     @Override
                     public Observable<JsonObject> call(final JsonObject jsonObject) {
                         Calendar past = getInstance();
-                        past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                        past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                         Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                         IndexRequestBuilder request = elasticsearch.get()
@@ -547,7 +552,8 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<JsonObject>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
@@ -586,7 +592,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeNoVerifiedTwoVersionsOneVersionRemaining(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
 
         Async async = context.async();
         prepareContainer(context)
@@ -626,7 +632,7 @@ public class PurgeTest extends BaseTestVerticle {
                     @Override
                     public Observable<JsonObject> call(final JsonObject jsonObject) {
                         Calendar past = getInstance();
-                        past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                        past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                         Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                         IndexRequestBuilder request = elasticsearch.get()
@@ -646,7 +652,7 @@ public class PurgeTest extends BaseTestVerticle {
                                 for (Object q : blobs) {
                                     JsonObject jsonBlob = (JsonObject) q;
                                     jsonBlob.put("acknowledged", false);
-                                    jsonBlob.put("verify_fail_count", VERIFY_RETRY_COUNT);
+                                    jsonBlob.put("verify_fail_count", VerifyRepairAllContainerObjects.VERIFY_RETRY_COUNT);
                                 }
                             }
                             break;
@@ -664,7 +670,8 @@ public class PurgeTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<JsonObject>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new RunJobs(VERTX_CONTEXT))
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
@@ -703,7 +710,7 @@ public class PurgeTest extends BaseTestVerticle {
     @Test
     public void testPurgeAboveVersionLimit(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
-        getCurrentInstance().nextBytes(data0);
+        getCurrentInstance().nextBytesBlocking(data0);
 
         ListMultimap<String, String> headers = create();
         headers.put(X_ADD_CONTAINER_META_PREFIX + X_MAX_OBJECT_REVISIONS, valueOf(2));
@@ -757,7 +764,7 @@ public class PurgeTest extends BaseTestVerticle {
                     @Override
                     public Observable<JsonObject> call(final JsonObject jsonObject) {
                         Calendar past = getInstance();
-                        past.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                        past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
                         Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
                         IndexRequestBuilder request = elasticsearch.get()

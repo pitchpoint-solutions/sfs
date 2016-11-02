@@ -22,7 +22,8 @@ import com.google.common.collect.ImmutableSet;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.rx.AsyncResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import rx.Observable;
 
@@ -43,9 +44,8 @@ import static java.nio.file.Files.createDirectory;
 import static java.nio.file.Files.isDirectory;
 import static org.sfs.filesystem.volume.Volume.Status.STARTED;
 import static org.sfs.filesystem.volume.Volume.Status.STOPPED;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.RxHelper.iterate;
-import static rx.Observable.create;
 import static rx.Observable.defer;
 
 public class VolumeManager {
@@ -67,16 +67,16 @@ public class VolumeManager {
         return defer(() -> {
             open = true;
 
-            AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
+            ObservableFuture<Void> handler = RxHelper.observableFuture();
             vertxContext.vertx().fileSystem()
-                    .mkdirs(basePath.toString(), null, handler);
+                    .mkdirs(basePath.toString(), null, handler.toHandler());
 
-            return create(handler.subscribe)
+            return handler
                     .flatMap(aVoid -> {
-                        AsyncResultMemoizeHandler<List<String>, List<String>> handler1 = new AsyncResultMemoizeHandler<>();
+                        ObservableFuture<List<String>> handler1 = RxHelper.observableFuture();
                         vertxContext.vertx().fileSystem()
-                                .readDir(basePath.toString(), handler1);
-                        return create(handler1.subscribe);
+                                .readDir(basePath.toString(), handler1.toHandler());
+                        return handler1;
                     })
                     .flatMap(Observable::from)
                     .map(volumeDirectory -> Paths.get(volumeDirectory))
@@ -101,20 +101,20 @@ public class VolumeManager {
                             return newVolume(vertxContext)
                                     .map(new ToVoid<>());
                         }
-                        return empty();
+                        return aVoid();
                     });
         });
     }
 
     public Observable<Void> deleteVolumes(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> {
                     checkState(!open, "Not closed");
                 })
                 .flatMap(aVoid -> {
-                    AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
-                    vertxContext.vertx().fileSystem().deleteRecursive(basePath.toString(), true, handler);
-                    return create(handler.subscribe);
+                    ObservableFuture<Void> handler = RxHelper.observableFuture();
+                    vertxContext.vertx().fileSystem().deleteRecursive(basePath.toString(), true, handler.toHandler());
+                    return handler;
                 });
     }
 
@@ -141,7 +141,7 @@ public class VolumeManager {
                     })
                     .onErrorResumeNext(throwable -> {
                         exists.set(true);
-                        return empty();
+                        return aVoid();
                     })
                     .flatMap(aVoid -> {
                         if (!exists.get()) {
@@ -157,7 +157,7 @@ public class VolumeManager {
     }
 
     public Observable<Void> openVolume(VertxContext<Server> vertxContext, final String volumeId) {
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> {
                     Volume volume = volumeMap.get(volumeId);
                     if (volume == null) {
@@ -172,7 +172,7 @@ public class VolumeManager {
     }
 
     public Observable<Void> closeVolume(VertxContext<Server> vertxContext, final String volumeId) {
-        return empty()
+        return aVoid()
                 .flatMap(aVoid -> {
                     Volume volume = volumeMap.get(volumeId);
                     if (volume == null) {
@@ -197,10 +197,11 @@ public class VolumeManager {
             final ImmutableSet<Volume> values = copyOf(volumeMap.values());
             volumeMap.clear();
             return iterate(
+                    vertxContext.vertx(),
                     values, volume -> volume.close(vertxContext.vertx())
                             .onErrorResumeNext(throwable -> {
                                 LOGGER.warn("Unhandled Exception", throwable);
-                                return empty();
+                                return aVoid();
                             })
                             .map(aVoid -> true)
             )

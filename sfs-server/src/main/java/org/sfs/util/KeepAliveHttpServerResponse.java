@@ -23,8 +23,14 @@ import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerResponse;
+import io.vertx.core.logging.Logger;
+import io.vertx.core.logging.LoggerFactory;
 import org.sfs.Server;
 import org.sfs.VertxContext;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
+import rx.Subscriber;
+import rx.exceptions.CompositeException;
 
 import java.util.concurrent.TimeUnit;
 
@@ -34,6 +40,7 @@ import static io.vertx.core.buffer.Buffer.buffer;
 
 public class KeepAliveHttpServerResponse implements HttpServerResponse {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(KeepAliveHttpServerResponse.class);
     private final VertxContext<Server> vertxContext;
     public static final String DELIMITER = "\n";
     public static final Buffer DELIMITER_BUFFER = buffer(DELIMITER, UTF_8.toString());
@@ -49,12 +56,35 @@ public class KeepAliveHttpServerResponse implements HttpServerResponse {
         this.delegate = delegate;
         this.timeout = timeUnit.toMillis(timeout);
         delegate.setChunked(true);
-        delegate.exceptionHandler(exception -> stopKeepAlive(event1 -> {
-            if (delegateExceptionHandler != null) {
-                delegateExceptionHandler.handle(exception);
-            }
-        }));
+        delegate.exceptionHandler(exception -> {
+            ObservableFuture<Void> handler = RxHelper.observableFuture();
+            stopKeepAlive(handler);
+            handler.subscribe(new Subscriber<Void>() {
+                @Override
+                public void onCompleted() {
+                    handleThrowable(exception);
+                }
+
+                @Override
+                public void onError(Throwable e) {
+                    handleThrowable(new CompositeException(exception, e));
+                }
+
+                @Override
+                public void onNext(Void aVoid) {
+
+                }
+            });
+        });
         startKeepAlive();
+    }
+
+    private void handleThrowable(Throwable e) {
+        if (delegateExceptionHandler != null) {
+            delegateExceptionHandler.handle(e);
+        } else {
+            LOGGER.error("Unhandled Exception", e);
+        }
     }
 
     public KeepAliveHttpServerResponse startKeepAlive() {
@@ -74,7 +104,7 @@ public class KeepAliveHttpServerResponse implements HttpServerResponse {
         return this;
     }
 
-    public KeepAliveHttpServerResponse stopKeepAlive(Handler<Void> handler) {
+    public KeepAliveHttpServerResponse stopKeepAlive(ObservableFuture<Void> handler) {
         keepAliveStarted = false;
         Long p = periodic;
         periodic = null;
@@ -84,7 +114,7 @@ public class KeepAliveHttpServerResponse implements HttpServerResponse {
         if (keepAliveRunning) {
             vertxContext.vertx().runOnContext(event -> stopKeepAlive(handler));
         } else {
-            handler.handle(null);
+            handler.complete(null);
         }
         return this;
     }
@@ -187,57 +217,227 @@ public class KeepAliveHttpServerResponse implements HttpServerResponse {
 
     @Override
     public HttpServerResponse write(Buffer chunk) {
-        stopKeepAlive(event -> delegate.write(chunk));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.write(chunk);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public HttpServerResponse write(String chunk, String enc) {
-        stopKeepAlive(event -> delegate.write(chunk, enc));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.write(chunk, enc);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public HttpServerResponse write(String chunk) {
-        stopKeepAlive(event -> delegate.write(chunk));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.write(chunk);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public void end(String chunk) {
-        stopKeepAlive(event -> delegate.end(chunk));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.end(chunk);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
     }
 
     @Override
     public void end(String chunk, String enc) {
-        stopKeepAlive(event -> delegate.end(chunk, enc));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.end(chunk, enc);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
     }
 
     @Override
     public void end(Buffer chunk) {
-        stopKeepAlive(event -> delegate.end(chunk));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.end(chunk);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
     }
 
     @Override
     public void end() {
-        stopKeepAlive(event -> delegate.end());
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.end();
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
     }
 
     @Override
     public HttpServerResponse writeContinue() {
-        stopKeepAlive(event -> delegate.writeContinue());
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.writeContinue();
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public HttpServerResponse sendFile(String filename, long offset, long length) {
-        stopKeepAlive(event -> delegate.sendFile(filename, offset, length));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.sendFile(filename, offset, length);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public HttpServerResponse sendFile(String filename, long offset, long length, Handler<AsyncResult<Void>> resultHandler) {
-        stopKeepAlive(event -> delegate.sendFile(filename, offset, length, resultHandler));
+        ObservableFuture<Void> handler = RxHelper.observableFuture();
+        stopKeepAlive(handler);
+        handler.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.sendFile(filename, offset, length, resultHandler);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
@@ -280,42 +480,161 @@ public class KeepAliveHttpServerResponse implements HttpServerResponse {
 
     @Override
     public HttpServerResponse push(HttpMethod method, String host, String path, Handler<AsyncResult<HttpServerResponse>> handler) {
-        stopKeepAlive(event -> delegate.push(method, host, path, handler));
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.push(method, host, path, handler);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public HttpServerResponse push(HttpMethod method, String path, MultiMap headers, Handler<AsyncResult<HttpServerResponse>> handler) {
-        stopKeepAlive(event -> delegate.push(method, path, headers, handler));
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.push(method, path, headers, handler);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public HttpServerResponse push(HttpMethod method, String path, Handler<AsyncResult<HttpServerResponse>> handler) {
-        stopKeepAlive(event -> delegate.push(method, path, handler));
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.push(method, path, handler);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public HttpServerResponse push(HttpMethod method, String host, String path, MultiMap headers, Handler<AsyncResult<HttpServerResponse>> handler) {
-        stopKeepAlive(event -> delegate.push(method, host, path, headers, handler));
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.push(method, host, path, headers, handler);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public void reset(long code) {
-        stopKeepAlive(event -> delegate.reset(code));
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.reset(code);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
     }
 
     @Override
     public HttpServerResponse writeCustomFrame(int type, int flags, Buffer payload) {
-        stopKeepAlive(event -> delegate.writeCustomFrame(type, flags, payload));
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.writeCustomFrame(type, flags, payload);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 
     @Override
     public void close() {
-        stopKeepAlive(event -> delegate.close());
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.close();
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
     }
 
     @Override

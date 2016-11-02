@@ -16,12 +16,12 @@
 
 package org.sfs.integration.java.func;
 
-import io.vertx.core.Handler;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -51,19 +51,14 @@ public class HeadContainer implements Func1<Void, Observable<HttpClientResponse>
                 .flatMap(new Func1<String, Observable<HttpClientResponse>>() {
                     @Override
                     public Observable<HttpClientResponse> call(String s) {
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         HttpClientRequest httpClientRequest =
-                                httpClient.head("/openstackswift001/" + accountName + "/" + containerName, handler)
-                                        .exceptionHandler(new Handler<Throwable>() {
-                                            @Override
-                                            public void handle(Throwable event) {
-                                                handler.fail(event);
-                                            }
-                                        })
+                                httpClient.head("/openstackswift001/" + accountName + "/" + containerName, handler::complete)
+                                        .exceptionHandler(handler::fail)
                                         .setTimeout(10000)
                                         .putHeader(AUTHORIZATION, s);
                         httpClientRequest.end();
-                        return create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

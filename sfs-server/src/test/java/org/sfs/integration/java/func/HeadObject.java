@@ -16,12 +16,12 @@
 
 package org.sfs.integration.java.func;
 
-import io.vertx.core.Handler;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -72,19 +72,14 @@ public class HeadObject implements Func1<Void, Observable<HttpClientResponse>> {
                                     .append("=")
                                     .append(version);
                         }
-                        final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                         HttpClientRequest httpClientRequest =
-                                httpClient.head(urlBuilder.toString(), handler)
-                                        .exceptionHandler(new Handler<Throwable>() {
-                                            @Override
-                                            public void handle(Throwable event) {
-                                                handler.fail(event);
-                                            }
-                                        })
+                                httpClient.head(urlBuilder.toString(), handler::complete)
+                                        .exceptionHandler(handler::fail)
                                         .setTimeout(5000)
                                         .putHeader(AUTHORIZATION, s);
                         httpClientRequest.end();
-                        return create(handler.subscribe)
+                        return handler
                                 .single();
                     }
                 });

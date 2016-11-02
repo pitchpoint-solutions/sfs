@@ -29,7 +29,7 @@ import java.util.Optional;
 
 import static com.google.common.base.Optional.of;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 
 public class SearchHitEndableWriteStreamUpdateNodeId extends AbstractBulkUpdateEndableWriteStream {
 
@@ -49,7 +49,7 @@ public class SearchHitEndableWriteStreamUpdateNodeId extends AbstractBulkUpdateE
 
     @Override
     protected Observable<com.google.common.base.Optional<JsonObject>> transform(JsonObject data, String id, long version) {
-        return empty()
+        return aVoid()
                 .map(aVoid -> {
                     Map.Entry<String, Holder1<Long>> entry = selectSmallest();
                     incrementCount(entry);

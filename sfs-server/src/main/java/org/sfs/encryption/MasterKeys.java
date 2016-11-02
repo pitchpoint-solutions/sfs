@@ -34,7 +34,6 @@ import org.sfs.util.MacDigestFactory;
 import org.sfs.vo.PersistentMasterKey;
 import org.sfs.vo.TransientMasterKey;
 import rx.Observable;
-import rx.Subscriber;
 
 import javax.crypto.Mac;
 import java.util.Arrays;
@@ -62,13 +61,12 @@ import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.fill;
 import static java.util.Calendar.getInstance;
 import static java.util.concurrent.TimeUnit.DAYS;
-import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.sfs.encryption.AlgorithmDef.getPreferred;
 import static org.sfs.encryption.KmsFactory.fromKeyId;
 import static org.sfs.encryption.KmsFactory.newBackup0Kms;
 import static org.sfs.encryption.KmsFactory.newKms;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
 import static org.sfs.rx.RxHelper.combineSinglesDelayError;
 import static org.sfs.util.MacDigestFactory.SHA512;
@@ -91,7 +89,7 @@ public class MasterKeys {
     private boolean failIfNotCached = false;
 
     public Observable<Void> start(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .filter(aVoid -> closed.compareAndSet(true, false))
                 .map(aVoid -> {
                     startedVertxContext = vertxContext;
@@ -113,42 +111,11 @@ public class MasterKeys {
                     timerIds.add(startedVertxContext.vertx().setTimer(SECONDS.toMillis(1), handler));
                     return (Void) null;
                 })
-                .map(aVoid -> {
-                    Handler<Long> handler = new Handler<Long>() {
-
-                        Handler<Long> _this = this;
-
-                        @Override
-                        public void handle(Long event) {
-                            timerIds.remove(event);
-                            maintain(vertxContext)
-                                    .subscribe(new Subscriber<Void>() {
-                                        @Override
-                                        public void onCompleted() {
-                                            timerIds.add(startedVertxContext.vertx().setTimer(MINUTES.toMillis(1), _this));
-                                        }
-
-                                        @Override
-                                        public void onError(Throwable e) {
-                                            LOGGER.warn("Unhandled Exception", e);
-                                            timerIds.add(startedVertxContext.vertx().setTimer(MINUTES.toMillis(1), _this));
-                                        }
-
-                                        @Override
-                                        public void onNext(Void aVoid) {
-
-                                        }
-                                    });
-                        }
-                    };
-                    timerIds.add(startedVertxContext.vertx().setTimer(MINUTES.toMillis(1), handler));
-                    return (Void) null;
-                })
                 .singleOrDefault(null);
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
-        return empty()
+        return aVoid()
                 .filter(aVoid -> closed.compareAndSet(false, true))
                 .map(aVoid -> {
                     cache.clear();
@@ -199,18 +166,19 @@ public class MasterKeys {
         return defer(() -> {
             checkOpen();
             return getPreferredKey(vertxContext)
-                    .map(masterKey -> {
-                        byte[] salt = masterKey.getAlgorithmDef().generateSalt();
-                        SecureSecret secureSecret = masterKey.getSecureSecret();
-                        byte[] clearMasterSecret = secureSecret.getClearBytes();
-                        try {
-                            Algorithm algorithm = masterKey.getAlgorithmDef().create(clearMasterSecret, salt);
-                            byte[] encryptedBytes = algorithm.encrypt(clearBytes);
-                            return new Encrypted(masterKey.getKeyId(), salt, encryptedBytes);
-                        } finally {
-                            fill(clearMasterSecret, (byte) 0);
-                        }
-                    });
+                    .flatMap(masterKey ->
+                            masterKey.getAlgorithmDef().generateSalt(vertxContext.vertx())
+                                    .map(salt -> {
+                                        SecureSecret secureSecret = masterKey.getSecureSecret();
+                                        byte[] clearMasterSecret = secureSecret.getClearBytes();
+                                        try {
+                                            Algorithm algorithm = masterKey.getAlgorithmDef().create(clearMasterSecret, salt);
+                                            byte[] encryptedBytes = algorithm.encrypt(clearBytes);
+                                            return new Encrypted(masterKey.getKeyId(), salt, encryptedBytes);
+                                        } finally {
+                                            fill(clearMasterSecret, (byte) 0);
+                                        }
+                                    }));
         });
     }
 
@@ -439,7 +407,7 @@ public class MasterKeys {
                 checkState(lastEntry == null, "Cached MasterKey not found");
             }
 
-            return empty()
+            return aVoid()
                     .flatMap(new GetNewestMasterKey(vertxContext, preferredAlgorithmDef))
                     .flatMap(persistentMasterKeyOptional -> {
                         if (persistentMasterKeyOptional.isPresent()) {
@@ -663,54 +631,54 @@ public class MasterKeys {
 
                 String id = nextKey(existingPersistentMasterKey.getId());
 
-                byte[] clearMasterSecret = preferredAlgorithmDef.generateKey();
+                return preferredAlgorithmDef.generateKey(vertxContext.vertx())
+                        .flatMap(clearMasterSecret ->
+                                using(
+                                        () -> null,
+                                        aVoid -> {
+                                            MacDigestFactory mdf = SHA512;
+                                            byte[] secretSalt = mdf.generateKey();
+                                            byte[] secretSha512 = mdf.instance(secretSalt).doFinal(clearMasterSecret);
+                                            return combineLatest(
+                                                    kms.encrypt(vertxContext, clearMasterSecret),
+                                                    backup0Kms.encrypt(vertxContext, clearMasterSecret),
+                                                    Defer.just(vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode()),
+                                                    (awsEncrypted, azureEncrypted, transientServiceDefServiceDefOptional) -> {
+                                                        Calendar now = getInstance();
+                                                        TransientMasterKey transientMasterKey =
+                                                                new TransientMasterKey(id)
+                                                                        .setEncryptedKey(awsEncrypted.getCipherText())
+                                                                        .setBackup0EncryptedKey(azureEncrypted.getCipherText())
+                                                                        .setKeyId(awsEncrypted.getKeyId())
+                                                                        .setBackup0KeyId(azureEncrypted.getKeyId())
+                                                                        .setSecretSalt(secretSalt)
+                                                                        .setSecretSha512(secretSha512)
+                                                                        .setAlgorithmDef(preferredAlgorithmDef)
+                                                                        .setReEncrypteTs(now)
+                                                                        .setCreateTs(now)
+                                                                        .setUpdateTs(now);
+                                                        if (transientServiceDefServiceDefOptional.isPresent()) {
+                                                            transientMasterKey.setNodeId(transientServiceDefServiceDefOptional.get().getId());
+                                                        }
+                                                        return transientMasterKey;
 
-                return using(
-                        () -> null,
-                        aVoid -> {
-                            MacDigestFactory mdf = SHA512;
-                            byte[] secretSalt = mdf.generateKey();
-                            byte[] secretSha512 = mdf.instance(secretSalt).doFinal(clearMasterSecret);
-                            return combineLatest(
-                                    kms.encrypt(vertxContext, clearMasterSecret),
-                                    backup0Kms.encrypt(vertxContext, clearMasterSecret),
-                                    Defer.just(vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode()),
-                                    (awsEncrypted, azureEncrypted, transientServiceDefServiceDefOptional) -> {
-                                        Calendar now = getInstance();
-                                        TransientMasterKey transientMasterKey =
-                                                new TransientMasterKey(id)
-                                                        .setEncryptedKey(awsEncrypted.getCipherText())
-                                                        .setBackup0EncryptedKey(azureEncrypted.getCipherText())
-                                                        .setKeyId(awsEncrypted.getKeyId())
-                                                        .setBackup0KeyId(azureEncrypted.getKeyId())
-                                                        .setSecretSalt(secretSalt)
-                                                        .setSecretSha512(secretSha512)
-                                                        .setAlgorithmDef(preferredAlgorithmDef)
-                                                        .setReEncrypteTs(now)
-                                                        .setCreateTs(now)
-                                                        .setUpdateTs(now);
-                                        if (transientServiceDefServiceDefOptional.isPresent()) {
-                                            transientMasterKey.setNodeId(transientServiceDefServiceDefOptional.get().getId());
-                                        }
-                                        return transientMasterKey;
-
-                                    });
-                        },
-                        aVoid -> fill(clearMasterSecret, (byte) 0))
-                        .flatMap(new PersistMasterKey(vertxContext))
-                        .map(newPersistentMasterKey -> {
-                            if (newPersistentMasterKey.isPresent()) {
-                                if (isDebugEnabled) {
-                                    LOGGER.debug("Finished Rotate of key " + existingPersistentMasterKey.getId() + ". New key is " + newPersistentMasterKey.get().getId());
-                                }
-                                return newPersistentMasterKey.get();
-                            } else {
-                                if (isDebugEnabled) {
-                                    LOGGER.debug("Finished Rotate of key " + existingPersistentMasterKey.getId() + ". Another thread completed the rotation");
-                                }
-                                return existingPersistentMasterKey;
-                            }
-                        });
+                                                    });
+                                        },
+                                        aVoid -> fill(clearMasterSecret, (byte) 0))
+                                        .flatMap(new PersistMasterKey(vertxContext))
+                                        .map(newPersistentMasterKey -> {
+                                            if (newPersistentMasterKey.isPresent()) {
+                                                if (isDebugEnabled) {
+                                                    LOGGER.debug("Finished Rotate of key " + existingPersistentMasterKey.getId() + ". New key is " + newPersistentMasterKey.get().getId());
+                                                }
+                                                return newPersistentMasterKey.get();
+                                            } else {
+                                                if (isDebugEnabled) {
+                                                    LOGGER.debug("Finished Rotate of key " + existingPersistentMasterKey.getId() + ". Another thread completed the rotation");
+                                                }
+                                                return existingPersistentMasterKey;
+                                            }
+                                        }));
 
             } else {
                 return just(existingPersistentMasterKey);
@@ -735,73 +703,76 @@ public class MasterKeys {
 
             String id = firstKey();
 
-            return using(
-                    preferredAlgorithmDef::generateKey,
-                    clearMasterSecret -> {
-                        MacDigestFactory mdf = SHA512;
-                        byte[] secretSalt = mdf.generateKey();
-                        byte[] secretSha512 = mdf.instance(secretSalt).doFinal(clearMasterSecret);
+            return preferredAlgorithmDef.generateKey(vertxContext.vertx())
+                    .flatMap(clearMasterSecret ->
+                            using(
+                                    () -> (Void) null,
+                                    aVoid -> {
+                                        MacDigestFactory mdf = SHA512;
+                                        byte[] secretSalt = mdf.generateKey();
+                                        byte[] secretSha512 = mdf.instance(secretSalt).doFinal(clearMasterSecret);
 
-                        return combineLatest(
-                                kms.encrypt(vertxContext, clearMasterSecret),
-                                backup0Kms.encrypt(vertxContext, clearMasterSecret),
-                                Defer.just(vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode()),
-                                (awsEncrypted, azureEncrypted, persistentServiceDefOptional) -> {
-                                    Calendar now = getInstance();
-                                    TransientMasterKey transientMasterKey =
-                                            new TransientMasterKey(id)
-                                                    .setEncryptedKey(awsEncrypted.getCipherText())
-                                                    .setBackup0EncryptedKey(azureEncrypted.getCipherText())
-                                                    .setKeyId(awsEncrypted.getKeyId())
-                                                    .setBackup0KeyId(azureEncrypted.getKeyId())
-                                                    .setSecretSalt(secretSalt)
-                                                    .setSecretSha512(secretSha512)
-                                                    .setAlgorithmDef(preferredAlgorithmDef)
-                                                    .setReEncrypteTs(now)
-                                                    .setCreateTs(now)
-                                                    .setUpdateTs(now);
-                                    if (persistentServiceDefOptional.isPresent()) {
-                                        transientMasterKey.setNodeId(persistentServiceDefOptional.get().getId());
-                                    }
-                                    return transientMasterKey;
+                                        return combineLatest(
+                                                kms.encrypt(vertxContext, clearMasterSecret),
+                                                backup0Kms.encrypt(vertxContext, clearMasterSecret),
+                                                Defer.just(vertxContext.verticle().getClusterInfo().getCurrentMaintainerNode()),
+                                                (awsEncrypted, azureEncrypted, persistentServiceDefOptional) -> {
+                                                    Calendar now = getInstance();
+                                                    TransientMasterKey transientMasterKey =
+                                                            new TransientMasterKey(id)
+                                                                    .setEncryptedKey(awsEncrypted.getCipherText())
+                                                                    .setBackup0EncryptedKey(azureEncrypted.getCipherText())
+                                                                    .setKeyId(awsEncrypted.getKeyId())
+                                                                    .setBackup0KeyId(azureEncrypted.getKeyId())
+                                                                    .setSecretSalt(secretSalt)
+                                                                    .setSecretSha512(secretSha512)
+                                                                    .setAlgorithmDef(preferredAlgorithmDef)
+                                                                    .setReEncrypteTs(now)
+                                                                    .setCreateTs(now)
+                                                                    .setUpdateTs(now);
+                                                    if (persistentServiceDefOptional.isPresent()) {
+                                                        transientMasterKey.setNodeId(persistentServiceDefOptional.get().getId());
+                                                    }
+                                                    return transientMasterKey;
 
-                                });
-                    },
-                    clearMasterSecret -> fill(clearMasterSecret, (byte) 0))
-                    .flatMap(new PersistMasterKey(vertxContext))
-                    .flatMap(newPersistentMasterKey -> {
-                        if (newPersistentMasterKey.isPresent()) {
-                            return just(newPersistentMasterKey.get());
-                        } else {
-                            return just(id)
-                                    .flatMap(new LoadMasterKey(vertxContext))
-                                    .map(Optional::get);
-                        }
-                    })
-                    .map(newPersistentMasterKey -> {
-                        if (isDebugEnabled) {
-                            LOGGER.debug("Finished Create of key " + newPersistentMasterKey.getId());
-                        }
-                        return newPersistentMasterKey;
-                    });
+                                                });
+                                    },
+                                    aVoid -> fill(clearMasterSecret, (byte) 0))
+                                    .flatMap(new PersistMasterKey(vertxContext))
+                                    .flatMap(newPersistentMasterKey -> {
+                                        if (newPersistentMasterKey.isPresent()) {
+                                            return just(newPersistentMasterKey.get());
+                                        } else {
+                                            return just(id)
+                                                    .flatMap(new LoadMasterKey(vertxContext))
+                                                    .map(Optional::get);
+                                        }
+                                    })
+                                    .map(newPersistentMasterKey -> {
+                                        if (isDebugEnabled) {
+                                            LOGGER.debug("Finished Create of key " + newPersistentMasterKey.getId());
+                                        }
+                                        return newPersistentMasterKey;
+                                    }));
+
         });
 
     }
 
-    protected Observable<Void> maintain(VertxContext<Server> vertxContext) {
+    public Observable<Void> maintain(VertxContext<Server> vertxContext) {
         return defer(() -> {
             if (vertxContext.verticle().nodes().isDataNode()) {
                 Calendar threshold = getInstance();
                 threshold.setTimeInMillis(currentTimeMillis() - DEFAULT_RE_ENCRYPT_AGE);
-                return empty()
-                        .flatMap(new ListReEncryptableMasterKeys(vertxContext, vertxContext.verticle().nodes().getNodeId(), threshold))
+                return aVoid()
+                        .flatMap(new ListReEncryptableMasterKeys(vertxContext, threshold))
                         .flatMap(pmk -> reEncrypt(vertxContext, pmk))
                         .map(new ToType<>((Void) null))
                         .count()
                         .map(new ToVoid<>())
                         .singleOrDefault(null);
             } else {
-                return empty();
+                return aVoid();
             }
         });
     }

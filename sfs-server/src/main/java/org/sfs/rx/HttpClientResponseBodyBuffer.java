@@ -18,11 +18,11 @@ package org.sfs.rx;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientResponse;
+import org.sfs.io.AsyncIO;
+import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.nodes.HttpClientResponseException;
 import rx.Observable;
 import rx.functions.Func1;
-
-import static rx.Observable.create;
 
 public class HttpClientResponseBodyBuffer implements Func1<HttpClientResponse, Observable<Buffer>> {
 
@@ -34,11 +34,9 @@ public class HttpClientResponseBodyBuffer implements Func1<HttpClientResponse, O
 
     @Override
     public Observable<Buffer> call(HttpClientResponse httpClientResponse) {
-        ResultMemoizeHandler<Buffer> handler = new ResultMemoizeHandler<>();
-        httpClientResponse.exceptionHandler(handler::fail);
-        httpClientResponse.bodyHandler(handler);
-        httpClientResponse.resume();
-        return create(handler.subscribe)
+        BufferWriteEndableWriteStream bufferWriteEndableWriteStream = new BufferWriteEndableWriteStream();
+        return AsyncIO.pump(httpClientResponse, bufferWriteEndableWriteStream)
+                .map(aVoid -> bufferWriteEndableWriteStream.toBuffer())
                 .doOnNext(buffer -> {
                     int statusCode = httpClientResponse.statusCode();
                     boolean ok = false;

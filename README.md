@@ -7,8 +7,8 @@
 
 
 ## Features
-* Object metadata is indexed in elasticsearch which allows for quick reads, updates, deletes and listings even when containers container millions of objects
-* Objects are versioned and the number of revisions stored can be configured per container. This means that you'll never loose by object by overwriting it or deleting it (unless you force a deletion).
+* Object metadata is indexed in elasticsearch which allows for quick reads, updates, deletes and listings even when containers contain millions of objects
+* Objects are versioned and the number of revisions stored can be configured per container. This means that you'll never loose an object by overwriting it or deleting it (unless you force a deletion).
 * Each object can have a TTL set on it so that manual purging is not required
 * Object data is stored in data files that are themselves replicated and healed when necessary (the object data replication level can be controlled by container independently of the object index settings). If the object size is very small it's stored with the object metadata instead of the data file. This is useful if you're storing token type data.
 * Object data files do not need to be compacted since the block ranges are recycled. The range allocator attempts to be intelligent about which ranges object data is written to so that writes are sequential.
@@ -116,58 +116,64 @@ Oracle Java 8 and Maven 3 should be used for building.
 * [Run a production elasticsearch cluster](https://www.elastic.co/guide/en/elasticsearch/guide/current/deploy.html)
 
 ###### Running the docker image you just built (See sample configuration and logback configuration) ######
-    docker run -it --add-host "es-host:${HOST_IP}" --add-host "localhost:127.0.0.1" -e "INSTANCES=200" -e "HEAP_SIZE=512m" -p 8092:8092 -v ${PWD}:/data -v ${PWD}/sample-config.json:/etc/vertx-conf.json -v ${PWD}/sample-logback.xml:/etc/vertx-logback.xml pps-sfs:latest
+    docker run -it --add-host "es-host:${HOST_IP}" --add-host "localhost:127.0.0.1" -e "INSTANCES=200" -e "HEAP_SIZE=512m" -p 8092:80 -v ${PWD}:/data -v ${PWD}/sample-config.json:/etc/vertx-conf.json -v ${PWD}/sample-logback.xml:/etc/vertx-logback.xml pps-sfs:latest
 
 ###### Sample Configuration ######
     {
-      "fs.home": "/data/sfs",
-      "node.data": true,
-      "node.master": true,
-      "number_of_replicas": 0,
-      "http.listen.addresses": "0.0.0.0",
-      "http.publish.addresses": "${docker_image_ip_address}"
-      "http.listen.port": 8092,
-      "http.maxheadersize": 40960,
-      "jobs.maintenance_interval": "86400000",
-      "remotenode.maxpoolsize": 200,
-      "remotenode.connectimeout": 5000,
-      "remotenode.responsetimeout": 10000,
-      "remotenode.secret": "YWJjMTIzCg==",
-      "elasticsearch.cluster.name": "elasticsearch_samplecluster",
-      "elasticsearch.node.name": "simple-file-server-client",
-      "elasticsearch.replicas": "0",
-      "elasticsearch.shards": "12",
-      "elasticsearch.discovery.zen.ping.multicast.enabled": false,
-      "elasticsearch.discovery.zen.ping.unicast.enabled": true,
-      "elasticsearch.discovery.zen.ping.unicast.hosts": [
-        "es-host:9300"
-      ],
-      "elasticsearch.defaultsearchtimeout": 30000,
-      "elasticsearch.defaultindextimeout": 30000,
-      "elasticsearch.defaultgettimeout": 30000,
-      "elasticsearch.defaultdeletetimeout": 30000,
-      "keystore.aws.kms.endpoint": "https://kms.us-east-1.amazonaws.com",
-      "keystore.aws.kms.key_id": "${aws_kms_key_id}",
-      "keystore.aws.kms.access_key_id": "${aws_kms_access_key_id}",
-      "keystore.aws.kms.secret_key": "${aws_kms_secret_key}",
-      "keystore.azure.kms.endpoint": "https://....vault.azure.net",
-      "keystore.azure.kms.key_id": "${aws_azure_key_id}",
-      "keystore.azure.kms.access_key_id": "${aws_azure_access_key_id}",
-      "keystore.azure.kms.secret_key": "${aws_azure_secret_key}",
-      "auth": {
-        "admin": [
-          {
-            "username": "admin",
-            "password": "admin"
-          }
+        "auth": {
+            "admin": [
+                {
+                    "id": 1,
+                    "password": "admin",
+                    "username": "admin"
+                }
+            ],
+            "user": [
+                {
+                    "id": 2,
+                    "password": "user",
+                    "username": "user"
+                }
+            ]
+        },
+        "elasticsearch.cluster.name": "elasticsearch_samplecluster",
+        "elasticsearch.defaultdeletetimeout": 30000,
+        "elasticsearch.defaultgettimeout": 30000,
+        "elasticsearch.defaultindextimeout": 30000,
+        "elasticsearch.defaultsearchtimeout": 30000,
+        "elasticsearch.discovery.zen.ping.multicast.enabled": false,
+        "elasticsearch.discovery.zen.ping.unicast.enabled": true,
+        "elasticsearch.discovery.zen.ping.unicast.hosts": [
+            "es-host:9300"
         ],
-        "user": [
-          {
-            "username": "user",
-            "password": "user"
-          }
-        ]
-      }
+        "elasticsearch.node.name": "simple-file-server-client",
+        "elasticsearch.replicas": 0,
+        "elasticsearch.shards": 1,
+        "fs.home": "/data",
+        "http.listen.addresses": [
+            "0.0.0.0:80"
+        ],
+        "http.maxheadersize": 40960,
+        "http.publish.addresses": [
+            "${docker_image_ip_address}:8092"
+        ],
+        "keystore.aws.kms.access_key_id": "${aws_kms_access_key_id}",
+        "keystore.aws.kms.endpoint": "https://kms.us-east-1.amazonaws.com",
+        "keystore.aws.kms.key_id": "${aws_kms_key_id}",
+        "keystore.aws.kms.secret_key": "${aws_kms_access_key_id}",
+        "keystore.azure.kms.access_key_id": "${aws_azure_access_key_id}",
+        "keystore.azure.kms.endpoint": "https://....vault.azure.net",
+        "keystore.azure.kms.key_id": "${aws_azure_key_id}",
+        "keystore.azure.kms.secret_key": "${aws_azure_secret_key}",
+        "node.data": true,
+        "node.master": true,
+        "number_of_object_replicas": 1,
+        "remotenode.connectimeout": 5000,
+        "remotenode.maxpoolsize": 200,
+        "remotenode.responsetimeout": 10000,
+        "remotenode.secret": "YWJjMTIzCg==",
+        "threadpool.background.size": 200,
+        "threadpool.io.size": 200
     }
     
 ###### Sample Logback Configuration ######
@@ -195,7 +201,7 @@ Oracle Java 8 and Maven 3 should be used for building.
             <appender-ref ref="STDOUT"/>
         </logger>
     
-        <logger name="pps" level="INFO" additivity="false">
+        <logger name="org.sfs" level="INFO" additivity="false">
             <appender-ref ref="STDOUT"/>
         </logger>
     
@@ -264,15 +270,15 @@ Oracle Java 8 and Maven 3 should be used for building.
 ## Container Import and Export    
 
 ###### Export a container ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" "http://localhost:8092/admin_containerexport/my_account/my_container"
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" "http://localhost:8092/export_container/my_account/my_container"
 ###### Export a container and compress the export ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" -H "x-sfs-compress: true" "http://localhost:8092/admin_containerexport/my_account/my_container"   
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" -H "x-sfs-compress: true" "http://localhost:8092/export_container/my_account/my_container"   
 ###### Export a container, compress and encrypt the export ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" -H "x-sfs-compress: true" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/admin_containerexport/my_account/my_container"       
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" -H "x-sfs-compress: true" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/export_container/my_account/my_container"       
 ###### Import a container into a container named target_container ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" "http://localhost:8092/admin_containerexport/my_account/target_containers"    
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" "http://localhost:8092/import_container/my_account/target_containers"    
 ###### Import an encrypted container into a container named target_container ######
-    curl -XPOST -u admin:admin -H "x-sfs-src-directory: /data/my_container_export" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/admin_containerexport/my_account/target_container"       
+    curl -XPOST -u admin:admin -H "x-sfs-src-directory: /data/my_container_export" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/import_container/my_account/target_container"       
     
     
 ## Health Check
@@ -283,12 +289,32 @@ Oracle Java 8 and Maven 3 should be used for building.
     
 ## Misc. Administration
 
-###### Repair and object manually ######
-    curl -XPOST -u admin:admin "http://localhost:8092/admin_objectrepair/my_account/my_account/my_container/my_object"
+###### Verify/Repair an object ######
+    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects/my_account/my_container/my_object"
+###### Execute Verify/Repair a container ######
+    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects/my_account/my_container"  
+###### Wait for Verify/Repair of a container for 30 seconds ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects/my_account/my_container"      
+###### Stop Verify/Repair of a container waiting 30 seconds for it to stop ######
+    curl -XDELETE -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects/my_account/my_container"     
+###### Verify/Repair all container ######
+    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects"         
+###### Wait for Verify/Repair of all container ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects"  
+###### Stop for Verify/Repair of all container ######
+    curl -XDELTE -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects"              
 ###### Verify and repair master keys (if amazon web services or azure spontaneously vanish from the face of planet earth) ######
-    curl -XPOST -u admin:admin "http://localhost:8092/admin/001/master_keys_check"    
-###### Manually run the maintenance jobs run by the master node ######
-    curl -XPOST -u admin:admin "http://localhost:8092/admin/001/run_jobs"   
+    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_masterkeys" 
+###### Wait for Verify and repair master keys (if amazon web services or azure spontaneously vanish from the face of planet earth) ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_masterkeys"         
+###### Re Encrypt Container Keys if they're older than 30 days ######
+    curl -XPOST -u admin:admin "http://localhost:8092/reencrypt_containerkeys"   
+###### Wait for Re Encrypt Container Keys if they're older than 30 days ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/reencrypt_containerkeys"     
+###### Re Encrypt Master Keys if they're older than 30 days ######
+    curl -XPOST -u admin:admin "http://localhost:8092/reencrypt_masterkeys"     
+###### Wait for Re Encrypt Master Keys if they're older than 30 days ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/reencrypt_masterkeys"
          
          
 ## Road Map

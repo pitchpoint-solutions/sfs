@@ -48,10 +48,11 @@ import org.sfs.integration.java.func.PutContainer;
 import org.sfs.integration.java.func.PutObject;
 import org.sfs.integration.java.func.PutObjectStream;
 import org.sfs.integration.java.func.RefreshIndex;
+import org.sfs.integration.java.func.VerifyRepairAllContainersExecute;
 import org.sfs.io.CountingEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.NullEndableWriteStream;
-import org.sfs.jobs.Jobs;
+import org.sfs.jobs.VerifyRepairAllContainerObjects;
 import org.sfs.rx.BufferToJsonObject;
 import org.sfs.rx.HttpClientResponseBodyBuffer;
 import org.sfs.rx.ToVoid;
@@ -92,9 +93,7 @@ import static java.nio.file.Files.copy;
 import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.newOutputStream;
 import static java.nio.file.Files.size;
-import static java.util.Calendar.MILLISECOND;
 import static java.util.Calendar.getInstance;
-import static org.sfs.elasticsearch.object.MaintainObjectsForNode.CONSISTENCY_THRESHOLD;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
 import static org.sfs.integration.java.help.AuthorizationFactory.httpBasic;
 import static org.sfs.io.AsyncIO.pump;
@@ -128,8 +127,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
     protected Observable<Void> prepareContainer(TestContext context) {
 
         return just((Void) null)
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
                 .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
                 .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
@@ -152,7 +150,6 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
         final byte[] data0 = "HELLO0".getBytes(UTF_8);
         final long currentTimeInMillis = currentTimeMillis();
 
-        final Jobs masterTasksManager = VERTX_CONTEXT.verticle().jobs();
 
         Async async = context.async();
         prepareContainer(context)
@@ -188,8 +185,9 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
                 .flatMap(new Func1<GetResponse, Observable<IndexResponse>>() {
                     @Override
                     public Observable<IndexResponse> call(GetResponse getResponse) {
+                        long now = System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2);
                         Calendar afterConsistencyWindow = getInstance();
-                        afterConsistencyWindow.add(MILLISECOND, -(CONSISTENCY_THRESHOLD * 2));
+                        afterConsistencyWindow.setTimeInMillis(now);
 
                         JsonObject jsonObject = new JsonObject(getResponse.getSourceAsString());
                         jsonObject.put("update_ts", toDateTimeString(afterConsistencyWindow));
@@ -208,12 +206,8 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
                 })
                 .map(new ToVoid<>())
                 .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new Func1<Void, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(Void aVoid) {
-                        return masterTasksManager.run(VERTX_CONTEXT);
-                    }
-                })
+                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
@@ -236,7 +230,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
     public void testEncryptedDynamicLargeLargeUpload(TestContext context) throws IOException {
 
         byte[] data = new byte[256];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
         int dataSize = 256 * 1024;
 
         Path tempFile1 = createTempFile(tmpDir, "", "");
@@ -354,7 +348,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
     public void testDynamicLargeLargeUpload(TestContext context) throws IOException {
 
         byte[] data = new byte[256];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
         int dataSize = 256 * 1024;
 
         Path tempFile1 = createTempFile(tmpDir, "", "");
@@ -474,7 +468,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
     public void testLargeUpload(TestContext context) throws IOException {
 
         byte[] data = new byte[256];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
         int dataSize = 256 * 1024;
 
         Path tempFile = createTempFile(tmpDir, "", "");
@@ -530,7 +524,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
     public void testEncryptedLargeUpload(TestContext context) throws IOException {
 
         byte[] data = new byte[256];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
         int dataSize = 256 * 1024;
 
         Path tempFile = createTempFile(tmpDir, "", "");

@@ -19,7 +19,8 @@ package org.sfs.integration.java.func;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import rx.Observable;
 import rx.functions.Func1;
@@ -44,14 +45,14 @@ public class RefreshIndex implements Func1<Void, Observable<Void>> {
     public Observable<Void> call(Void aVoid) {
         return auth.toHttpAuthorization()
                 .flatMap(s -> {
-                    final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                     HttpClientRequest httpClientRequest =
-                            httpClient.post("/admin/001/refresh_index", handler)
+                            httpClient.post("/admin/001/refresh_index", handler::complete)
                                     .exceptionHandler(handler::fail)
                                     .putHeader(AUTHORIZATION, s)
                                     .setTimeout(10000);
                     httpClientRequest.end();
-                    return create(handler.subscribe)
+                    return handler
                             .doOnNext(httpClientResponse -> {
                                 checkState(httpClientResponse.statusCode() == HTTP_OK);
                             })

@@ -23,7 +23,8 @@ import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
 import org.sfs.rx.HttpClientKeepAliveResponseBodyBuffer;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -99,9 +100,9 @@ public class ContainerImport implements Func1<Void, Observable<HttpClientRespons
 
                     String query = on('&').join(keyValues);
 
-                    ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
+                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                     HttpClientRequest httpClientRequest =
-                            httpClient.post("/admin_containerimport/" + accountName + "/" + containerName + (query.length() > 0 ? "?" + query : ""), handler)
+                            httpClient.post("/import_container/" + accountName + "/" + containerName + (query.length() > 0 ? "?" + query : ""), handler::complete)
                                     .exceptionHandler(handler::fail)
                                     .setTimeout(20000)
                                     .putHeader(AUTHORIZATION, s);
@@ -110,7 +111,7 @@ public class ContainerImport implements Func1<Void, Observable<HttpClientRespons
                     }
                     httpClientRequest = httpClientRequest.putHeader(X_SFS_SRC_DIRECTORY, srcDirectory.toString());
                     httpClientRequest.end();
-                    return Observable.create(handler.subscribe)
+                    return handler
                             .flatMap(httpClientResponse ->
                                     just(httpClientResponse)
                                             .flatMap(new HttpClientKeepAliveResponseBodyBuffer())

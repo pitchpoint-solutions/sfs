@@ -28,6 +28,7 @@ import org.sfs.SfsRequest;
 import org.sfs.auth.Authenticate;
 import org.sfs.elasticsearch.account.ListContainers;
 import org.sfs.elasticsearch.account.LoadAccount;
+import org.sfs.io.AsyncIO;
 import org.sfs.io.BufferOutputStream;
 import org.sfs.metadata.Metadata;
 import org.sfs.rx.ConnectionCloseTerminus;
@@ -35,7 +36,6 @@ import org.sfs.validate.ValidateAccountPath;
 import org.sfs.validate.ValidateActionAuthenticated;
 import org.sfs.validate.ValidatePersistentAccountExists;
 import org.sfs.vo.Account;
-import org.sfs.vo.ContainerList;
 
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamWriter;
@@ -60,7 +60,7 @@ import static java.lang.String.valueOf;
 import static java.math.BigDecimal.ROUND_HALF_UP;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static javax.xml.stream.XMLOutputFactory.newFactory;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.NullSafeAscii.equalsIgnoreCase;
 import static org.sfs.util.SfsHttpHeaders.X_ACCOUNT_BYTES_USED;
 import static org.sfs.util.SfsHttpHeaders.X_ACCOUNT_CONTAINER_COUNT;
@@ -78,7 +78,7 @@ public class GetAccount implements Handler<SfsRequest> {
     @Override
     public void handle(final SfsRequest httpServerRequest) {
 
-        empty()
+        aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
                 .flatMap(new ValidateActionAuthenticated(httpServerRequest))
                 .map(aVoid -> fromSfsRequest(httpServerRequest))
@@ -87,145 +87,147 @@ public class GetAccount implements Handler<SfsRequest> {
                 .flatMap(new LoadAccount(httpServerRequest.vertxContext()))
                 .map(new ValidatePersistentAccountExists())
                 .flatMap(new ListContainers(httpServerRequest))
-                .single()
-                .subscribe(new ConnectionCloseTerminus<ContainerList>(httpServerRequest) {
+                .flatMap(containerList -> {
+                    HttpServerResponse httpServerResponse = httpServerRequest.response();
+                    MultiMap headerParams = httpServerRequest.headers();
+                    MultiMap queryParams = httpServerRequest.params();
+                    String format = queryParams.get(FORMAT);
 
-                    @Override
-                    public void onNext(ContainerList containerList) {
+                    String accept = headerParams.get(ACCEPT);
 
-                        HttpServerResponse httpServerResponse = httpServerRequest.response();
-                        MultiMap headerParams = httpServerRequest.headers();
-                        MultiMap queryParams = httpServerRequest.params();
-                        String format = queryParams.get(FORMAT);
+                    Account account = containerList.getAccount();
 
-                        String accept = headerParams.get(ACCEPT);
+                    Metadata metadata = account.getMetadata();
 
-                        Account account = containerList.getAccount();
+                    for (String key : metadata.keySet()) {
+                        SortedSet<String> values = metadata.get(key);
+                        if (values != null && !values.isEmpty()) {
+                            httpServerResponse.putHeader(format("%s%s", X_ADD_ACCOUNT_META_PREFIX, key), values);
+                        }
+                    }
 
-                        Metadata metadata = account.getMetadata();
+                    httpServerResponse.putHeader(X_ACCOUNT_OBJECT_COUNT, valueOf(containerList.getObjectCount()));
+                    httpServerResponse.putHeader(X_ACCOUNT_CONTAINER_COUNT, valueOf(containerList.getContainerCount()));
+                    httpServerResponse.putHeader(
+                            X_ACCOUNT_BYTES_USED,
+                            BigDecimal.valueOf(containerList.getBytesUsed())
+                                    .setScale(0, ROUND_HALF_UP)
+                                    .toString()
+                    );
 
-                        for (String key : metadata.keySet()) {
-                            SortedSet<String> values = metadata.get(key);
-                            if (values != null && !values.isEmpty()) {
-                                httpServerResponse.putHeader(format("%s%s", X_ADD_ACCOUNT_META_PREFIX, key), values);
-                            }
+                    MediaType parsedAccept = null;
+                    if (!isNullOrEmpty(accept)) {
+                        parsedAccept = parse(accept);
+                    }
+
+                    if (equalsIgnoreCase("xml", format)) {
+                        parsedAccept = APPLICATION_XML_UTF_8;
+                    } else if (equalsIgnoreCase("json", format)) {
+                        parsedAccept = JSON_UTF_8;
+                    }
+
+                    httpServerResponse.setStatusCode(HTTP_OK);
+
+                    if (parsedAccept != null && JSON_UTF_8.is(parsedAccept)) {
+                        String charset = UTF_8.toString();
+
+                        JsonArray array = new JsonArray();
+
+                        for (SparseContainer container : ordered(containerList.getContainers())) {
+
+                            array.add(
+                                    new JsonObject()
+                                            .put("name", container.getContainerName())
+                                            .put("count", container.getObjectCount())
+                                            .put("bytes",
+                                                    BigDecimal.valueOf(container.getByteCount())
+                                                            .setScale(0, ROUND_HALF_UP)
+                                                            .longValue()));
+
                         }
 
-                        httpServerResponse.putHeader(X_ACCOUNT_OBJECT_COUNT, valueOf(containerList.getObjectCount()));
-                        httpServerResponse.putHeader(X_ACCOUNT_CONTAINER_COUNT, valueOf(containerList.getContainerCount()));
-                        httpServerResponse.putHeader(
-                                X_ACCOUNT_BYTES_USED,
-                                BigDecimal.valueOf(containerList.getBytesUsed())
-                                        .setScale(0, ROUND_HALF_UP)
-                                        .toString()
-                        );
+                        Buffer buffer = buffer(array.encode(), charset);
+                        httpServerResponse = httpServerResponse.putHeader(CONTENT_TYPE, JSON_UTF_8.toString());
+                        httpServerResponse = httpServerResponse.putHeader(CONTENT_LENGTH, valueOf(buffer.length()));
+                        return AsyncIO.append(buffer, httpServerResponse);
 
-                        MediaType parsedAccept = null;
-                        if (!isNullOrEmpty(accept)) {
-                            parsedAccept = parse(accept);
-                        }
+                    } else if (parsedAccept != null && APPLICATION_XML_UTF_8.is(parsedAccept)) {
 
-                        if (equalsIgnoreCase("xml", format)) {
-                            parsedAccept = APPLICATION_XML_UTF_8;
-                        } else if (equalsIgnoreCase("json", format)) {
-                            parsedAccept = JSON_UTF_8;
-                        }
+                        BufferOutputStream bufferOutputStream = new BufferOutputStream();
+                        String charset = UTF_8.toString();
+                        XMLStreamWriter writer = null;
+                        try {
+                            writer = newFactory()
+                                    .createXMLStreamWriter(bufferOutputStream, charset);
 
-                        httpServerResponse.setStatusCode(HTTP_OK);
+                            writer.writeStartDocument(charset, "1.0");
 
-                        if (parsedAccept != null && JSON_UTF_8.is(parsedAccept)) {
-                            String charset = UTF_8.toString();
+                            writer.writeStartElement("account");
 
-                            JsonArray array = new JsonArray();
+                            writer.writeAttribute("name", fromPaths(account.getId()).accountName().get());
 
                             for (SparseContainer container : ordered(containerList.getContainers())) {
 
-                                array.add(
-                                        new JsonObject()
-                                                .put("name", container.getContainerName())
-                                                .put("count", container.getObjectCount())
-                                                .put("bytes",
-                                                        BigDecimal.valueOf(container.getByteCount())
-                                                                .setScale(0, ROUND_HALF_UP)
-                                                                .longValue()));
+                                writer.writeStartElement("container");
 
-                            }
-
-                            Buffer buffer = buffer(array.encode(), charset);
-                            httpServerResponse = httpServerResponse.putHeader(CONTENT_TYPE, JSON_UTF_8.toString());
-                            httpServerResponse = httpServerResponse.putHeader(CONTENT_LENGTH, valueOf(buffer.length()));
-                            httpServerResponse.write(buffer);
-
-                        } else if (parsedAccept != null && APPLICATION_XML_UTF_8.is(parsedAccept)) {
-
-                            BufferOutputStream bufferOutputStream = new BufferOutputStream();
-                            String charset = UTF_8.toString();
-                            XMLStreamWriter writer = null;
-                            try {
-                                writer = newFactory()
-                                        .createXMLStreamWriter(bufferOutputStream, charset);
-
-                                writer.writeStartDocument(charset, "1.0");
-
-                                writer.writeStartElement("account");
-
-                                writer.writeAttribute("name", fromPaths(account.getId()).accountName().get());
-
-                                for (SparseContainer container : ordered(containerList.getContainers())) {
-
-                                    writer.writeStartElement("container");
-
-                                    writer.writeStartElement("name");
-                                    writer.writeCharacters(container.getContainerName());
-                                    writer.writeEndElement();
-
-                                    writer.writeStartElement("count");
-                                    writer.writeCharacters(valueOf(container.getObjectCount()));
-                                    writer.writeEndElement();
-
-                                    writer.writeStartElement("bytes");
-                                    writer.writeCharacters(
-                                            BigDecimal.valueOf(container.getByteCount())
-                                                    .setScale(0, ROUND_HALF_UP)
-                                                    .toString());
-                                    writer.writeEndElement();
-
-                                    writer.writeEndElement();
-                                }
-
+                                writer.writeStartElement("name");
+                                writer.writeCharacters(container.getContainerName());
                                 writer.writeEndElement();
 
-                                writer.writeEndDocument();
+                                writer.writeStartElement("count");
+                                writer.writeCharacters(valueOf(container.getObjectCount()));
+                                writer.writeEndElement();
 
-                            } catch (XMLStreamException e) {
-                                throw new RuntimeException(e);
-                            } finally {
-                                try {
-                                    if (writer != null) {
-                                        writer.close();
-                                    }
-                                } catch (XMLStreamException e) {
-                                    LOGGER.warn(e.getLocalizedMessage(), e);
+                                writer.writeStartElement("bytes");
+                                writer.writeCharacters(
+                                        BigDecimal.valueOf(container.getByteCount())
+                                                .setScale(0, ROUND_HALF_UP)
+                                                .toString());
+                                writer.writeEndElement();
+
+                                writer.writeEndElement();
+                            }
+
+                            writer.writeEndElement();
+
+                            writer.writeEndDocument();
+
+                        } catch (XMLStreamException e) {
+                            throw new RuntimeException(e);
+                        } finally {
+                            try {
+                                if (writer != null) {
+                                    writer.close();
                                 }
+                            } catch (XMLStreamException e) {
+                                LOGGER.warn(e.getLocalizedMessage(), e);
                             }
-
-                            Buffer buffer = bufferOutputStream.toBuffer();
-                            httpServerResponse = httpServerResponse.putHeader(CONTENT_TYPE, APPLICATION_XML_UTF_8.toString());
-                            httpServerResponse = httpServerResponse.putHeader(CONTENT_LENGTH, valueOf(buffer.length()));
-                            httpServerResponse.write(buffer);
-
-                        } else {
-                            String charset = UTF_8.toString();
-                            Buffer buffer = buffer();
-                            for (SparseContainer container : ordered(containerList.getContainers())) {
-                                buffer.appendString(container.getContainerName(), charset);
-                                buffer.appendString("\n", charset);
-                            }
-                            httpServerResponse = httpServerResponse.putHeader(CONTENT_TYPE, PLAIN_TEXT_UTF_8.toString());
-                            httpServerResponse = httpServerResponse.putHeader(CONTENT_LENGTH, valueOf(buffer.length()));
-                            httpServerResponse.write(buffer);
-
                         }
+
+                        Buffer buffer = bufferOutputStream.toBuffer();
+                        httpServerResponse = httpServerResponse.putHeader(CONTENT_TYPE, APPLICATION_XML_UTF_8.toString());
+                        httpServerResponse = httpServerResponse.putHeader(CONTENT_LENGTH, valueOf(buffer.length()));
+                        return AsyncIO.append(buffer, httpServerResponse);
+
+                    } else {
+                        String charset = UTF_8.toString();
+                        Buffer buffer = buffer();
+                        for (SparseContainer container : ordered(containerList.getContainers())) {
+                            buffer.appendString(container.getContainerName(), charset);
+                            buffer.appendString("\n", charset);
+                        }
+                        httpServerResponse = httpServerResponse.putHeader(CONTENT_TYPE, PLAIN_TEXT_UTF_8.toString());
+                        httpServerResponse = httpServerResponse.putHeader(CONTENT_LENGTH, valueOf(buffer.length()));
+                        return AsyncIO.append(buffer, httpServerResponse);
+                    }
+                })
+                .single()
+                .subscribe(new ConnectionCloseTerminus<Void>(httpServerRequest) {
+
+                    @Override
+                    public void onNext(Void aVoid) {
+
+
                     }
 
                 });

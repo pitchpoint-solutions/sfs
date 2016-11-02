@@ -68,7 +68,7 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
     @Test
     public void testLarge(TestContext context) throws IOException {
         final byte[] data = new byte[256];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
         int dataSize = 256 * 1024;
 
         final Path tempFile1 = createTempFile(tmpDir, "", "");

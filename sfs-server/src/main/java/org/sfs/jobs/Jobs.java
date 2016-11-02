@@ -17,195 +17,216 @@
 package org.sfs.jobs;
 
 
-import com.google.common.base.Optional;
-import io.vertx.core.AsyncResultHandler;
-import io.vertx.core.Handler;
+import io.vertx.core.MultiMap;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.elasticsearch.nodes.AssignUnassignedDocumentsToNode;
-import org.sfs.elasticsearch.object.MaintainObjectsForNode;
-import org.sfs.nodes.ClusterInfo;
-import org.sfs.rx.AsyncResultMemoizeHandler;
-import org.sfs.rx.ResultMemoizeHandler;
-import org.sfs.rx.SingleAsyncResultSubscriber;
-import org.sfs.util.ConfigHelper;
+import org.sfs.nodes.Nodes;
+import org.sfs.rx.Defer;
+import org.sfs.rx.ToVoid;
+import org.sfs.util.HttpStatusCodeException;
 import rx.Observable;
-import rx.Subscriber;
-import rx.functions.Func1;
 
-import java.nio.channels.ClosedChannelException;
+import java.net.HttpURLConnection;
 import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static java.lang.Long.parseLong;
-import static java.lang.String.valueOf;
-import static java.util.concurrent.TimeUnit.MINUTES;
-import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.sfs.elasticsearch.AbstractBulkUpdateEndableWriteStream.BulkUpdateFailedException;
-import static org.sfs.rx.Defer.empty;
-import static org.sfs.rx.Defer.just;
-import static org.sfs.util.ExceptionHelper.containsException;
-import static rx.Observable.create;
-import static rx.Observable.defer;
-import static rx.Observable.from;
-import static rx.Observable.using;
+import static org.sfs.rx.Defer.aVoid;
 
 public class Jobs {
 
+    public static class ID {
+
+        public static final String RE_ENCRYPT_CONTAINER_KEYS = "re_encrypt_container_keys";
+        public static final String RE_ENCRYPT_MASTER_KEYS = "re_encrypt_master_keys";
+        public static final String REPAIR_MASTER_KEYS = "repair_master_keys";
+        public static final String VERIFY_REPAIR_CONTAINER_OBJECTS = "verify_repair_container_objects";
+        public static final String VERIFY_REPAIR_ALL_CONTAINERS_OBJECTS = "verify_repair_all_container_objects";
+        public static final String VERIFY_REPAIR_OBJECT = "verify_repair_object";
+        public static final String ASSIGN_DOCUMENTS_TO_NODE = "assign_documents_to_node";
+    }
+
+    public static class Parameters {
+        public static final String JOB_ID = "job_id";
+        public static final String CONTAINER_ID = "container_id";
+        public static final String OBJECT_ID = "object_id";
+        public static final String TIMEOUT = "timeout";
+    }
+
     private static final Logger LOGGER = getLogger(Jobs.class);
-    private final long initialInterval = SECONDS.toMillis(10);
-    private long interval;
     private AtomicBoolean started = new AtomicBoolean(false);
-    private AtomicBoolean running = new AtomicBoolean(false);
 
-    public Observable<Void> start(VertxContext<Server> vertxContext, JsonObject config) {
-        return empty()
+    private Map<String, Class<? extends Job>> jobs = new HashMap<>();
+    private ConcurrentMap<String, Job> runningJobs = new ConcurrentHashMap<>();
+
+    public Jobs() {
+
+        AssignDocumentsToNodeJob assignDocumentsToNodeJob = new AssignDocumentsToNodeJob();
+        VerifyRepairAllContainerObjects verifyRepairAllContainerObjects = new VerifyRepairAllContainerObjects();
+        VerifyRepairContainerObjects verifyRepairContainerObjects = new VerifyRepairContainerObjects();
+        ReEncryptContainerKeys reEncryptContainerKeys = new ReEncryptContainerKeys();
+        ReEncryptMasterKeys reEncryptMasterKeys = new ReEncryptMasterKeys();
+        RepairMasterKeys repairMasterKeys = new RepairMasterKeys();
+
+        register(assignDocumentsToNodeJob);
+        register(verifyRepairAllContainerObjects);
+        register(verifyRepairContainerObjects);
+        register(reEncryptContainerKeys);
+        register(reEncryptMasterKeys);
+        register(repairMasterKeys);
+    }
+
+    public Observable<Void> open(VertxContext<Server> vertxContext, JsonObject config) {
+        return aVoid()
                 .filter(aVoid -> started.compareAndSet(false, true))
-                .flatMap(new Func1<Void, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(Void aVoid) {
-                        interval = parseLong(ConfigHelper.getFieldOrEnv(config, "jobs.maintenance_interval", valueOf(MINUTES.toMillis(5))));
-                        if (LOGGER.isInfoEnabled()) {
-                            LOGGER.info("Running initial maintenance sweep in " + initialInterval + "ms. Subsequent sweeps every every " + interval + "ms.");
-                        }
-                        Handler<Long> handler = new Handler<Long>() {
+                .singleOrDefault(null);
+    }
 
-                            Handler<Long> _this = this;
-
-                            @Override
-                            public void handle(Long event) {
-                                if (started.get()) {
-                                    run(vertxContext)
-                                            .subscribe(new Subscriber<Void>() {
-                                                @Override
-                                                public void onCompleted() {
-                                                    if (started.get()) {
-                                                        vertxContext.vertx().setTimer(interval, _this);
-                                                    }
-                                                }
-
-                                                @Override
-                                                public void onError(Throwable e) {
-                                                    LOGGER.warn("Handling Exception", e);
-                                                    if (started.get()) {
-                                                        if (containsException(BulkUpdateFailedException.class, e)
-                                                                || containsException(ClosedChannelException.class, e)) {
-                                                            vertxContext.vertx().setTimer(initialInterval, _this);
-                                                        } else {
-                                                            vertxContext.vertx().setTimer(interval, _this);
-                                                        }
-                                                    }
-                                                }
-
-                                                @Override
-                                                public void onNext(Void aVoid) {
-
-                                                }
-                                            });
-                                }
-
-                            }
-                        };
-                        if (started.get()) {
-                            vertxContext.vertx().setTimer(initialInterval, handler);
-                        }
-                        return empty();
+    public Observable<Void> stop(VertxContext<Server> vertxContext, String jobId) {
+        return Defer.aVoid()
+                .doOnNext(aVoid -> checkMaster(vertxContext))
+                .map(aVoid -> getJob(jobId))
+                .map(jobClass -> runningJobs.get(jobId))
+                .flatMap(job -> {
+                    if (job != null) {
+                        return job.stop(vertxContext);
+                    } else {
+                        return Defer.aVoid();
                     }
-                })
-                .singleOrDefault(null);
+                });
     }
 
-    public Observable<Void> stop(VertxContext<Server> vertxContext) {
-        return empty()
+    public Observable<Void> waitStopped(VertxContext<Server> vertxContext, String jobId) {
+        return Defer.aVoid()
+                .doOnNext(aVoid -> checkMaster(vertxContext))
+                .map(aVoid -> getJob(jobId))
+                .map(jobClass -> runningJobs.get(jobId))
+                .flatMap(job -> {
+                    if (job != null) {
+                        return job.waitStopped(vertxContext);
+                    } else {
+                        return Defer.aVoid();
+                    }
+                });
+    }
+
+    public Observable<Void> waitStopped(VertxContext<Server> vertxContext, String jobId, long timeout, TimeUnit timeUnit) {
+        return Defer.aVoid()
+                .doOnNext(aVoid -> checkMaster(vertxContext))
+                .map(aVoid -> getJob(jobId))
+                .map(jobClass -> runningJobs.get(jobId))
+                .flatMap(job -> {
+                    if (job != null) {
+                        return job.waitStopped(vertxContext, timeout, timeUnit);
+                    } else {
+                        return Defer.aVoid();
+                    }
+                });
+    }
+
+    public Observable<Void> execute(VertxContext<Server> vertxContext, String jobId, MultiMap parameters) {
+        return Defer.aVoid()
+                .doOnNext(aVoid -> checkMaster(vertxContext))
+                .map(aVoid -> getJob(jobId))
+                .map(this::newInstance)
+                .flatMap(job ->
+                        Observable.using(
+                                () -> runningJobs.putIfAbsent(jobId, job) == null,
+                                running -> {
+                                    if (running) {
+                                        return job.execute(vertxContext, parameters);
+                                    } else {
+                                        return Observable.error(new JobAlreadyRunning());
+                                    }
+                                },
+                                running -> {
+                                    if (running) {
+                                        runningJobs.remove(jobId);
+                                    }
+                                }));
+    }
+
+
+    public Observable<Void> close(VertxContext<Server> vertxContext) {
+        return aVoid()
                 .filter(aVoid -> started.compareAndSet(true, false))
-                .flatMap(aVoid -> {
-                    ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
-                    waitForStop0(vertxContext, handler);
-                    return create(handler.subscribe);
+                .onErrorResumeNext(throwable -> {
+                    LOGGER.warn("Handling error", throwable);
+                    return Defer.aVoid();
                 })
+                .flatMap(aVoid ->
+                        Observable.from(runningJobs.values())
+                                .flatMap(job -> job.stop(vertxContext))
+                                .onErrorResumeNext(throwable -> {
+                                    LOGGER.warn("Handling error", throwable);
+                                    return Defer.aVoid();
+                                })
+                                .count()
+                                .map(new ToVoid<>()))
                 .singleOrDefault(null);
     }
 
-    protected void waitForStop0(VertxContext<Server> vertxContext, Handler<Void> handler) {
-        if (!running.get()) {
-            vertxContext.vertx().runOnContext(event -> handler.handle(null));
-        } else {
-            vertxContext.vertx().runOnContext(event -> waitForStop0(vertxContext, handler));
+    private void checkMaster(VertxContext<Server> vertxContext) {
+        Nodes nodes = vertxContext.verticle().nodes();
+        if (!nodes.isMaster()) {
+            throw new JobMustRunOnMaster();
         }
     }
 
-    public Observable<Void> run(VertxContext<Server> vertxContext) {
-        return defer(() -> {
-            AsyncResultMemoizeHandler<Void, Void> handler = new AsyncResultMemoizeHandler<>();
-            run0(vertxContext, handler);
-            return create(handler.subscribe);
-        });
+    private void register(Job job) {
+        jobs.put(job.id(), job.getClass());
     }
 
-    protected void run0(VertxContext<Server> vertxContext, AsyncResultHandler<Void> handler) {
-        using(
-                () -> running.compareAndSet(false, true),
-                success -> just(success)
-                        .filter(aSuccess -> aSuccess)
-                        .flatMap(aVoid1 -> masterNodeSweep(vertxContext))
-                        .flatMap(aVoid1 -> dataNodeSweep(vertxContext))
-                        .singleOrDefault(null),
-                success -> {
-                    if (success) {
-                        checkState(running.compareAndSet(true, false), "Concurrent Update");
-                    } else {
-                        throw new JobsAlreadyRunningException();
-                    }
-                })
-                .subscribe(new SingleAsyncResultSubscriber<>(handler));
+    private Class<? extends Job> getJob(String jobId) {
+        Class<? extends Job> job = jobs.get(jobId);
+        if (job == null) {
+            throw new JobNotFound();
+        }
+
+        return job;
     }
 
-    protected Observable<Void> dataNodeSweep(VertxContext<Server> vertxContext) {
-        return empty()
-                .filter(aVoid -> {
-                    // only data nodes manage data
-                    return vertxContext.verticle().nodes().isMaster();
-                })
-                .flatMap(new MaintainObjectsForNode(vertxContext, vertxContext.verticle().nodes().getNodeId()))
-                .singleOrDefault(null);
+    private Job newInstance(Class<? extends Job> clazz) {
+        try {
+            return clazz.newInstance();
+        } catch (InstantiationException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    protected Observable<Void> masterNodeSweep(VertxContext<Server> vertxContext) {
-        return empty()
-                .filter(aVoid -> {
-                    // only data nodes manage data
-                    return vertxContext.verticle().nodes().isMaster();
-                })
-                .flatMap(aVoid -> assignUnassignedDocumentsToNodes(vertxContext))
-                .singleOrDefault(null);
+    public static class JobNotFound extends HttpStatusCodeException {
+
+        public JobNotFound() {
+            super(HttpURLConnection.HTTP_NOT_FOUND);
+        }
     }
 
-    protected Observable<Void> assignUnassignedDocumentsToNodes(VertxContext<Server> vertxContext) {
-        return empty()
-                .flatMap(aVoid -> {
-                    ClusterInfo clusterInfo = vertxContext.verticle().getClusterInfo();
-                    return from(clusterInfo.getDataNodes());
-                })
-                .reduce(new HashMap<String, Long>(), (documentCountsByNode, persistentServiceDef) -> {
-                    Optional<Long> documentCount = persistentServiceDef.getDocumentCount();
-                    if (documentCount.isPresent()) {
-                        documentCountsByNode.put(persistentServiceDef.getId(), documentCount.get());
-                    }
-                    return documentCountsByNode;
-                })
-                .filter(stringLongHashMap -> !stringLongHashMap.isEmpty())
-                .flatMap(documentCountsByNode ->
-                        empty()
-                                .flatMap(new AssignUnassignedDocumentsToNode(vertxContext, documentCountsByNode)))
-                .singleOrDefault(null);
+    public static class JobMustRunOnMaster extends HttpStatusCodeException {
+
+        public JobMustRunOnMaster() {
+            super(HttpURLConnection.HTTP_FORBIDDEN);
+        }
     }
 
-    public static class JobsAlreadyRunningException extends RuntimeException {
+    public static class JobAlreadyRunning extends HttpStatusCodeException {
 
+        public JobAlreadyRunning() {
+            super(HttpURLConnection.HTTP_CONFLICT);
+        }
     }
+
+    public static class WaitStoppedExpired extends HttpStatusCodeException {
+
+        public WaitStoppedExpired() {
+            super(HttpURLConnection.HTTP_CONFLICT);
+        }
+    }
+
 }
 

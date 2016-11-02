@@ -20,7 +20,7 @@ import rx.Observable;
 
 public class Defer {
 
-    public static Observable<Void> empty() {
+    public static Observable<Void> aVoid() {
         return Observable.just(null);
     }
 

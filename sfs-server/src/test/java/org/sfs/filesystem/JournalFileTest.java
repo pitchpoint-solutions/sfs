@@ -35,7 +35,6 @@ import org.sfs.io.Block;
 import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.NullEndableWriteStream;
-import org.sfs.thread.CapacityLinkedBlockingQueue;
 import org.sfs.thread.NamedThreadFactory;
 import rx.Observable;
 
@@ -43,6 +42,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -62,7 +62,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.sfs.filesystem.JournalFile.DEFAULT_BLOCK_SIZE;
 import static org.sfs.io.Block.encodeFrame;
 import static org.sfs.protobuf.XVolume.XJournal.Header.newBuilder;
-import static org.sfs.rx.Defer.empty;
+import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.MessageDigestFactory.SHA512;
 import static org.sfs.util.PrngRandom.getCurrentInstance;
 import static org.sfs.util.VertxAssert.assertArrayEquals;
@@ -79,8 +79,8 @@ public class JournalFileTest {
 
     @Before
     public void start() {
-        BlockingQueue<Runnable> ioQueue = new CapacityLinkedBlockingQueue<>(500);
-        BlockingQueue<Runnable> backgroundQueue = new CapacityLinkedBlockingQueue<>(500);
+        BlockingQueue<Runnable> ioQueue = new LinkedBlockingQueue<>(500);
+        BlockingQueue<Runnable> backgroundQueue = new LinkedBlockingQueue<>(500);
         ExecutorService ioPool =
                 new ThreadPoolExecutor(
                         200,
@@ -155,7 +155,7 @@ public class JournalFileTest {
 
         Async async = context.async();
 
-        empty()
+        aVoid()
                 .flatMap(aVoid -> journalFile.open(sfsVertx))
                 .flatMap(aVoid -> journalFile.enableWrites(sfsVertx))
                 .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("hello0", UTF_8.toString())))
@@ -181,7 +181,7 @@ public class JournalFileTest {
 
         Async async = context.async();
 
-        empty()
+        aVoid()
                 .flatMap(aVoid -> journalFile.open(sfsVertx))
                 .flatMap(aVoid -> journalFile.enableWrites(sfsVertx))
                 .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata0", UTF_8.toString()), buffer("data0", UTF_8.toString())))
@@ -207,7 +207,7 @@ public class JournalFileTest {
 
         Async async = context.async();
 
-        empty()
+        aVoid()
                 .flatMap(aVoid -> journalFile.open(sfsVertx))
                 .flatMap(aVoid -> journalFile.enableWrites(sfsVertx))
                 .flatMap(aVoid -> journalFile.append(sfsVertx, buffer(0), buffer("data0", UTF_8.toString())))
@@ -230,7 +230,7 @@ public class JournalFileTest {
     public void testMetadataAndReadStream(TestContext context) throws IOException {
 
         byte[] data = new byte[256 * 1024 * 1024];
-        getCurrentInstance().nextBytes(data);
+        getCurrentInstance().nextBytesBlocking(data);
 
         Path dataFile = path.resolve(".data");
         write(dataFile, data, CREATE_NEW);
@@ -244,7 +244,7 @@ public class JournalFileTest {
 
         Async async = context.async();
 
-        empty()
+        aVoid()
                 .flatMap(aVoid -> journalFile.open(sfsVertx))
                 .flatMap(aVoid -> journalFile.enableWrites(sfsVertx))
                 .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata0", UTF_8.toString()), size, bigFile))

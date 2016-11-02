@@ -21,7 +21,8 @@ import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.rx.MemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -66,9 +67,9 @@ public class RunNodeJobs implements Func1<Void, Observable<HttpClientResponse>> 
     public Observable<HttpClientResponse> call(Void aVoid) {
         return auth.toHttpAuthorization()
                 .flatMap(s -> {
-                    final MemoizeHandler<HttpClientResponse, HttpClientResponse> handler = new MemoizeHandler<>();
+                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
                     HttpClientRequest httpClientRequest =
-                            httpClient.post("/admin/001/run_jobs", handler)
+                            httpClient.post("/admin/001/run_jobs", handler::complete)
                                     .exceptionHandler(handler::fail)
                                     .setTimeout(1000)
                                     .putHeader(AUTHORIZATION, s);
@@ -76,7 +77,7 @@ public class RunNodeJobs implements Func1<Void, Observable<HttpClientResponse>> 
                         httpClientRequest = httpClientRequest.putHeader(entry, headers.get(entry));
                     }
                     httpClientRequest.end();
-                    return Observable.create(handler.subscribe)
+                    return handler
                             .single();
                 });
 

@@ -17,7 +17,6 @@
 package org.sfs.filesystem;
 
 import com.google.common.base.Optional;
-import io.vertx.core.Context;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.impl.ConcurrentHashSet;
@@ -36,7 +35,8 @@ import org.sfs.io.LimitedWriteEndableWriteStream;
 import org.sfs.io.WaitForActiveWriters;
 import org.sfs.io.WaitForEmptyWriteQueue;
 import org.sfs.io.WriteQueueSupport;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 import rx.functions.Func0;
 
@@ -64,8 +64,7 @@ import static org.sfs.filesystem.BlobFile.Status.STOPPED;
 import static org.sfs.filesystem.BlobFile.Status.STOPPING;
 import static org.sfs.io.AsyncIO.end;
 import static org.sfs.io.AsyncIO.pump;
-import static org.sfs.rx.Defer.empty;
-import static rx.Observable.create;
+import static org.sfs.rx.Defer.aVoid;
 import static rx.Observable.defer;
 import static rx.Observable.error;
 import static rx.Observable.using;
@@ -89,7 +88,7 @@ public class BlobFile {
     private final int produceBufferSize;
     private final RangeLock lock;
     private AsynchronousFileChannel channel;
-    private final WriteQueueSupport writeQueueSupport = new WriteQueueSupport(MAX_WRITES);
+    private final WriteQueueSupport<AsyncFileWriter> writeQueueSupport = new WriteQueueSupport<>(MAX_WRITES);
     private final Set<AsyncFileWriter> activeWriters = new ConcurrentHashSet<>();
     private AtomicBoolean readOnly = new AtomicBoolean(true);
     private Set<Long> periodics = new ConcurrentHashSet<>();
@@ -115,7 +114,7 @@ public class BlobFile {
     public Observable<Void> open(SfsVertx vertx, StandardOpenOption openOption, StandardOpenOption... openOptions) {
         this.vertx = vertx;
         this.executorService = vertx.getIoPool();
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STOPPED, STARTING)))
                 .flatMap(aVoid -> executeBlocking(vertx, () -> {
                     try {
@@ -174,7 +173,7 @@ public class BlobFile {
 
 
     public Observable<Void> disableWrites(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkOpen())
                 .doOnNext(aVoid -> readOnly.compareAndSet(false, true))
                 .flatMap(new WaitForActiveWriters(vertx, activeWriters))
@@ -182,13 +181,13 @@ public class BlobFile {
     }
 
     public Observable<Void> enableWrites(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkOpen())
                 .doOnNext(aVoid -> readOnly.compareAndSet(true, false));
     }
 
     public Observable<Void> close(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STARTED, STOPPING) || status.compareAndSet(START_FAILED, STOPPING), "Status was %s expected %s or %s", status.get(), STARTED, START_FAILED))
                 .doOnNext(aVoid -> readOnly.compareAndSet(false, true))
                 .flatMap(new WaitForActiveWriters(vertx, activeWriters))
@@ -208,7 +207,7 @@ public class BlobFile {
     }
 
     public Observable<Long> size(SfsVertx vertx) {
-        return empty()
+        return aVoid()
                 .doOnNext(aVoid -> checkOpen())
                 .flatMap(aVoid -> executeBlocking(vertx, () -> {
                     try {
@@ -236,8 +235,16 @@ public class BlobFile {
             checkOpen();
             dstBlobFile.checkOpen();
             dstBlobFile.checkCanWrite();
-            LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(new BufferedEndableWriteStream(dstBlobFile.createWriteStream(vertx, dstPosition, true)), dstLength);
-            return produce(vertx, srcPosition, srcLength, limitedWriteStream);
+            ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
+            if (dstBlobFile.writeQueueSupport.writeQueueFull()) {
+                dstBlobFile.writeQueueSupport.drainHandler(vertx, drainHandler::complete);
+            } else {
+                drainHandler.complete(null);
+            }
+            return drainHandler.flatMap(aVoid -> {
+                LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(new BufferedEndableWriteStream(dstBlobFile.createWriteStream(vertx, dstPosition, true)), dstLength);
+                return produce(vertx, srcPosition, srcLength, limitedWriteStream);
+            });
         });
     }
 
@@ -255,20 +262,27 @@ public class BlobFile {
         return defer(() -> {
             checkOpen();
             checkCanWrite();
-            return using(
-                    () -> {
-                        AsyncFileWriter dst = createWriteStream(vertx, position, assertAlignment);
-                        activeWriters.add(dst);
-                        return dst;
-                    },
-                    sfsWriteStream -> {
-                        BufferedEndableWriteStream bufferedWriteStream = new BufferedEndableWriteStream(sfsWriteStream);
-                        LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(bufferedWriteStream, length);
-                        return pump(src, limitedWriteStream)
-                                .doOnNext(aVoid -> activeWriters.remove(sfsWriteStream));
-                    },
-                    activeWriters::remove
-            );
+            ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
+            if (writeQueueSupport.writeQueueFull()) {
+                writeQueueSupport.drainHandler(vertx, drainHandler::complete);
+            } else {
+                drainHandler.complete(null);
+            }
+            return drainHandler.flatMap(aVoid ->
+                    using(
+                            () -> {
+                                AsyncFileWriter dst = createWriteStream(vertx, position, assertAlignment);
+                                activeWriters.add(dst);
+                                return dst;
+                            },
+                            sfsWriteStream -> {
+                                BufferedEndableWriteStream bufferedWriteStream = new BufferedEndableWriteStream(sfsWriteStream);
+                                LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(bufferedWriteStream, length);
+                                return pump(src, limitedWriteStream)
+                                        .doOnNext(aVoid1 -> activeWriters.remove(sfsWriteStream));
+                            },
+                            activeWriters::remove
+                    ));
         });
     }
 
@@ -284,19 +298,27 @@ public class BlobFile {
         return defer(() -> {
             checkOpen();
             checkCanWrite();
-            return using(
-                    () -> {
-                        AsyncFileWriter dst = createWriteStream(vertx, position, assertAlignment);
-                        activeWriters.add(dst);
-                        return dst;
-                    },
-                    sfsWriteStream -> {
-                        LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(sfsWriteStream, src.length());
-                        return end(src, limitedWriteStream)
-                                .doOnNext(aVoid -> activeWriters.remove(sfsWriteStream));
-                    },
-                    activeWriters::remove
-            );
+            ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
+            if (writeQueueSupport.writeQueueFull()) {
+                writeQueueSupport.drainHandler(vertx, drainHandler::complete);
+            } else {
+                drainHandler.complete(null);
+            }
+            return drainHandler
+                    .flatMap(aVoid ->
+                            using(
+                                    () -> {
+                                        AsyncFileWriter dst = createWriteStream(vertx, position, assertAlignment);
+                                        activeWriters.add(dst);
+                                        return dst;
+                                    },
+                                    sfsWriteStream -> {
+                                        LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(sfsWriteStream, src.length());
+                                        return end(src, limitedWriteStream)
+                                                .doOnNext(aVoid1 -> activeWriters.remove(sfsWriteStream));
+                                    },
+                                    activeWriters::remove
+                            ));
         });
 
     }
@@ -360,16 +382,6 @@ public class BlobFile {
     }
 
     protected <T> Observable<T> executeBlocking(SfsVertx vertx, Func0<T> func0) {
-        Context context = vertx.getOrCreateContext();
-        ResultMemoizeHandler<T> handler = new ResultMemoizeHandler<T>();
-        executorService.execute(() -> {
-            try {
-                T result = func0.call();
-                context.runOnContext(event -> handler.complete(result));
-            } catch (Throwable e) {
-                context.runOnContext(event -> handler.fail(e));
-            }
-        });
-        return create(handler.subscribe);
+        return RxHelper.executeBlocking(vertx, executorService, func0);
     }
 }

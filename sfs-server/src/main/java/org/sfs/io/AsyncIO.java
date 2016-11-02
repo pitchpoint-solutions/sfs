@@ -25,9 +25,9 @@ import io.vertx.core.streams.ReadStream;
 import io.vertx.core.streams.WriteStream;
 import org.sfs.Server;
 import org.sfs.VertxContext;
-import org.sfs.rx.AsyncResultMemoizeHandler;
 import org.sfs.rx.Defer;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 
 import java.nio.channels.AsynchronousFileChannel;
@@ -39,52 +39,85 @@ public class AsyncIO {
 
     public static Observable<Void> append(Buffer buffer, final WriteStream<Buffer> ws) {
         return Observable.defer(() -> {
-            final ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
-            ws.exceptionHandler(handler::fail);
-            ws.write(buffer);
+
+            ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
+            ws.exceptionHandler(drainHandler::fail);
             if (ws.writeQueueFull()) {
-                ws.drainHandler(handler);
+                ws.drainHandler(drainHandler::complete);
             } else {
-                handler.handle(null);
+                drainHandler.complete(null);
             }
-            return Observable.create(handler.subscribe);
+
+            return drainHandler.flatMap(aVoid -> {
+                ObservableFuture<Void> writeHandler = RxHelper.observableFuture();
+                ws.exceptionHandler(writeHandler::fail);
+                ws.write(buffer);
+                if (ws.writeQueueFull()) {
+                    ws.drainHandler(writeHandler::complete);
+                } else {
+                    writeHandler.complete(null);
+                }
+                return writeHandler;
+            });
         });
     }
 
     public static Observable<Void> end(Buffer buffer, final BufferEndableWriteStream ws) {
         return Observable.defer(() -> {
-            BufferReadStream bufferReadStream = new BufferReadStream(buffer);
-            return pump(bufferReadStream, ws);
+            ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
+            ws.exceptionHandler(drainHandler::fail);
+            if (ws.writeQueueFull()) {
+                ws.drainHandler(drainHandler::complete);
+            } else {
+                drainHandler.complete(null);
+            }
+            return drainHandler.flatMap(aVoid -> {
+                ObservableFuture<Void> endHandler = RxHelper.observableFuture();
+                ws.exceptionHandler(endHandler::fail);
+                ws.endHandler(endHandler::complete);
+                ws.end(buffer);
+                return endHandler;
+            });
         });
     }
 
     public static Observable<Void> append(Buffer buffer, final BufferEndableWriteStream ws) {
         return Observable.defer(() -> {
-            final ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
-            ws.exceptionHandler(handler::fail);
-            ws.write(buffer);
+            ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
+            ws.exceptionHandler(drainHandler::fail);
             if (ws.writeQueueFull()) {
-                ws.drainHandler(event -> handler.complete(null));
+                ws.drainHandler(drainHandler::complete);
             } else {
-                handler.complete(null);
+                drainHandler.complete(null);
             }
-            return Observable.create(handler.subscribe);
+
+            return drainHandler.flatMap(aVoid -> {
+                ObservableFuture<Void> writeHandler = RxHelper.observableFuture();
+                ws.exceptionHandler(writeHandler::fail);
+                ws.write(buffer);
+                if (ws.writeQueueFull()) {
+                    ws.drainHandler(writeHandler::complete);
+                } else {
+                    writeHandler.complete(null);
+                }
+                return writeHandler;
+            });
         });
     }
 
     public static <M> Observable<Void> pump(final ReadStream<M> rs, final EndableWriteStream<M> ws) {
         rs.pause();
         return Observable.defer(() -> {
-            ResultMemoizeHandler<Void> handler = new ResultMemoizeHandler<>();
+            ObservableFuture<Void> observableFuture = RxHelper.observableFuture();
             Handler<Throwable> exceptionHandler = throwable -> {
                 try {
                     ws.drainHandler(null);
                     rs.handler(null);
                 } catch (Throwable e) {
-                    handler.fail(e);
+                    observableFuture.fail(e);
                     return;
                 }
-                handler.fail(throwable);
+                observableFuture.fail(throwable);
             };
             rs.exceptionHandler(exceptionHandler);
             ws.exceptionHandler(exceptionHandler);
@@ -107,7 +140,7 @@ public class AsyncIO {
                     exceptionHandler.handle(e);
                 }
             };
-            ws.endHandler(event -> handler.complete(null));
+            ws.endHandler(observableFuture::complete);
             rs.endHandler(event -> {
                 try {
                     ws.end();
@@ -121,22 +154,22 @@ public class AsyncIO {
             } catch (Throwable e) {
                 exceptionHandler.handle(e);
             }
-            return Observable.create(handler.subscribe);
+            return observableFuture;
         });
     }
 
 
     public static Observable<Void> close(AsyncFile asyncFile) {
         return Observable.defer(() -> {
-            AsyncResultMemoizeHandler<Void, Void> rh = new AsyncResultMemoizeHandler<>();
-            asyncFile.close(rh);
-            return Observable.create(rh.subscribe);
+            ObservableFuture<Void> rh = RxHelper.observableFuture();
+            asyncFile.close(rh.toHandler());
+            return rh;
         });
     }
 
     public static Observable<Void> close(VertxContext<Server> vertxContext, final WriteQueueSupport writeQueueSupport, final AsynchronousFileChannel channel) {
         if (channel != null) {
-            return Defer.empty()
+            return Defer.aVoid()
                     .flatMap(new WaitForEmptyWriteQueue(vertxContext, writeQueueSupport))
                     .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
                         try {
@@ -148,7 +181,7 @@ public class AsyncIO {
                         return null;
                     }));
         } else {
-            return Defer.empty();
+            return Defer.aVoid();
         }
     }
 }

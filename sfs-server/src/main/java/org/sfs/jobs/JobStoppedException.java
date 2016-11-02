@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-package org.sfs.rx;
+package org.sfs.jobs;
 
-/** ResultMemoizeHandler 
- * @author <a href="http://github.com/petermd">Peter McDonnell</a>
- **/
-public class ResultMemoizeHandler<T> extends MemoizeHandler<T,T> {
+public class JobStoppedException extends RuntimeException {
+
+    public JobStoppedException(String jobId) {
+        super(String.format("JobId: %s", jobId));
+    }
 }

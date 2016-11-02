@@ -24,7 +24,8 @@ import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.HttpMethod;
 import org.sfs.rx.Holder2;
 import org.sfs.rx.HttpClientResponseBodyBuffer;
-import org.sfs.rx.ResultMemoizeHandler;
+import org.sfs.rx.ObservableFuture;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 
 import java.util.Map;
@@ -88,7 +89,7 @@ public abstract class ExecuteRequest {
     public abstract Observable<Void> writeEntity(HttpClientRequest httpClientRequest);
 
     public Observable<HttpClientResponse> execute(String url) {
-        ResultMemoizeHandler<HttpClientResponse> handler = new ResultMemoizeHandler<>();
+        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
         HttpClientRequest httpClientRequest =
                 httpClient.requestAbs(method, url, httpClientResponse -> {
                     httpClientResponse.pause();
@@ -107,7 +108,7 @@ public abstract class ExecuteRequest {
         }
         return writeEntity(httpClientRequest)
                 .doOnNext(aVoid -> httpClientRequest.end())
-                .flatMap(aVoid -> Observable.create(handler.subscribe));
+                .flatMap(aVoid -> handler);
     }
 
     public Observable<Holder2<HttpClientResponse, Buffer>> executeAndBufferResponse(String url) {
