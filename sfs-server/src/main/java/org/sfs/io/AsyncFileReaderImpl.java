@@ -170,7 +170,9 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
 
     private void handleEnd() {
         if (endHandler != null) {
-            endHandler.handle(null);
+            Handler<Void> h = endHandler;
+            endHandler = null;
+            h.handle(null);
         }
     }
 

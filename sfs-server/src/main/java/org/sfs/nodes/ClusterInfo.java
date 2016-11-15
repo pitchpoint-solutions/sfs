@@ -101,7 +101,8 @@ public class ClusterInfo {
     }
 
     public NavigableMap<Long, Set<String>> getStartedVolumeIdByUseableSpace() {
-        return startedVolumeIdByUseableSpace != null ? startedVolumeIdByUseableSpace : Collections.emptyNavigableMap();
+        NavigableMap<Long, Set<String>> snapshot = startedVolumeIdByUseableSpace;
+        return snapshot != null ? snapshot : Collections.emptyNavigableMap();
     }
 
     public Observable<Void> forceRefresh(VertxContext<Server> vertxContext) {
@@ -112,10 +113,11 @@ public class ClusterInfo {
 
     public Iterable<TransientServiceDef> getNodesWithStartedVolumes() {
         checkStarted();
-        if (nodesByStartedVolume == null) {
+        Map<String, TransientServiceDef> snapshot = nodesByStartedVolume;
+        if (snapshot == null) {
             return emptyList();
         }
-        return nodesByStartedVolume.values();
+        return snapshot.values();
     }
 
     public Observable<Boolean> isOnline() {
@@ -141,7 +143,8 @@ public class ClusterInfo {
 
     public Optional<TransientServiceDef> getServiceDefForVolume(String volumeId) {
         checkStarted();
-        return nodesByStartedVolume != null ? Optional.fromNullable(nodesByStartedVolume.get(volumeId)) : Optional.absent();
+        Map<String, TransientServiceDef> snapshot = nodesByStartedVolume;
+        return snapshot != null ? Optional.fromNullable(snapshot.get(volumeId)) : Optional.absent();
     }
 
     public Optional<TransientServiceDef> getCurrentMaintainerNode() {
@@ -151,13 +154,14 @@ public class ClusterInfo {
 
     public TransientServiceDef getCurrentMasterNode() {
         checkStarted();
-        if (masterNodes.isEmpty()) {
-            Preconditions.checkState(masterNodes.isEmpty(), "no elected master node");
+        List<TransientServiceDef> snapshot = masterNodes;
+        if (snapshot.isEmpty()) {
+            Preconditions.checkState(snapshot.isEmpty(), "no elected master node");
         }
-        if (masterNodes.size() > 1) {
-            Preconditions.checkState(masterNodes.size() > 1, "more than one elected master node");
+        if (snapshot.size() > 1) {
+            Preconditions.checkState(snapshot.size() > 1, "more than one elected master node");
         }
-        return masterNodes.get(0);
+        return snapshot.get(0);
     }
 
     public Iterable<TransientServiceDef> getDataNodes() {
