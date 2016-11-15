@@ -49,12 +49,12 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
     private long lastWriteTime;
     private boolean ended = false;
 
-    public AsyncFileWriterImpl(long startPosition, WriteQueueSupport<AsyncFileWriter> writeQueueSupport, final SfsVertx vertx, AsynchronousFileChannel dataFile, Logger log) {
+    public AsyncFileWriterImpl(long startPosition, WriteQueueSupport<AsyncFileWriter> writeQueueSupport, Context context, AsynchronousFileChannel dataFile, Logger log) {
         this.log = log;
         this.startPosition = startPosition;
         this.writePos = startPosition;
         this.ch = dataFile;
-        this.context = vertx.getOrCreateContext();
+        this.context = context;
         this.writeQueueSupport = writeQueueSupport;
         this.lastWriteTime = System.currentTimeMillis();
     }
@@ -75,14 +75,15 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
         checkNotEnded();
         ended = true;
         int length = buffer.length();
-        if (length > 0) {
-            doWrite(buffer, writePos);
-            writePos += length;
-            lastWriteTime = System.currentTimeMillis();
-        } else {
-            lastWriteTime = System.currentTimeMillis();
-            handleEnd();
-        }
+        doWrite(buffer, writePos, event -> {
+            if (event.succeeded()) {
+                handleEnd();
+            } else {
+                handleException(event.cause());
+            }
+        });
+        writePos += length;
+        lastWriteTime = System.currentTimeMillis();
     }
 
     @Override
@@ -111,21 +112,32 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
     public AsyncFileWriterImpl write(Buffer buffer) {
         checkNotEnded();
         int length = buffer.length();
-        if (length > 0) {
-            doWrite(buffer, writePos);
-            writePos += length;
-            lastWriteTime = System.currentTimeMillis();
-        }
+        doWrite(buffer, writePos, event -> {
+            if (event.succeeded()) {
+                handleEnd();
+            } else {
+                handleException(event.cause());
+            }
+        });
+        writePos += length;
+        lastWriteTime = System.currentTimeMillis();
         return this;
     }
 
-
-    private AsyncFileWriterImpl doWrite(Buffer buffer, long position) {
+    private AsyncFileWriterImpl doWrite(Buffer buffer, long position, Handler<AsyncResult<Void>> handler) {
+        Preconditions.checkNotNull(buffer, "buffer");
+        Preconditions.checkArgument(position >= 0, "position must be >= 0");
         Handler<AsyncResult<Void>> wrapped = ar -> {
             if (ar.succeeded()) {
-                handleEnd();
+                if (handler != null) {
+                    handler.handle(ar);
+                }
             } else {
-                handleException(ar.cause());
+                if (handler != null) {
+                    handler.handle(ar);
+                } else {
+                    handleException(ar.cause());
+                }
             }
         };
         ByteBuf buf = buffer.getByteBuf();
@@ -136,6 +148,35 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
             doWrite(bb, position, bb.limit(), wrapped);
         }
         return this;
+    }
+
+    private void doWrite(ByteBuffer[] buffers, long position, Handler<AsyncResult<Void>> handler) {
+        AtomicInteger cnt = new AtomicInteger();
+        AtomicBoolean sentFailure = new AtomicBoolean();
+        for (ByteBuffer b : buffers) {
+            int limit = b.limit();
+            doWrite(b, position, limit, ar -> {
+                if (ar.succeeded()) {
+                    if (cnt.incrementAndGet() == buffers.length) {
+                        handler.handle(ar);
+                    }
+                } else {
+                    if (sentFailure.compareAndSet(false, true)) {
+                        handler.handle(ar);
+                    }
+                }
+            });
+            position += limit;
+        }
+    }
+
+    private void doWrite(ByteBuffer buff, long position, int toWrite, Handler<AsyncResult<Void>> handler) {
+        if (toWrite <= 0) {
+            handler.handle(Future.succeededFuture());
+        } else {
+            incrementWritesOutstanding(toWrite);
+            writeInternal(buff, position, handler);
+        }
     }
 
     @Override
@@ -154,8 +195,12 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
         return writeQueueSupport.writeQueueEmpty(this);
     }
 
-    public void incrementWritesOutstanding(long delta) {
+    public void incrementWritesOutstanding(int delta) {
         writeQueueSupport.incrementWritesOutstanding(this, delta);
+    }
+
+    public void decrementWritesOutstanding(int delta) {
+        writeQueueSupport.decrementWritesOutstanding(this, delta);
     }
 
     protected void removeWritesOutstandingCounter() {
@@ -183,73 +228,50 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
         }
     }
 
-    private void doWrite(ByteBuffer[] buffers, long position, Handler<AsyncResult<Void>> handler) {
-        AtomicInteger cnt = new AtomicInteger();
-        AtomicBoolean sentFailure = new AtomicBoolean();
-        for (ByteBuffer b : buffers) {
-            int limit = b.limit();
-            doWrite(b, position, limit, ar -> {
-                if (ar.succeeded()) {
-                    if (cnt.incrementAndGet() == buffers.length) {
-                        handler.handle(ar);
-                    }
-                } else {
-                    if (sentFailure.compareAndSet(false, true)) {
-                        handler.handle(ar);
-                    }
-                }
-            });
-            position += limit;
-        }
-    }
-
     private void handleEnd() {
         if (ended) {
-            Handler<Void> handler = endHandler;
-            if (handler != null && writeQueueEmpty()) {
+            if (endHandler != null) {
+                Handler<Void> h = endHandler;
                 endHandler = null;
-                handler.handle(null);
+                writeQueueSupport.emptyHandler(this, context, h);
             }
         }
-    }
-
-    private void doWrite(ByteBuffer buff, long position, long toWrite, Handler<AsyncResult<Void>> handler) {
-        if (toWrite == 0) {
-            throw new IllegalStateException("Cannot save zero bytes");
-        }
-        incrementWritesOutstanding(toWrite);
-        writeInternal(buff, position, handler);
     }
 
     private void writeInternal(ByteBuffer buff, long position, Handler<AsyncResult<Void>> handler) {
+        try {
+            ch.write(buff, position, null, new java.nio.channels.CompletionHandler<Integer, Object>() {
 
-        ch.write(buff, position, null, new java.nio.channels.CompletionHandler<Integer, Object>() {
+                public void completed(Integer bytesWritten, Object attachment) {
 
-            public void completed(Integer bytesWritten, Object attachment) {
+                    long pos = position;
 
-                long pos = position;
+                    if (buff.hasRemaining()) {
+                        // partial write
+                        pos += bytesWritten;
+                        // resubmit
+                        writeInternal(buff, pos, handler);
+                    } else {
+                        // It's been fully written
+                        context.runOnContext((v) -> {
+                            decrementWritesOutstanding(buff.limit());
+                            handler.handle(Future.succeededFuture());
+                        });
+                    }
+                }
 
-                if (buff.hasRemaining()) {
-                    // partial write
-                    pos += bytesWritten;
-                    // resubmit
-                    writeInternal(buff, pos, handler);
-                } else {
-                    // It's been fully written
+                public void failed(Throwable exc, Object attachment) {
                     removeWritesOutstandingCounter();
-                    context.runOnContext((v) -> handler.handle(Future.succeededFuture()));
+                    if (exc instanceof Exception) {
+                        context.runOnContext((v) -> handler.handle(Future.succeededFuture()));
+                    } else {
+                        log.error("Error occurred", exc);
+                    }
                 }
-            }
-
-            public void failed(Throwable exc, Object attachment) {
-                removeWritesOutstandingCounter();
-                if (exc instanceof Exception) {
-                    context.runOnContext((v) -> handler.handle(Future.succeededFuture()));
-                } else {
-                    log.error("Error occurred", exc);
-                }
-            }
-        });
+            });
+        } catch (RuntimeException e) {
+            removeWritesOutstandingCounter();
+            throw e;
+        }
     }
-
 }

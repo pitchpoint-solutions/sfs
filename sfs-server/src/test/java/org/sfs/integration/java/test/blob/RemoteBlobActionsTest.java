@@ -101,7 +101,7 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                     public Observable<Void> call(final RemoteNode remoteNode) {
                         out.println("ZZZZ1");
                         return just((Void) null)
-                                .flatMap(new PutData(VERTX_CONTEXT, context, remoteNode, tempFile))
+                                .flatMap(new PutData(vertxContext, context, remoteNode, tempFile))
                                 .map(headerBlob -> {
                                     out.println("Done writing");
                                     return headerBlob;
@@ -245,7 +245,7 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                     public Observable<Void> call(final RemoteNode remoteNode) {
                         out.println("A0");
                         return just((Void) null)
-                                .flatMap(new PutData(VERTX_CONTEXT, context, remoteNode, tempFile1))
+                                .flatMap(new PutData(vertxContext, context, remoteNode, tempFile1))
                                 .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
                                     @Override
                                     public Observable<HeaderBlob> call(HeaderBlob blob) {

@@ -16,6 +16,7 @@
 
 package org.sfs.filesystem.temp;
 
+import io.vertx.core.Context;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
@@ -50,6 +51,7 @@ public class TempDirectoryCleaner {
         this.ttl = ttl;
         this.vertxContext = vertxContext;
         this.ioPool = vertxContext.getIoPool();
+        Context context = vertxContext.vertx().getOrCreateContext();
         return defer(() -> {
             ObservableFuture<Void> handler = RxHelper.observableFuture();
             vertxContext.vertx()
@@ -57,11 +59,10 @@ public class TempDirectoryCleaner {
                     .mkdirs(vertxContext.verticle().sfsFileSystem().tmpDirectory().toString(), null, handler.toHandler());
             long id = vertxContext.vertx()
                     .setPeriodic(SECONDS.toMillis(1),
-                            event -> vertxContext.executeBlocking(
-                                    () -> {
-                                        deleteExpired();
-                                        return (Void) null;
-                                    })
+                            event -> RxHelper.executeBlocking(context, ioPool, () -> {
+                                deleteExpired();
+                                return (Void) null;
+                            })
                                     .single()
                                     .subscribe(
                                             aVoid -> {

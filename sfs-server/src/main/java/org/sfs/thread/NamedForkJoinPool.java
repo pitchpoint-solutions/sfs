@@ -14,16 +14,21 @@
  * limitations under the License.
  */
 
-package org.sfs;
+package org.sfs.thread;
 
-import io.vertx.core.Vertx;
+import io.vertx.core.logging.Logger;
+import io.vertx.core.logging.LoggerFactory;
 
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
 
+public class NamedForkJoinPool {
 
-public interface SfsVertx extends Vertx {
+    public static final Logger LOGGER = LoggerFactory.getLogger(NamedForkJoinPool.class);
 
-    ExecutorService getIoPool();
-
-    ExecutorService getBackgroundPool();
+    public static ForkJoinPool newInstance(int parallelism, String name) {
+        return new ForkJoinPool(
+                parallelism,
+                new NamedForkJoinThreadFactory(name),
+                (t, e) -> LOGGER.error("Unhandled Exception", e), true);
+    }
 }

@@ -72,7 +72,9 @@ public class DeleteDataInVolumes implements Func1<PersistentObject, Observable<B
                                 .flatMap(new DeleteBlobReference(vertxContext))
                                 .filter(deleted -> deleted)
                                 .map(deleted -> {
-                                    transientBlobReference.setDeleted(deleted);
+                                    if (Boolean.TRUE.equals(deleted)) {
+                                        transientBlobReference.setDeleted(deleted);
+                                    }
                                     if (deleted && LOGGER.isDebugEnabled()) {
                                         LOGGER.debug("mark deletedatainvolumes object=" + persistentObject.getId());
                                     }

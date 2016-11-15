@@ -48,6 +48,7 @@ import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.index.engine.DocumentAlreadyExistsException;
 import org.elasticsearch.index.engine.VersionConflictEngineException;
 import org.sfs.Server;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
 import org.sfs.rx.Defer;
 import org.sfs.rx.ObservableFuture;
@@ -94,9 +95,11 @@ public class Elasticsearch {
     }
 
     public Observable<Void> start(final VertxContext<Server> vertxContext, final JsonObject config, boolean isMasterNode) {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
         return Defer.aVoid()
                 .filter(aVoid -> status.compareAndSet(Status.STOPPED, Status.STARTING))
-                .flatMap(aVoid -> vertxContext.executeBlocking(
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(),
                         () -> {
                             if (elasticSearchClient == null) {
                                 LOGGER.debug("Starting Elasticsearch");
@@ -317,7 +320,9 @@ public class Elasticsearch {
     }
 
     protected Observable<String> getMapping(VertxContext<Server> vertxContext, final String name) {
-        return vertxContext.executeBlocking(() -> {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
             try (Reader reader = new InputStreamReader(Thread.currentThread().getContextClassLoader().getResourceAsStream(name), Charsets.UTF_8)) {
                 return CharStreams.toString(reader);
             } catch (IOException e) {
@@ -359,9 +364,11 @@ public class Elasticsearch {
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
+        SfsVertx vertx = vertxContext.vertx();
+        Context context = vertx.getOrCreateContext();
         return Defer.aVoid()
                 .filter(aVoid -> status.compareAndSet(Status.STARTED, Status.STOPPING) || status.compareAndSet(Status.STARTING, Status.STOPPING))
-                .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), (() -> {
                     LOGGER.debug("Stopping Elasticsearch");
                     if (elasticSearchClient != null) {
                         try {
@@ -374,7 +381,7 @@ public class Elasticsearch {
                     LOGGER.debug("Stopped Elasticsearch");
                     return (Void) null;
                 }))
-                .doOnNext(aVoid -> Preconditions.checkState(status.compareAndSet(Status.STOPPING, Status.STOPPED)));
+                .doOnNext(aVoid1 -> Preconditions.checkState(status.compareAndSet(Status.STOPPING, Status.STOPPED))));
 
     }
 

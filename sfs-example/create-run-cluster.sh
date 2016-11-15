@@ -15,25 +15,24 @@ function is_port_in_use(){
 
 function get_start_container_command(){
     local port; port=${1}
-    local directory; directory=${2}
-    local clusterHosts; clusterHosts=${3}
-    local numberOfReplicas; numberOfReplicas=${4}
-    local nodeMaster; nodeMaster=${5}
-    local nodeData; nodeData=${6}
-    local containerName; containerName=${7}
-    local publishAddress; publishAddress=${8}
-    local remoteNodeSecret; remoteNodeSecret=${9}
-    local keyStoreAwsKmsEndpoint; keyStoreAwsKmsEndpoint=${10}
-    local keyStoreAwsKmsKeyId; keyStoreAwsKmsKeyId=${11}
-    local keyStoreAwsKmsAccessKeyId; keyStoreAwsKmsAccessKeyId=${12}
-    local keyStoreAwsKmsSecretKey; keyStoreAwsKmsSecretKey=${13}
-    local keyStoreAzureKmsEndpoint; keyStoreAzureKmsEndpoint=${14}
-    local keyStoreAzureKmsKeyId; keyStoreAzureKmsKeyId=${15}
-    local keyStoreAzureKmsAccessKeyId; keyStoreAzureKmsAccessKeyId=${16}
-    local keyStoreAzureKmsSecretKey; keyStoreAzureKmsSecretKey=${17}
-    local elasticsearchClusterName; elasticsearchClusterName=${18}
-    local elasticsearchNodeName; elasticsearchNodeName=${19}
-    local elasticsearchHosts; elasticsearchHosts=${20}
+    local clusterHosts; clusterHosts=${2}
+    local numberOfReplicas; numberOfReplicas=${3}
+    local nodeMaster; nodeMaster=${4}
+    local nodeData; nodeData=${5}
+    local containerName; containerName=${6}
+    local publishAddress; publishAddress=${7}
+    local remoteNodeSecret; remoteNodeSecret=${8}
+    local keyStoreAwsKmsEndpoint; keyStoreAwsKmsEndpoint=${9}
+    local keyStoreAwsKmsKeyId; keyStoreAwsKmsKeyId=${10}
+    local keyStoreAwsKmsAccessKeyId; keyStoreAwsKmsAccessKeyId=${11}
+    local keyStoreAwsKmsSecretKey; keyStoreAwsKmsSecretKey=${12}
+    local keyStoreAzureKmsEndpoint; keyStoreAzureKmsEndpoint=${13}
+    local keyStoreAzureKmsKeyId; keyStoreAzureKmsKeyId=${14}
+    local keyStoreAzureKmsAccessKeyId; keyStoreAzureKmsAccessKeyId=${15}
+    local keyStoreAzureKmsSecretKey; keyStoreAzureKmsSecretKey=${16}
+    local elasticsearchClusterName; elasticsearchClusterName=${17}
+    local elasticsearchNodeName; elasticsearchNodeName=${18}
+    local elasticsearchHosts; elasticsearchHosts=${19}
     local commandToExecute; commandToExecute="${DOCKER} run -it \
     --add-host localhost:127.0.0.1 \
     -e INSTANCES=200 \
@@ -64,12 +63,6 @@ function get_start_container_command(){
     -p ${port}:80 \
     simple-file-server:0-SNAPSHOT"
     echo ${commandToExecute}
-}
-
-function get_working_directory_for_port(){
-    local directory; directory=$1
-    local port; port=$2
-    echo "${WORKING_DIRECTORY}/sfs_example_node_${port}"
 }
 
 function get_container_name(){
@@ -160,23 +153,19 @@ for port in `seq ${FIRST_PORT} ${LAST_PORT}`; do
 done
 CLUSTER_HOSTS_AS_STRING=`printf "%s," "${CLUSTER_HOSTS[@]}" | cut -d "," -f 1-${#CLUSTER_HOSTS[@]}`
 
-
-ELASTICSEARCH_HOME="${WORKING_DIRECTORY}/sfs_example_elasticsearch"
-
+${DOCKER} pull elasticsearch:2.4.1 || { echo "failed to update elasticsearch. Exiting... $?"; exit 1;}
 START_ELASTICSEARCH_COMMAND="${DOCKER} run -d -p ${ELASTICSEARCH_PORT}:9300 --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=${ELASTICSEARCH_CLUSTER_NAME}"
 echo "Starting elasticsearch docker container ${START_ELASTICSEARCH_COMMAND}."
-${START_ELASTICSEARCH_COMMAND} || { echo "failed to start elasticsearch in ${ELASTICSEARCH_HOME}. Exiting... $?"; exit 1;}
+${START_ELASTICSEARCH_COMMAND} || { echo "failed to start elasticsearch. Exiting... $?"; exit 1;}
 
 NODE_MASTER=true
 declare -a START_CONTAINER_COMMANDS
 for port in `seq ${FIRST_PORT} ${LAST_PORT}`; do
-    DIRECTORY=$(get_working_directory_for_port ${WORKING_DIRECTORY} ${port})
     CONTAINER_NAME=$(get_container_name ${port})
     PUBLISH_ADDRESS="${PUBLISH_IP}:${port}"
     ELASTICSEARCH_ADDRESS="${PUBLISH_IP}:${ELASTICSEARCH_PORT}"
     START_CONTAINER_COMMAND=$(get_start_container_command \
     ${port} \
-    ${DIRECTORY} \
     ${CLUSTER_HOSTS_AS_STRING} \
     ${NUMBER_OF_REPLICAS} \
     ${NODE_MASTER} \

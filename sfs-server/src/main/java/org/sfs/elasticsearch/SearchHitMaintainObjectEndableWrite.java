@@ -35,11 +35,16 @@ import org.sfs.rx.ToType;
 import org.sfs.vo.PersistentAccount;
 import org.sfs.vo.PersistentContainer;
 import org.sfs.vo.PersistentObject;
+import org.sfs.vo.TransientBlobReference;
+import org.sfs.vo.TransientSegment;
 import org.sfs.vo.TransientServiceDef;
+import org.sfs.vo.TransientVersion;
 import rx.Observable;
 import rx.Scheduler;
 
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Optional.absent;
@@ -60,11 +65,12 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
     private final CachedAccount cachedAccount;
     private final CachedContainer cachedContainer;
 
-    private List<TransientServiceDef> dataNodes;
+    private final List<TransientServiceDef> dataNodes;
     private final Scheduler scheduler;
+    private final Set<String> forceRemoveVolumes;
 
 
-    public SearchHitMaintainObjectEndableWrite(VertxContext<Server> vertxContext) {
+    public SearchHitMaintainObjectEndableWrite(VertxContext<Server> vertxContext, Set<String> forceRemoveVolumes) {
         super(vertxContext);
         this.clusterInfo = vertxContext.verticle().getClusterInfo();
         this.dataNodes =
@@ -74,11 +80,16 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
         this.scheduler = RxHelper.scheduler(vertxContext.vertx());
         this.cachedAccount = new CachedAccount(vertxContext);
         this.cachedContainer = new CachedContainer(vertxContext);
+        this.forceRemoveVolumes = forceRemoveVolumes;
+        if (!forceRemoveVolumes.isEmpty()) {
+            LOGGER.info("forceRemoveVolumes: " + forceRemoveVolumes);
+        }
     }
 
     @Override
     protected Observable<Optional<JsonObject>> transform(final JsonObject data, String id, long version) {
         return toPersistentObject(data, id, version)
+                .map(this::forceRemoveVolumes)
                 // delete versions that are to old to attempt verification,ack and rebalance
                 .flatMap(this::deleteOldUnAckdVersions)
                 .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on deleteOldUnAckdVersions " + data.encodePrettily())), scheduler)
@@ -104,6 +115,26 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                         return of(jsonObject);
                     }
                 });
+    }
+
+    protected PersistentObject forceRemoveVolumes(PersistentObject persistentObject) {
+        if (!forceRemoveVolumes.isEmpty()) {
+            for (TransientVersion version : persistentObject.getVersions()) {
+                for (TransientSegment segment : version.getSegments()) {
+                    if (!segment.isTinyData()) {
+                        Iterator<TransientBlobReference> iterator = segment.getBlobs().iterator();
+                        while (iterator.hasNext()) {
+                            TransientBlobReference blob = iterator.next();
+                            String volumeId = blob.getVolumeId().orNull();
+                            if (volumeId != null && forceRemoveVolumes.contains(volumeId)) {
+                                iterator.remove();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return persistentObject;
     }
 
     protected Observable<PersistentObject> verifyAck(PersistentObject persistentObject) {
@@ -191,7 +222,9 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                                     .flatMap(new DeleteBlobReference(vertxContext))
                                     .filter(deleted -> deleted)
                                     .map(deleted -> {
-                                        transientBlobReference.setDeleted(deleted);
+                                        if (Boolean.TRUE.equals(deleted)) {
+                                            transientBlobReference.setDeleted(deleted);
+                                        }
                                         return (Void) null;
                                     }))
                     .onErrorResumeNext(throwable -> {

@@ -31,10 +31,10 @@ import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.integration.java.func.WaitForCluster;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.NullEndableWriteStream;
+import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.Nodes;
 import org.sfs.nodes.VolumeReplicaGroup;
 import org.sfs.nodes.XNode;
-import org.sfs.rx.Holder2;
 import org.sfs.rx.ToVoid;
 
 import java.io.IOException;
@@ -91,46 +91,43 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                 .setRead(true)
                 .setWrite(true);
 
-        final AsyncFile asyncFile = VERTX.fileSystem().openBlocking(tempFile1.toString(), openOptions);
+        final AsyncFile asyncFile = vertx.fileSystem().openBlocking(tempFile1.toString(), openOptions);
 
         Nodes nodes = vertxContext().verticle().nodes();
+        ClusterInfo clusterInfo = vertxContext().verticle().getClusterInfo();
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
-                .flatMap(new WaitForCluster(VERTX, HTTP_CLIENT))
+                .flatMap(aVoid -> vertxContext.verticle().getNodeStats().forceUpdate(vertxContext))
+                .flatMap(aVoid -> vertxContext.verticle().getClusterInfo().forceRefresh(vertxContext))
+                .flatMap(new WaitForCluster(vertxContext))
                 .flatMap(aVoid -> {
                     final VolumeManager volumeManager = nodes.volumeManager();
-                    return volumeManager.newVolume(VERTX_CONTEXT)
+                    return volumeManager.newVolume(vertxContext)
                             .map(new ToVoid<>())
-                            .flatMap(aVoid1 -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
-                            .flatMap(aVoid1 -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
-                            .flatMap(aVoid1 -> {
+                            .flatMap(aVoid1 -> vertxContext.verticle().getNodeStats().forceUpdate(vertxContext))
+                            .flatMap(aVoid1 -> vertxContext.verticle().getClusterInfo().forceRefresh(vertxContext))
+                            .flatMap(new WaitForCluster(vertxContext))
+                            .map(aVoid1 -> {
                                 assertEquals(context, 2, Iterables.size(volumeManager.volumes()));
-                                return just(new VolumeReplicaGroup(vertxContext(), 2)
-                                        .setAllowSameNode(true));
+                                return new VolumeReplicaGroup(vertxContext(), 2)
+                                        .setAllowSameNode(true);
                             });
                 })
                 .flatMap(volumeReplicaGroup ->
                         just((Void) null)
                                 .flatMap(aVoid -> volumeReplicaGroup.consume(size, newArrayList(MD5, SHA512), asyncFile))
-                                .map(responses -> {
-                                    DigestBlob blob;
-                                    for (Holder2<XNode, DigestBlob> h : responses) {
-                                        blob = h.value1();
+                                .doOnNext(digestBlobs -> {
+                                    assertEquals(context, 2, digestBlobs.size());
+                                    for (DigestBlob blob : digestBlobs) {
                                         assertArrayEquals(context, md5, blob.getDigest(MD5).get());
                                         assertArrayEquals(context, sha512, blob.getDigest(SHA512).get());
                                     }
-                                    return responses;
-
                                 })
-                                .flatMap(responses ->
-                                        from(responses)
-                                                .flatMap(response -> {
-                                                    DigestBlob digestBlob = response.value1();
-                                                    XNode xNode = response.value0();
-                                                    LOGGER.debug("Doing ack for volume " + digestBlob.getVolume() + " position " + digestBlob.getPosition());
+                                .flatMap(digestBlobs ->
+                                        from(digestBlobs)
+                                                .flatMap(digestBlob -> {
+                                                    XNode xNode = clusterInfo.getNodeForVolume(vertxContext(), digestBlob.getVolume()).get();
                                                     return xNode.acknowledge(digestBlob.getVolume(), digestBlob.getPosition())
                                                             .map(headerBlobOptional -> {
                                                                 assertTrue(context, headerBlobOptional.isPresent());
@@ -138,13 +135,12 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                                                             });
                                                 })
                                                 .count()
-                                                .map(integer -> responses)
+                                                .map(integer -> digestBlobs)
                                 )
-                                .flatMap(responses ->
-                                        from(responses)
-                                                .flatMap(response -> {
-                                                    DigestBlob digestBlob = response.value1();
-                                                    XNode xNode = response.value0();
+                                .flatMap(digestBlobs ->
+                                        from(digestBlobs)
+                                                .flatMap(digestBlob -> {
+                                                    XNode xNode = clusterInfo.getNodeForVolume(vertxContext(), digestBlob.getVolume()).get();
                                                     return xNode.createReadStream(digestBlob.getVolume(), digestBlob.getPosition(), absent(), absent())
                                                             .map(Optional::get)
                                                             .flatMap(readStreamBlob -> {
@@ -158,13 +154,12 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
 
                                                 })
                                                 .count()
-                                                .map(integer -> responses)
+                                                .map(integer -> digestBlobs)
                                 )
-                                .flatMap(responses ->
-                                        from(responses)
-                                                .flatMap(response -> {
-                                                    DigestBlob digestBlob = response.value1();
-                                                    XNode xNode = response.value0();
+                                .flatMap(digestBlobs ->
+                                        from(digestBlobs)
+                                                .flatMap(digestBlob -> {
+                                                    XNode xNode = clusterInfo.getNodeForVolume(vertxContext(), digestBlob.getVolume()).get();
                                                     return xNode.delete(digestBlob.getVolume(), digestBlob.getPosition())
                                                             .map(headerBlobOptional -> {
                                                                 assertTrue(context, headerBlobOptional.isPresent());
@@ -172,7 +167,7 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                                                             });
                                                 })
                                                 .count()
-                                                .map(integer -> responses)
+                                                .map(integer -> digestBlobs)
                                 )
                 )
                 .map(new ToVoid<>())

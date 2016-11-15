@@ -24,7 +24,6 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import org.sfs.SfsRequest;
 import org.sfs.util.HttpRequestValidationException;
-import org.sfs.util.HttpServerRequestHeaderToJsonObject;
 import org.sfs.util.HttpStatusCodeException;
 import rx.Subscriber;
 
@@ -75,7 +74,6 @@ public abstract class Terminus<T> extends Subscriber<T> {
         try {
             HttpServerResponse response = httpServerRequest.response();
             response.setChunked(true);
-            JsonObject jsonRequestDump = HttpServerRequestHeaderToJsonObject.call(httpServerRequest);
             if (containsException(HttpRequestValidationException.class, e)) {
                 HttpRequestValidationException cause = unwrapCause(HttpRequestValidationException.class, e).get();
                 JsonObject entity = cause.getEntity();
@@ -146,9 +144,7 @@ public abstract class Terminus<T> extends Subscriber<T> {
                             .appendBuffer(DELIMITER_BUFFER);
                     response.end(encoded);
                 } else {
-                    Buffer encoded = buffer(jsonRequestDump.encodePrettily(), UTF_8.toString());
                     response.setStatusCode(status)
-                            .write(encoded)
                             .end();
                 }
 
@@ -161,9 +157,7 @@ public abstract class Terminus<T> extends Subscriber<T> {
                             .appendBuffer(DELIMITER_BUFFER);
                     response.end(encoded);
                 } else {
-                    Buffer encoded = buffer(jsonRequestDump.encodePrettily(), UTF_8.toString());
                     response.setStatusCode(HTTP_INTERNAL_ERROR)
-                            .write(encoded)
                             .end();
                 }
 

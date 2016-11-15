@@ -16,6 +16,7 @@
 
 package org.sfs.nodes.compute.container;
 
+import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
 import io.vertx.core.http.HttpServerResponse;
@@ -25,6 +26,7 @@ import io.vertx.core.logging.LoggerFactory;
 import org.elasticsearch.index.query.TermQueryBuilder;
 import org.sfs.Server;
 import org.sfs.SfsRequest;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
 import org.sfs.auth.Authenticate;
 import org.sfs.elasticsearch.Elasticsearch;
@@ -80,6 +82,8 @@ public class ExportContainer implements Handler<SfsRequest> {
     public void handle(final SfsRequest httpServerRequest) {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
 
         aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
@@ -177,7 +181,7 @@ public class ExportContainer implements Handler<SfsRequest> {
                             .flatMap(journalFile -> journalFile.close(vertxContext.vertx())
                                     .map(aVoid -> journalFile))
                             .flatMap(journalFile ->
-                                    executeBlocking(vertxContext.vertx(), () -> {
+                                    RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
                                         try {
                                             write(get(destDirectory).resolve(".successful"), new byte[0], CREATE_NEW, WRITE);
                                             return (Void) null;

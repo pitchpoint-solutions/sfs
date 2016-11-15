@@ -22,13 +22,13 @@ import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.io.BaseEncoding;
 import com.google.common.math.LongMath;
+import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import io.vertx.core.streams.ReadStream;
 import org.sfs.SfsVertx;
-import org.sfs.VertxContext;
 import org.sfs.block.RangeLock;
 import org.sfs.block.RecyclingAllocator;
 import org.sfs.filesystem.BlobFile;
@@ -138,11 +138,12 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<TransientXVolume> volumeInfo(SfsVertx vertx) {
+        Context context = vertx.getOrCreateContext();
         return Defer.aVoid()
                 .doOnNext(aVoid -> {
                     checkStarted();
                 })
-                .flatMap(aVoid -> VertxContext.executeBlocking(vertx, () -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
 
                     try {
                         FileStore fileStore = Files.getFileStore(basePath);
@@ -332,10 +333,11 @@ public class VolumeV1 implements Volume {
     @Override
     public Observable<Void> open(SfsVertx vertx) {
         final VolumeV1 _this = this;
+        Context context = vertx.getOrCreateContext();
         return Defer.aVoid()
                 .doOnNext(aVoid -> Preconditions.checkState(volumeState.compareAndSet(Status.STOPPED, Status.STARTING)))
                 .doOnNext(aVoid -> logger.info("Starting volume " + basePath.toString()))
-                .flatMap(aVoid -> VertxContext.executeBlocking(vertx, () -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
                     try {
 
                         Files.createDirectories(basePath);

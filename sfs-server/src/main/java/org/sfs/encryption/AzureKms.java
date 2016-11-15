@@ -26,12 +26,15 @@ import com.microsoft.azure.keyvault.models.KeyOperationResult;
 import com.microsoft.windowsazure.Configuration;
 import com.microsoft.windowsazure.core.pipeline.filter.ServiceRequestContext;
 import com.microsoft.windowsazure.credentials.CloudCredentials;
+import io.vertx.core.Context;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
 import org.sfs.Server;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
+import org.sfs.rx.RxHelper;
 import org.sfs.util.ConfigHelper;
 import rx.Observable;
 
@@ -81,7 +84,8 @@ public class AzureKms implements Kms {
 
     public Observable<Void> start(VertxContext<Server> vertxContext,
                                   JsonObject config) {
-
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
         return aVoid()
                 .filter(aVoid -> started.compareAndSet(false, true))
                 .flatMap(aVoid -> {
@@ -101,7 +105,7 @@ public class AzureKms implements Kms {
 
                     azureKeyIdentifier = format("%s/keys/%s", endpoint, keyId);
 
-                    return vertxContext.executeBlocking(() -> {
+                    return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
                         try {
                             kms = createKeyVaultClient(vertxContext);
                         } catch (Exception e) {
@@ -155,7 +159,9 @@ public class AzureKms implements Kms {
 
     @Override
     public Observable<Encrypted> encrypt(VertxContext<Server> vertxContext, byte[] plainBytes) {
-        return defer(() -> vertxContext.executeBlocking(() -> {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return defer(() -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
             String algorithm = AlgorithmName;
             Future<KeyOperationResult> encrypted = kms.encryptAsync(azureKeyIdentifier, algorithm, plainBytes);
             try {
@@ -184,7 +190,9 @@ public class AzureKms implements Kms {
 
     @Override
     public Observable<byte[]> decrypt(VertxContext<Server> vertxContext, byte[] cipherBytes) {
-        return defer(() -> vertxContext.executeBlocking(() -> {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return defer(() -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
             try {
                 CipherText instance = parseFrom(cipherBytes.clone());
                 String keyIdentifier = instance.getKeyIdentifier();
@@ -200,6 +208,8 @@ public class AzureKms implements Kms {
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
         return aVoid()
                 .filter(aVoid -> started.compareAndSet(true, false))
                 .flatMap(aVoid -> {
@@ -208,7 +218,7 @@ public class AzureKms implements Kms {
                         properties = null;
                     }
                     if (kms != null) {
-                        return vertxContext.executeBlocking(() -> {
+                        return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
                             try {
                                 kms.close();
                             } catch (Throwable e) {

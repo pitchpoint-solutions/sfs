@@ -40,7 +40,7 @@ public class KeystoneAuthTest extends BaseTestVerticle {
     public void testValidCreds(TestContext context) {
         Async async = context.async();
         just((Void) null)
-                .flatMap(new KeystoneAuth(HTTP_CLIENT, "user", "user"))
+                .flatMap(new KeystoneAuth(httpClient, "user", "user"))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
                 .flatMap(new HttpClientResponseBodyBuffer())
@@ -53,7 +53,7 @@ public class KeystoneAuthTest extends BaseTestVerticle {
     public void testInvalid(TestContext context) {
         Async async = context.async();
         just((Void) null)
-                .flatMap(new KeystoneAuth(HTTP_CLIENT, "user", "badpassword"))
+                .flatMap(new KeystoneAuth(httpClient, "user", "badpassword"))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_UNAUTHORIZED))
                 .flatMap(new HttpClientResponseBodyBuffer())

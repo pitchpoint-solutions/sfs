@@ -91,7 +91,7 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
                         if (encryptedLength > TINY_DATA_THRESHOLD) {
 
                             return volumeReplicaGroup.consume(encryptedLength, sha512Digest, blobDigestReadStream)
-                                    .map(holders -> {
+                                    .map(digestBlobs -> {
                                         SegmentCipher segmentCipher = new SegmentCipher(keyResponse.getKeyId(), keyResponse.getSalt());
 
                                         final TransientSegment newSegment = transientVersion.newSegment();
@@ -104,8 +104,7 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
                                                 .setReadLength(clearByteCount.count())
                                                 .setIsTinyData(false);
 
-                                        for (Holder2<XNode, DigestBlob> response : holders) {
-                                            DigestBlob digestBlob = response.value1();
+                                        for (DigestBlob digestBlob : digestBlobs) {
                                             newSegment.newBlob()
                                                     .setVolumeId(digestBlob.getVolume())
                                                     .setPosition(digestBlob.getPosition())
@@ -150,7 +149,7 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
             if (contentLength > TINY_DATA_THRESHOLD) {
 
                 return volumeReplicaGroup.consume(contentLength, sha512Digest, digestReadStream)
-                        .map(holders -> {
+                        .map(digestBlobs -> {
 
                             final TransientSegment newSegment = transientVersion.newSegment();
 
@@ -162,8 +161,7 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
                                     .setReadLength(clearByteCount.count())
                                     .setIsTinyData(false);
 
-                            for (Holder2<XNode, DigestBlob> response : holders) {
-                                DigestBlob digestBlob = response.value1();
+                            for (DigestBlob digestBlob : digestBlobs) {
                                 newSegment.newBlob()
                                         .setVolumeId(digestBlob.getVolume())
                                         .setPosition(digestBlob.getPosition())

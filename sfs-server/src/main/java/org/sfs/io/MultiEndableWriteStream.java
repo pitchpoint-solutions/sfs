@@ -21,34 +21,51 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
+import rx.Observable;
 import rx.Subscriber;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static rx.Observable.from;
 
 public class MultiEndableWriteStream implements BufferEndableWriteStream {
 
     private static final Logger LOGGER = getLogger(MultiEndableWriteStream.class);
-    protected final BufferEndableWriteStream[] delegateWriteStreams;
+    private final List<BufferEndableWriteStream> delegateWriteStreams;
+    private final List<ObservableFuture<Void>> drainHandlers;
+    private final List<ObservableFuture<Void>> endHandlers;
+    private final int size;
     private Handler<Void> delegateEndHandler;
     private Handler<Void> delegateDrainHandler;
     private Handler<Throwable> delegateErrorHandler;
     private boolean ended = false;
-    private Buffer endBuffer = null;
 
+    public MultiEndableWriteStream(List<BufferEndableWriteStream> writeStreams) {
+        this.size = writeStreams.size();
+        this.drainHandlers = new ArrayList<>(size);
+        this.endHandlers = new ArrayList<>(size);
+        this.delegateWriteStreams = writeStreams;
+    }
 
     public MultiEndableWriteStream(BufferEndableWriteStream[] writeStreams) {
-        this.delegateWriteStreams = writeStreams;
+        this.delegateWriteStreams = new ArrayList<>(writeStreams.length);
+        Collections.addAll(this.delegateWriteStreams, writeStreams);
+        this.drainHandlers = new ArrayList<>(writeStreams.length);
+        this.endHandlers = new ArrayList<>(writeStreams.length);
+        this.size = delegateWriteStreams.size();
     }
 
 
     public MultiEndableWriteStream(BufferEndableWriteStream writeStream, BufferEndableWriteStream... writeStreams) {
-        this.delegateWriteStreams = new BufferEndableWriteStream[1 + writeStreams.length];
-        this.delegateWriteStreams[0] = writeStream;
-        for (int i = 0; i < writeStreams.length; i++) {
-            this.delegateWriteStreams[i + 1] = writeStreams[i];
-        }
+        this.delegateWriteStreams = new ArrayList<>(1 + writeStreams.length);
+        this.drainHandlers = new ArrayList<>(1 + writeStreams.length);
+        this.endHandlers = new ArrayList<>(1 + writeStreams.length);
+        this.delegateWriteStreams.add(writeStream);
+        Collections.addAll(this.delegateWriteStreams, writeStreams);
+        this.size = this.delegateWriteStreams.size();
     }
 
     @Override
@@ -81,6 +98,15 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
     @Override
     public MultiEndableWriteStream drainHandler(Handler<Void> handler) {
         this.delegateDrainHandler = handler;
+        drainHandlers.clear();
+        for (int i = 0; i < size; i++) {
+            BufferEndableWriteStream writeStream = delegateWriteStreams.get(i);
+            if (writeStream.writeQueueFull()) {
+                ObservableFuture<Void> h = RxHelper.observableFuture();
+                drainHandlers.add(h);
+                writeStream.drainHandler(h::complete);
+            }
+        }
         handleDrain();
         return this;
     }
@@ -102,10 +128,17 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
     }
 
     @Override
-    public void end(final Buffer buffer) {
+    public void end(Buffer buffer) {
         checkState(!ended, "Already ended");
         ended = true;
-        endBuffer = buffer;
+        endHandlers.clear();
+        for (int i = 0; i < size; i++) {
+            BufferEndableWriteStream writeStream = delegateWriteStreams.get(i);
+            ObservableFuture<Void> h = RxHelper.observableFuture();
+            endHandlers.add(h);
+            writeStream.endHandler(h::complete);
+            writeStream.end(buffer);
+        }
         handleEnd();
     }
 
@@ -113,6 +146,14 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
     public void end() {
         checkState(!ended, "Already ended");
         ended = true;
+        endHandlers.clear();
+        for (int i = 0; i < size; i++) {
+            BufferEndableWriteStream writeStream = delegateWriteStreams.get(i);
+            ObservableFuture<Void> h = RxHelper.observableFuture();
+            endHandlers.add(h);
+            writeStream.endHandler(h::complete);
+            writeStream.end();
+        }
         handleEnd();
     }
 
@@ -120,13 +161,9 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
         if (delegateDrainHandler != null) {
             Handler<Void> handler = delegateDrainHandler;
             delegateDrainHandler = null;
-            from(delegateWriteStreams)
-                    .flatMap(endableWriteStream -> {
-                        ObservableFuture<Void> h = RxHelper.observableFuture();
-                        endableWriteStream.drainHandler(h::complete);
-                        return h;
-                    })
-                    .subscribe(new Subscriber<Void>() {
+            Observable.mergeDelayError(drainHandlers)
+                    .count()
+                    .subscribe(new Subscriber<Integer>() {
                         @Override
                         public void onCompleted() {
                             handler.handle(null);
@@ -138,7 +175,7 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
                         }
 
                         @Override
-                        public void onNext(Void aVoid) {
+                        public void onNext(Integer count) {
                         }
                     });
         }
@@ -148,20 +185,9 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
         Handler<Void> handler = delegateEndHandler;
         if (ended && handler != null) {
             delegateEndHandler = null;
-            from(delegateWriteStreams)
-                    .flatMap(endableWriteStream -> {
-                        ObservableFuture<Void> h = RxHelper.observableFuture();
-                        endableWriteStream.endHandler(h::complete);
-                        if (endBuffer != null) {
-                            Buffer data = endBuffer;
-                            endBuffer = null;
-                            endableWriteStream.end(data);
-                        } else {
-                            endableWriteStream.end();
-                        }
-                        return h;
-                    })
-                    .subscribe(new Subscriber<Void>() {
+            Observable.mergeDelayError(endHandlers)
+                    .count()
+                    .subscribe(new Subscriber<Integer>() {
                         @Override
                         public void onCompleted() {
                             handler.handle(null);
@@ -173,7 +199,7 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
                         }
 
                         @Override
-                        public void onNext(Void aVoid) {
+                        public void onNext(Integer count) {
                         }
                     });
         }

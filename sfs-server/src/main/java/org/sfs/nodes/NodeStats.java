@@ -18,12 +18,15 @@ package org.sfs.nodes;
 
 import com.google.common.base.Optional;
 import com.google.common.net.HostAndPort;
+import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
 import org.sfs.elasticsearch.nodes.GetDocumentsCountForNode;
 import org.sfs.filesystem.volume.VolumeManager;
+import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
 import org.sfs.vo.TransientServiceDef;
 import org.sfs.vo.TransientXFileSystem;
@@ -135,8 +138,10 @@ public class NodeStats {
 
     protected Observable<Void> generate(VertxContext<Server> vertxContext) {
         NodeStats _this = this;
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
         return aVoid()
-                .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
                     try {
                         Nodes nodes = vertxContext.verticle().nodes();
                         List<HostAndPort> publishAddresses = nodes.getPublishAddresses();
@@ -162,8 +167,6 @@ public class NodeStats {
                                 .setTotalMemory(runtime.totalMemory())
                                 .setDataNode(nodes.isDataNode())
                                 .setMaster(nodes.isMaster())
-                                .setBackgroundPoolQueueSize(nodes.getBackgroundQueueSize())
-                                .setIoPoolQueueSize(nodes.getIoQueueSize())
                                 .setFileSystem(fileSystemInfo)
                                 .setPublishAddresses(publishAddresses);
 

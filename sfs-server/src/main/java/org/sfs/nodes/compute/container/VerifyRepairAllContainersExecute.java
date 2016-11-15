@@ -31,7 +31,6 @@ import org.sfs.rx.ConnectionCloseTerminus;
 import org.sfs.rx.Defer;
 import org.sfs.rx.ToVoid;
 import org.sfs.validate.ValidateActionAdminOrSystem;
-import org.sfs.validate.ValidateHeaderBetweenLong;
 import org.sfs.vo.TransientServiceDef;
 
 import java.nio.charset.StandardCharsets;
@@ -59,7 +58,12 @@ public class VerifyRepairAllContainersExecute implements Handler<SfsRequest> {
 
                     long timeout = headers.contains(Jobs.Parameters.TIMEOUT) ? Long.parseLong(headers.get(Jobs.Parameters.TIMEOUT)) : 100;
 
+                    String unparsedForceRemoveVolumes = headers.contains(Jobs.Parameters.FORCE_REMOVE_VOLUMES) ? headers.get(Jobs.Parameters.FORCE_REMOVE_VOLUMES) : null;
+
                     MultiMap params = MultiMap.caseInsensitiveMultiMap();
+                    if (unparsedForceRemoveVolumes != null) {
+                        params.add(Jobs.Parameters.FORCE_REMOVE_VOLUMES, unparsedForceRemoveVolumes);
+                    }
 
                     TransientServiceDef transientServiceDef = clusterInfo.getCurrentMasterNode();
                     MasterNode masterNode = nodes.remoteMasterNode(vertxContext, transientServiceDef);

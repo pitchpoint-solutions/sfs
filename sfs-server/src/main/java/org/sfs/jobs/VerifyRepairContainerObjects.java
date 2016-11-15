@@ -16,6 +16,9 @@
 
 package org.sfs.jobs;
 
+import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
+import com.google.common.collect.Sets;
 import io.vertx.core.MultiMap;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
@@ -30,6 +33,9 @@ import org.sfs.io.AsyncIO;
 import org.sfs.rx.Defer;
 import org.sfs.vo.ObjectPath;
 import rx.Observable;
+
+import java.util.Collections;
+import java.util.Set;
 
 public class VerifyRepairContainerObjects extends AbstractJob {
 
@@ -59,6 +65,12 @@ public class VerifyRepairContainerObjects extends AbstractJob {
 
     protected Observable<Void> execute0(VertxContext<Server> vertxContext, MultiMap parameters) {
 
+        String unparsedForceRemoveVolumes = JobParams.getFirstOptionalParam(parameters, Jobs.Parameters.FORCE_REMOVE_VOLUMES);
+        Set<String> forceRemoveVolumes =
+                Strings.isNullOrEmpty(unparsedForceRemoveVolumes)
+                        ? Collections.emptySet()
+                        : Sets.newHashSet(Splitter.on(',').omitEmptyStrings().trimResults().split(unparsedForceRemoveVolumes));
+
         String containerId = JobParams.getFirstRequiredParam(parameters, Jobs.Parameters.CONTAINER_ID);
 
         Elasticsearch elasticSearch = vertxContext.verticle().elasticsearch();
@@ -80,7 +92,7 @@ public class VerifyRepairContainerObjects extends AbstractJob {
             producer.abort();
         }
 
-        SearchHitMaintainObjectEndableWrite consumer = new SearchHitMaintainObjectEndableWrite(vertxContext);
+        SearchHitMaintainObjectEndableWrite consumer = new SearchHitMaintainObjectEndableWrite(vertxContext, forceRemoveVolumes);
 
         LOGGER.info("Starting maintain on container " + containerId);
 

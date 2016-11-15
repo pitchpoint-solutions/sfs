@@ -37,9 +37,9 @@ public class TempDirectoryCleanerTest extends BaseTestVerticle {
     @Test
     public void testDelete(TestContext context) throws IOException {
 
-        Path tempDir = VERTX_CONTEXT.verticle().sfsFileSystem().tmpDirectory();
+        Path tempDir = vertxContext.verticle().sfsFileSystem().tmpDirectory();
 
-        TempDirectoryCleaner tempDirectoryCleaner = VERTX_CONTEXT.verticle().tempFileFactory();
+        TempDirectoryCleaner tempDirectoryCleaner = vertxContext.verticle().tempFileFactory();
 
         List<Path> tempFiles = new ArrayList<>();
 
@@ -48,7 +48,7 @@ public class TempDirectoryCleanerTest extends BaseTestVerticle {
         tempFiles.add(createTempFile(tempDir, "3", ""));
         tempFiles.add(createTempFile(tempDir, "4", ""));
 
-        tempDirectoryCleaner.start(VERTX_CONTEXT, 0);
+        tempDirectoryCleaner.start(vertxContext, 0);
 
 
         tempDirectoryCleaner.deleteExpired();
@@ -65,7 +65,7 @@ public class TempDirectoryCleanerTest extends BaseTestVerticle {
         tempFiles.add(createTempFile(tempDir, "4", ""));
 
         tempDirectoryCleaner.stop();
-        tempDirectoryCleaner.start(VERTX_CONTEXT, DAYS.toMillis(1));
+        tempDirectoryCleaner.start(vertxContext, DAYS.toMillis(1));
 
         tempDirectoryCleaner.deleteExpired();
 

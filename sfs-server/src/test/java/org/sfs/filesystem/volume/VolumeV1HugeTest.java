@@ -41,6 +41,7 @@ import org.sfs.io.DigestReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.io.ReplayReadStream;
 import org.sfs.rx.ToVoid;
+import org.sfs.thread.NamedCapacityFixedThreadPool;
 import org.sfs.util.MessageDigestFactory;
 import org.sfs.util.VertxAssert;
 import rx.Observable;
@@ -50,7 +51,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Calendar;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 
@@ -58,11 +58,11 @@ import java.util.concurrent.atomic.AtomicReference;
 public class VolumeV1HugeTest {
 
     private static Logger LOGGER = LoggerFactory.getLogger(VolumeV1HugeTest.class);
-    private ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-    private ExecutorService ioPool = Executors.newFixedThreadPool(200);
     private Path path;
     @Rule
     public final RunTestOnContext rule = new RunTestOnContext();
+    private ExecutorService ioPool;
+    private ExecutorService backgroundPool;
 
     @Before
     public void start() {
@@ -71,12 +71,20 @@ public class VolumeV1HugeTest {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        ioPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-io-pool");
+        backgroundPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-blocking-action-pool");
     }
 
     @After
     public void stop(TestContext context) {
         if (path != null) {
             rule.vertx().fileSystem().deleteRecursiveBlocking(path.toString(), true);
+        }
+        if (ioPool != null) {
+            ioPool.shutdown();
+        }
+        if (backgroundPool != null) {
+            backgroundPool.shutdown();
         }
     }
 

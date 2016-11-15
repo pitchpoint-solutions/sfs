@@ -20,6 +20,7 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
+import org.sfs.SfsVertx;
 import rx.Observable;
 import rx.Observer;
 import rx.Scheduler;
@@ -101,8 +102,7 @@ public class RxHelper {
         return combineSinglesDelayError(asList(o1.single(), o2.single(), o3.single(), o4.single(), o5.single(), o6.single(), o7.single(), o8.single(), o9.single()), fromFunc(combineFunction));
     }
 
-    public static <T> Observable<T> executeBlocking(Vertx vertx, ExecutorService executorService, Func0<T> func0) {
-        Context context = vertx.getOrCreateContext();
+    public static <T> Observable<T> executeBlocking(Context context, ExecutorService executorService, Func0<T> func0) {
         return Defer.aVoid()
                 .flatMap(aVoid -> {
                     ObservableFuture<T> observableFuture = RxHelper.observableFuture();
@@ -116,29 +116,6 @@ public class RxHelper {
                     });
                     return observableFuture;
                 });
-    }
-
-    public static <T> Observable<T> executeBlocking(Vertx vertx, Func0<T> func) {
-        return executeBlocking(vertx, func, true);
-    }
-
-    public static <T> Observable<T> executeBlocking(Vertx vertx, Func0<T> func, boolean ordered) {
-        return defer(() -> {
-            ObservableFuture<T> h = RxHelper.observableFuture();
-            vertx.executeBlocking(
-                    future -> {
-                        T result;
-                        try {
-                            result = func.call();
-                        } catch (Throwable e) {
-                            future.fail(e);
-                            return;
-                        }
-                        future.complete(result);
-                    }, ordered,
-                    h.toHandler());
-            return h;
-        });
     }
 
     private static final <T, R> Observable<R> combineSinglesDelayError(List<? extends Observable<? extends T>> sources, FuncN<? extends R> combineFunction) {

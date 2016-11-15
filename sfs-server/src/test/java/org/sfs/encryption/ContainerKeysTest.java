@@ -69,15 +69,15 @@ public class ContainerKeysTest extends BaseTestVerticle {
     protected Observable<Void> prepareContainer(TestContext context) {
 
         return just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
+                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, containerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PostContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin)
+                .flatMap(new PostContainer(httpClient, accountName, containerName, authNonAdmin)
                         .setHeader(X_ADD_CONTAINER_META_PREFIX + X_MAX_OBJECT_REVISIONS, valueOf(3)))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
@@ -86,30 +86,30 @@ public class ContainerKeysTest extends BaseTestVerticle {
 
     @Test
     public void testKeyNoRotate(TestContext context) {
-        ContainerKeys containerKeys = VERTX_CONTEXT.verticle().containerKeys();
+        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
 
         Async async = context.async();
         prepareContainer(context)
                 .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(VERTX_CONTEXT))
+                .flatMap(new LoadAccount(vertxContext))
                 .map(Optional::get)
                 .flatMap(persistentAccount ->
                         just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(VERTX_CONTEXT, persistentAccount))
+                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
                                 .map(Optional::get))
                 .flatMap(persistentContainer -> {
                     AtomicReference<byte[]> existingArray = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(VERTX_CONTEXT, persistentContainer)
+                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                             .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
                             .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(VERTX_CONTEXT))
+                            .flatMap(new GetNewestContainerKey(vertxContext))
                             .map(Optional::get)
                             .map(persistentContainerKey -> {
                                 existingArray.set(persistentContainerKey.getEncryptedKey().get());
                                 return persistentContainerKey;
                             })
-                            .flatMap(pck -> containerKeys.rotateIfRequired(VERTX_CONTEXT, pck))
+                            .flatMap(pck -> containerKeys.rotateIfRequired(vertxContext, pck))
                             .map(persistentContainerKey -> {
                                 assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
                                 assertArrayEquals(context, existingArray.get(), persistentContainerKey.getEncryptedKey().get());
@@ -122,25 +122,25 @@ public class ContainerKeysTest extends BaseTestVerticle {
 
     @Test
     public void testKeyRotate(TestContext context) {
-        ContainerKeys containerKeys = VERTX_CONTEXT.verticle().containerKeys();
+        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
 
         Async async = context.async();
         prepareContainer(context)
                 .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(VERTX_CONTEXT))
+                .flatMap(new LoadAccount(vertxContext))
                 .map(Optional::get)
                 .flatMap(persistentAccount ->
                         just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(VERTX_CONTEXT, persistentAccount))
+                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
                                 .map(Optional::get))
                 .flatMap(persistentContainer -> {
                     AtomicReference<byte[]> existingArray = new AtomicReference<>();
                     AtomicReference<String> existingId = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(VERTX_CONTEXT, persistentContainer)
+                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                             .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
                             .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(VERTX_CONTEXT))
+                            .flatMap(new GetNewestContainerKey(vertxContext))
                             .map(Optional::get)
                             .map(persistentContainerKey -> {
                                 assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
@@ -155,10 +155,10 @@ public class ContainerKeysTest extends BaseTestVerticle {
                                 persistentContainerKey.setCreateTs(now);
                                 return persistentContainerKey;
                             })
-                            .flatMap(new UpdateContainerKey(VERTX_CONTEXT))
+                            .flatMap(new UpdateContainerKey(vertxContext))
                             .map(Holder2::value1)
                             .map(Optional::get)
-                            .flatMap(pck -> containerKeys.rotateIfRequired(VERTX_CONTEXT, pck))
+                            .flatMap(pck -> containerKeys.rotateIfRequired(vertxContext, pck))
                             .map(persistentContainerKey -> {
                                 assertEquals(context, "/testaccount/testcontainer/0000000000000000001", persistentContainerKey.getId());
                                 assertFalse(context, Arrays.equals(existingArray.get(), persistentContainerKey.getEncryptedKey().get()));
@@ -172,25 +172,25 @@ public class ContainerKeysTest extends BaseTestVerticle {
 
     @Test
     public void testReEncrypt(TestContext context) {
-        ContainerKeys containerKeys = VERTX_CONTEXT.verticle().containerKeys();
+        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
 
         Async async = context.async();
         prepareContainer(context)
                 .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(VERTX_CONTEXT))
+                .flatMap(new LoadAccount(vertxContext))
                 .map(Optional::get)
                 .flatMap(persistentAccount ->
                         just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(VERTX_CONTEXT, persistentAccount))
+                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
                                 .map(Optional::get))
                 .flatMap(persistentContainer -> {
                     AtomicReference<byte[]> existingArray = new AtomicReference<>();
                     AtomicReference<String> existingId = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(VERTX_CONTEXT, persistentContainer)
+                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                             .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
                             .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(VERTX_CONTEXT))
+                            .flatMap(new GetNewestContainerKey(vertxContext))
                             .map(Optional::get)
                             .map(persistentContainerKey -> {
                                 assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
@@ -205,13 +205,13 @@ public class ContainerKeysTest extends BaseTestVerticle {
                                 persistentContainerKey.setReEncryptTs(now);
                                 return persistentContainerKey;
                             })
-                            .flatMap(new UpdateContainerKey(VERTX_CONTEXT))
+                            .flatMap(new UpdateContainerKey(vertxContext))
                             .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                            .flatMap(aVoid -> containerKeys.maintain(VERTX_CONTEXT))
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
+                            .flatMap(aVoid -> containerKeys.maintain(vertxContext))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
                             .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(VERTX_CONTEXT))
+                            .flatMap(new GetNewestContainerKey(vertxContext))
                             .map(Optional::get)
                             .map(persistentContainerKey -> {
                                 assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
@@ -225,25 +225,25 @@ public class ContainerKeysTest extends BaseTestVerticle {
 
     @Test
     public void testNoReEncrypt(TestContext context) {
-        ContainerKeys containerKeys = VERTX_CONTEXT.verticle().containerKeys();
+        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
 
         Async async = context.async();
         prepareContainer(context)
                 .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(VERTX_CONTEXT))
+                .flatMap(new LoadAccount(vertxContext))
                 .map(Optional::get)
                 .flatMap(persistentAccount ->
                         just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(VERTX_CONTEXT, persistentAccount))
+                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
                                 .map(Optional::get))
                 .flatMap(persistentContainer -> {
                     AtomicReference<byte[]> existingArray = new AtomicReference<>();
                     AtomicReference<String> existingId = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(VERTX_CONTEXT, persistentContainer)
+                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                             .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
                             .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(VERTX_CONTEXT))
+                            .flatMap(new GetNewestContainerKey(vertxContext))
                             .map(Optional::get)
                             .map(persistentContainerKey -> {
                                 assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
@@ -251,13 +251,13 @@ public class ContainerKeysTest extends BaseTestVerticle {
                                 existingId.set(persistentContainerKey.getId());
                                 return persistentContainerKey;
                             })
-                            .flatMap(new UpdateContainerKey(VERTX_CONTEXT))
+                            .flatMap(new UpdateContainerKey(vertxContext))
                             .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                            .flatMap(aVoid -> containerKeys.maintain(VERTX_CONTEXT))
-                            .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
+                            .flatMap(aVoid -> containerKeys.maintain(vertxContext))
+                            .flatMap(new RefreshIndex(httpClient, authAdmin))
                             .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(VERTX_CONTEXT))
+                            .flatMap(new GetNewestContainerKey(vertxContext))
                             .map(Optional::get)
                             .map(persistentContainerKey -> {
                                 assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
@@ -274,23 +274,23 @@ public class ContainerKeysTest extends BaseTestVerticle {
 
         byte[] data = "this is a test 111".getBytes(UTF_8);
 
-        ContainerKeys containerKeys = VERTX_CONTEXT.verticle().containerKeys();
+        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
 
         Async async = context.async();
         prepareContainer(context)
                 .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(VERTX_CONTEXT))
+                .flatMap(new LoadAccount(vertxContext))
                 .map(Optional::get)
                 .flatMap(persistentAccount ->
                         just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(VERTX_CONTEXT, persistentAccount))
+                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
                                 .map(Optional::get))
                 .flatMap(persistentContainer ->
-                        containerKeys.preferredAlgorithm(VERTX_CONTEXT, persistentContainer)
+                        containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                                 .flatMap(keyResponse -> {
                                     Algorithm algorithm = keyResponse.getData();
                                     byte[] encryptedData = algorithm.encrypt(data);
-                                    return containerKeys.algorithm(VERTX_CONTEXT, persistentContainer, keyResponse.getKeyId(), keyResponse.getSalt())
+                                    return containerKeys.algorithm(vertxContext, persistentContainer, keyResponse.getKeyId(), keyResponse.getSalt())
                                             .map(keyResponse1 -> {
                                                 Algorithm algorithm1 = keyResponse1.getData();
                                                 return algorithm1.decrypt(encryptedData);

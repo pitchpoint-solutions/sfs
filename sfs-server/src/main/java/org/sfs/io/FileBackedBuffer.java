@@ -16,6 +16,7 @@
 
 package org.sfs.io;
 
+import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
@@ -24,6 +25,7 @@ import io.vertx.core.streams.WriteStream;
 import org.sfs.SfsVertx;
 import org.sfs.encryption.Algorithm;
 import org.sfs.encryption.AlgorithmDef;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 
 import java.io.IOException;
@@ -37,7 +39,6 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static java.lang.Long.MAX_VALUE;
 import static java.nio.channels.AsynchronousFileChannel.open;
 import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.deleteIfExists;
@@ -46,7 +47,6 @@ import static java.nio.file.StandardOpenOption.WRITE;
 import static java.util.Arrays.fill;
 import static org.sfs.encryption.AlgorithmDef.getPreferred;
 import static org.sfs.rx.Defer.aVoid;
-import static org.sfs.rx.RxHelper.executeBlocking;
 
 public class FileBackedBuffer implements BufferEndableWriteStream {
 
@@ -66,10 +66,12 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
     private Handler<Void> drainHandler;
     private Buffer memory;
     private BufferEndableWriteStream fileWriteStreamConsumer;
+    private CountingEndableWriteStream countingEndableWriteStream;
     private Algorithm algorithm;
     private boolean openedReadStream = false;
     private boolean ended = false;
     private boolean encryptTempFile;
+    private Context context;
 
     public FileBackedBuffer(SfsVertx sfsVertx, int fileThreshold, boolean encryptTempFile, Path tempFileDirectory) {
         this.sfsVertx = sfsVertx;
@@ -77,6 +79,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
         this.fileThreshold = fileThreshold;
         this.memory = buffer();
         this.tempFileDirectory = tempFileDirectory;
+        this.context = sfsVertx.getOrCreateContext();
     }
 
     public FileBackedBuffer(SfsVertx sfsVertx, int fileThreshold, Path tempFileDirectory) {
@@ -95,7 +98,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
         checkReadStreamNotOpen();
         openedReadStream = true;
         if (fileOpen) {
-            AsyncFileReader asyncFileReader = new AsyncFileReaderImpl(sfsVertx, 0, 8192, MAX_VALUE, channel, LOGGER);
+            AsyncFileReader asyncFileReader = new AsyncFileReaderImpl(context, 0, 8192, countingEndableWriteStream.count(), channel, LOGGER);
             if (encryptTempFile) {
                 return algorithm.decrypt(asyncFileReader);
             } else {
@@ -199,7 +202,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
 
     public Observable<Void> close() {
         if (channel != null || tempFile != null) {
-            return executeBlocking(sfsVertx, () -> {
+            return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
                 if (channel != null) {
                     try {
                         channel.close();
@@ -266,7 +269,9 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
                     throw new RuntimeException(e);
                 }
                 WriteQueueSupport<AsyncFileWriter> writeQueueSupport = new WriteQueueSupport<>(MAX_WRITES);
-                fileWriteStreamConsumer = new AsyncFileWriterImpl(0L, writeQueueSupport, sfsVertx, channel, LOGGER);
+                fileWriteStreamConsumer = new AsyncFileWriterImpl(0L, writeQueueSupport, context, channel, LOGGER);
+                countingEndableWriteStream = new CountingEndableWriteStream(fileWriteStreamConsumer);
+                fileWriteStreamConsumer = countingEndableWriteStream;
                 if (encryptTempFile) {
                     byte[] secret = ALGORITHM_DEF.generateKeyBlocking();
                     try {
@@ -288,7 +293,6 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
             return null;
         }
     }
-
 
     protected void checkReadStreamNotOpen() {
         checkArgument(!openedReadStream, "ReadStream is open");

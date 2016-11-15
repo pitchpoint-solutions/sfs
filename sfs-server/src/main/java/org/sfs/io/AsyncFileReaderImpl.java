@@ -23,7 +23,6 @@ import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import org.sfs.SfsVertx;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
@@ -45,14 +44,14 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
     private final long startPosition;
     private long bytesRemaining;
 
-    public AsyncFileReaderImpl(final SfsVertx vertx, long startPosition, int bufferSize, long length, AsynchronousFileChannel dataFile, Logger log) {
+    public AsyncFileReaderImpl(Context context, long startPosition, int bufferSize, long length, AsynchronousFileChannel dataFile, Logger log) {
         this.log = log;
         this.bufferSize = bufferSize;
         this.readPos = startPosition;
         this.bytesRemaining = length;
         this.startPosition = startPosition;
         this.ch = dataFile;
-        this.context = vertx.getOrCreateContext();
+        this.context = context;
     }
 
 
@@ -112,7 +111,7 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
                             int bufferLength = buffer.length();
                             bytesRemaining -= bufferLength;
 
-                            if (bufferLength == 0) {
+                            if (bufferLength <= 0) {
                                 // Empty buffer represents end of file
                                 handleEnd();
                             } else {
@@ -170,7 +169,9 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
 
     private void handleEnd() {
         if (endHandler != null) {
-            endHandler.handle(null);
+            Handler<Void> h = endHandler;
+            endHandler = null;
+            h.handle(null);
         }
     }
 
@@ -180,7 +181,7 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
 
             long pos = position;
 
-            private void done() {
+            private void done(boolean eof) {
                 context.runOnContext(event -> {
                     buff.flip();
                     writeBuff.setBytes(offset, buff);
@@ -191,7 +192,7 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
             public void completed(Integer bytesRead, Object attachment) {
                 if (bytesRead == -1) {
                     //End of file
-                    done();
+                    done(true);
                 } else if (buff.hasRemaining()) {
                     // partial read
                     pos += bytesRead;
@@ -199,7 +200,7 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
                     doRead(writeBuff, offset, buff, pos, handler);
                 } else {
                     // It's been fully written
-                    done();
+                    done(false);
                 }
             }
 

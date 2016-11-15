@@ -64,7 +64,12 @@ public class VerifyRepairContainerExecute implements Handler<SfsRequest> {
 
                     long timeout = headers.contains(Jobs.Parameters.TIMEOUT) ? Long.parseLong(headers.get(Jobs.Parameters.TIMEOUT)) : 100;
 
+                    String unparsedForceRemoveVolumes = headers.contains(Jobs.Parameters.FORCE_REMOVE_VOLUMES) ? headers.get(Jobs.Parameters.FORCE_REMOVE_VOLUMES) : null;
+
                     MultiMap params = MultiMap.caseInsensitiveMultiMap();
+                    if (unparsedForceRemoveVolumes != null) {
+                        params.add(Jobs.Parameters.FORCE_REMOVE_VOLUMES, unparsedForceRemoveVolumes);
+                    }
                     params.set(Jobs.Parameters.CONTAINER_ID, objectPath.containerPath().get());
 
                     TransientServiceDef transientServiceDef = clusterInfo.getCurrentMasterNode();

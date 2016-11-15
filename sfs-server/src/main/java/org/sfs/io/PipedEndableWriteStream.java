@@ -59,21 +59,13 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
     public PipedEndableWriteStream write(Buffer data) {
         checkState(!ended, "Already Ended");
         write0(data);
-        handleDrained();
         return this;
     }
 
     private void write0(Buffer data) {
-        if (chunks.isEmpty()) {
-            if (!readStream.write(data)) {
-                writesOutstanding += data.length();
-                chunks.offer(data);
-            }
-        } else {
-            writesOutstanding += data.length();
-            chunks.offer(data);
-            readStream.drainWriteStream();
-        }
+        writesOutstanding += data.length();
+        chunks.offer(data);
+        readStream.drainWriteStream();
     }
 
     @Override
@@ -118,8 +110,6 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
         checkState(!ended, "Already Ended");
         ended = true;
         write0(buffer);
-        readStream.drainWriteStream();
-        handleEnd();
     }
 
     @Override
@@ -127,7 +117,6 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
         checkState(!ended, "Already Ended");
         ended = true;
         readStream.drainWriteStream();
-        handleEnd();
     }
 
     protected Buffer poll() {
@@ -141,9 +130,9 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
     }
 
     protected void handleEnd() {
-        if (ended && writeQueueEmpty()) {
+        if (ended) {
             Handler<Void> handler = endHandler;
-            if (handler != null && writeQueueEmpty()) {
+            if (handler != null) {
                 endHandler = null;
                 handler.handle(null);
             }
@@ -151,9 +140,9 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
     }
 
     protected void handleDrained() {
-        if (!ended && writeQueueDrained()) {
+        if (writeQueueDrained()) {
             Handler<Void> handler = drainHandler;
-            if (handler != null && writeQueueDrained()) {
+            if (handler != null) {
                 drainHandler = null;
                 handler.handle(null);
             }

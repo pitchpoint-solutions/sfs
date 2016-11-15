@@ -65,11 +65,11 @@ public class AccountMetadataTest extends BaseTestVerticle {
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new PostAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new HeadAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {
@@ -102,11 +102,11 @@ public class AccountMetadataTest extends BaseTestVerticle {
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth, map))
+                .flatMap(new PostAccount(httpClient, accountName, auth, map))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new HeadAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {
@@ -147,11 +147,11 @@ public class AccountMetadataTest extends BaseTestVerticle {
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth, map))
+                .flatMap(new PostAccount(httpClient, accountName, auth, map))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new HeadAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {
@@ -179,13 +179,13 @@ public class AccountMetadataTest extends BaseTestVerticle {
                         final ListMultimap<String, String> map = create();
                         map.put(name, "TEST_VALUE0");
                         return just((Void) null)
-                                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth, map));
+                                .flatMap(new PostAccount(httpClient, accountName, auth, map));
                     }
                 })
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new HeadAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {

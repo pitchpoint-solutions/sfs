@@ -22,15 +22,17 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
-import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.delete.DeleteRequestBuilder;
 import org.elasticsearch.action.index.IndexRequestBuilder;
+import org.elasticsearch.common.util.concurrent.EsRejectedExecutionException;
+import org.elasticsearch.index.engine.VersionConflictEngineException;
 import org.elasticsearch.search.SearchHit;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.io.EndableWriteStream;
 import org.sfs.rx.Defer;
 import org.sfs.rx.Sleep;
+import org.sfs.util.ExceptionHelper;
 import rx.Observable;
 import rx.Subscriber;
 
@@ -193,74 +195,105 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
 
     protected Observable<Void> write0(SearchHit data) {
         count++;
-        Observable<Void> o;
-        if (count % 1000 == 0) {
-            o = just((Void) null)
-                    .flatMap(new Sleep(vertxContext, 1000));
-        } else {
-            o = just(null);
-        }
-        return o.flatMap(aVoid -> {
-            String index = data.getIndex();
-            String type = data.getType();
-            String id = data.getId();
-            long version = data.getVersion();
-            JsonObject jsonObject = new JsonObject(data.getSourceAsString());
-            return transform(jsonObject, id, version)
-                    .map(oUpdatedJsonObject -> {
-                        if (oUpdatedJsonObject.isPresent()) {
-                            JsonObject updatedJsonObject = oUpdatedJsonObject.get();
+        return Defer.aVoid()
+                .flatMap(aVoid -> {
+                    String index = data.getIndex();
+                    String type = data.getType();
+                    String id = data.getId();
+                    long version = data.getVersion();
+                    JsonObject jsonObject = new JsonObject(data.getSourceAsString());
+                    return transform(jsonObject, id, version)
+                            .map(oUpdatedJsonObject -> {
+                                if (oUpdatedJsonObject.isPresent()) {
+                                    JsonObject updatedJsonObject = oUpdatedJsonObject.get();
 
-                            if (!equal(updatedJsonObject, jsonObject)) {
+                                    if (!equal(updatedJsonObject, jsonObject)) {
 
-                                if (LOGGER.isDebugEnabled()) {
-                                    LOGGER.debug(format("Index Request {%s,%s,%s,%d} = %s, original was %s", index, type, id, data.getVersion(), updatedJsonObject.encodePrettily(), jsonObject.encodePrettily()));
+                                        if (LOGGER.isDebugEnabled()) {
+                                            LOGGER.debug(format("Index Request {%s,%s,%s,%d} = %s, original was %s", index, type, id, data.getVersion(), updatedJsonObject.encodePrettily(), jsonObject.encodePrettily()));
+                                        }
+
+                                        IndexRequestBuilder request = elasticsearch.get()
+                                                .prepareIndex(index, type, id)
+                                                .setSource(updatedJsonObject.encode())
+                                                .setTimeout(timeValueMillis(elasticsearch.getDefaultIndexTimeout() - 10));
+                                        if (version >= 0) {
+                                            request = request.setVersion(version);
+                                        }
+
+                                        if (bulkRequest == null) {
+                                            bulkRequest = elasticsearch.get().prepareBulk()
+                                                    .setTimeout(timeValueMillis((elasticsearch.getDefaultIndexTimeout() * writeQueueMaxSize) - 10));
+                                        }
+                                        bulkRequest.add(request);
+
+                                    }
+                                } else {
+                                    DeleteRequestBuilder request = elasticsearch.get()
+                                            .prepareDelete(index, type, id)
+                                            .setTimeout(timeValueMillis(elasticsearch.getDefaultDeleteTimeout() - 10));
+                                    if (version >= 0) {
+                                        request = request.setVersion(version);
+                                    }
+
+                                    if (bulkRequest == null) {
+                                        bulkRequest = elasticsearch.get().prepareBulk()
+                                                .setTimeout(timeValueMillis((elasticsearch.getDefaultIndexTimeout() * writeQueueMaxSize) - 10));
+                                    }
+                                    bulkRequest.add(request);
                                 }
-
-                                IndexRequestBuilder request = elasticsearch.get()
-                                        .prepareIndex(index, type, id)
-                                        .setSource(updatedJsonObject.encode())
-                                        .setTimeout(timeValueMillis(elasticsearch.getDefaultIndexTimeout() - 10));
-                                if (version >= 0) {
-                                    request = request.setVersion(version);
-                                }
-
-                                if (bulkRequest == null) {
-                                    bulkRequest = elasticsearch.get().prepareBulk()
-                                            .setTimeout(timeValueMillis((elasticsearch.getDefaultIndexTimeout() * writeQueueMaxSize) - 10));
-                                }
-                                bulkRequest.add(request);
-
-                            }
-                        } else {
-                            DeleteRequestBuilder request = elasticsearch.get()
-                                    .prepareDelete(index, type, id)
-                                    .setTimeout(timeValueMillis(elasticsearch.getDefaultDeleteTimeout() - 10));
-                            if (version >= 0) {
-                                request = request.setVersion(version);
-                            }
-
-                            if (bulkRequest == null) {
-                                bulkRequest = elasticsearch.get().prepareBulk()
-                                        .setTimeout(timeValueMillis((elasticsearch.getDefaultIndexTimeout() * writeQueueMaxSize) - 10));
-                            }
-                            bulkRequest.add(request);
-                        }
-                        return (Void) null;
-                    })
-                    .onErrorResumeNext(throwable -> {
-                        LOGGER.warn("Handling Error", throwable);
-                        return just(null);
-                    })
-                    .singleOrDefault(null);
-        });
+                                return (Void) null;
+                            })
+                            .onErrorResumeNext(throwable -> {
+                                LOGGER.warn("Handling Error", throwable);
+                                return just(null);
+                            })
+                            .singleOrDefault(null);
+                });
     }
 
     protected void flush() {
         if (bulkRequest != null && (ended || bulkRequest.numberOfActions() > writeQueueMaxSize)) {
             elasticsearch.execute(vertxContext, bulkRequest, (elasticsearch.getDefaultIndexTimeout() * writeQueueMaxSize))
                     .map(Optional::get)
-                    .subscribe(new Subscriber<BulkResponse>() {
+                    .flatMap(bulkItemResponses -> {
+                        boolean hasFailed = false;
+                        boolean hasRejectedExecution = false;
+                        for (BulkItemResponse response : bulkItemResponses.getItems()) {
+                            if (LOGGER.isDebugEnabled()) {
+                                LOGGER.debug(format("Index Response {%s,%s,%s,%d}", response.getIndex(), response.getType(), response.getId(), response.getVersion()));
+                            }
+                            if (response.isFailed()) {
+                                LOGGER.error(format("Update of %s with id %s failed. Reason was %s", response.getType(), response.getId(), response.getFailureMessage()));
+                                Throwable cause = response.getFailure().getCause();
+                                if (ExceptionHelper.containsException(VersionConflictEngineException.class, cause)) {
+                                    // skip over version conflicts
+                                } else if (ExceptionHelper.containsException(EsRejectedExecutionException.class, cause)) {
+                                    hasRejectedExecution |= true;
+                                } else {
+                                    hasFailed |= true;
+                                }
+                            }
+                        }
+                        if (hasRejectedExecution) {
+                            return Defer.aVoid()
+                                    .flatMap(new Sleep(vertxContext, 5000));
+                        } else if (hasFailed) {
+                            return Observable.error(new BulkUpdateFailedException());
+                        } else {
+                            return Defer.aVoid();
+                        }
+                    })
+                    .onErrorResumeNext(throwable -> {
+                        if (ExceptionHelper.containsException(EsRejectedExecutionException.class, throwable)) {
+                            LOGGER.warn("Handling Exception", throwable);
+                            return Defer.aVoid()
+                                    .flatMap(new Sleep(vertxContext, 5000));
+                        } else {
+                            return Observable.error(throwable);
+                        }
+                    })
+                    .subscribe(new Subscriber<Void>() {
 
                         @Override
                         public void onCompleted() {
@@ -281,20 +314,8 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
                         }
 
                         @Override
-                        public void onNext(BulkResponse bulkItemResponses) {
-                            boolean hasFailed = false;
-                            for (BulkItemResponse response : bulkItemResponses.getItems()) {
-                                if (LOGGER.isDebugEnabled()) {
-                                    LOGGER.debug(format("Index Response {%s,%s,%s,%d}", response.getIndex(), response.getType(), response.getId(), response.getVersion()));
-                                }
-                                if (response.isFailed()) {
-                                    hasFailed |= true;
-                                    LOGGER.error(format("Update of %s with id %s failed. Reason was %s", response.getType(), response.getId(), response.getFailureMessage()));
-                                }
-                            }
-                            if (hasFailed) {
-                                throw new BulkUpdateFailedException();
-                            }
+                        public void onNext(Void aVoid) {
+
                         }
                     });
         } else {

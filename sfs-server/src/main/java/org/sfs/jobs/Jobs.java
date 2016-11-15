@@ -57,6 +57,7 @@ public class Jobs {
         public static final String CONTAINER_ID = "container_id";
         public static final String OBJECT_ID = "object_id";
         public static final String TIMEOUT = "timeout";
+        public static final String FORCE_REMOVE_VOLUMES = "force-remove-volumes";
     }
 
     private static final Logger LOGGER = getLogger(Jobs.class);

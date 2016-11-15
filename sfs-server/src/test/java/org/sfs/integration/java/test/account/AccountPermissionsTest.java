@@ -81,17 +81,17 @@ public class AccountPermissionsTest extends BaseTestVerticle {
         Producer auth = httpBasic(username, password);
 
         return just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new PostAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetAccount(HTTP_CLIENT, accountName, auth)
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetAccount(httpClient, accountName, auth)
                         .setMediaTypes(JSON_UTF_8))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, "".equals(username) ? HTTP_FORBIDDEN : HTTP_NOT_FOUND))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new HeadAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
                 .map(new ToVoid<HttpClientResponse>());

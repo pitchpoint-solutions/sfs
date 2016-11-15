@@ -19,6 +19,7 @@ package org.sfs.elasticsearch;
 import org.elasticsearch.action.admin.indices.refresh.RefreshRequestBuilder;
 import org.sfs.Server;
 import org.sfs.VertxContext;
+import org.sfs.rx.ToVoid;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -37,16 +38,17 @@ public class IndexRefresh implements Func1<Void, Observable<Void>> {
         Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
         return aVoid()
                 .flatMap(new ListSfsIndexes(vertxContext))
-                .toList()
-                .flatMap(names -> {
+                .flatMap(name -> {
                     RefreshRequestBuilder request =
                             elasticsearch
                                     .get()
                                     .admin()
                                     .indices()
-                                    .prepareRefresh(names.toArray(new String[names.size()]));
+                                    .prepareRefresh(name);
                     return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultAdminTimeout())
                             .map(refreshResponseOptional -> null);
-                });
+                })
+                .count()
+                .map(new ToVoid<>());
     }
 }

@@ -48,15 +48,15 @@ public class ContainerPermissionsHeadContainerTest extends BaseTestVerticle {
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
+                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin0))
+                .flatMap(new PutContainer(httpClient, accountName, containerName, authNonAdmin0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin0))
+                .flatMap(new HeadContainer(httpClient, accountName, containerName, authNonAdmin0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())

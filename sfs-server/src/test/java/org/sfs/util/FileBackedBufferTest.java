@@ -22,6 +22,8 @@ import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import io.vertx.ext.unit.junit.RunTestOnContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -31,6 +33,7 @@ import org.sfs.TestSubscriber;
 import org.sfs.io.BufferReadStream;
 import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.FileBackedBuffer;
+import org.sfs.thread.NamedCapacityFixedThreadPool;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -40,7 +43,6 @@ import static io.vertx.core.buffer.Buffer.buffer;
 import static java.lang.String.valueOf;
 import static java.lang.System.currentTimeMillis;
 import static java.nio.file.Files.createTempDirectory;
-import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.sfs.io.AsyncIO.pump;
 import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.util.PrngRandom.getCurrentInstance;
@@ -49,10 +51,28 @@ import static org.sfs.util.VertxAssert.assertEquals;
 
 @RunWith(VertxUnitRunner.class)
 public class FileBackedBufferTest {
-    private ExecutorService backgroundPool = newFixedThreadPool(200);
-    private ExecutorService ioPool = newFixedThreadPool(200);
+
     @Rule
     public final RunTestOnContext rule = new RunTestOnContext();
+
+    private ExecutorService backgroundPool;
+    private ExecutorService ioPool;
+
+    @Before
+    public void start() {
+        ioPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-io-pool");
+        backgroundPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-blocking-action-pool");
+    }
+
+    @After
+    public void stop(TestContext context) {
+        if (ioPool != null) {
+            ioPool.shutdown();
+        }
+        if (backgroundPool != null) {
+            backgroundPool.shutdown();
+        }
+    }
 
     @Test
     public void testSmallNoEncrypt(TestContext context) throws IOException {

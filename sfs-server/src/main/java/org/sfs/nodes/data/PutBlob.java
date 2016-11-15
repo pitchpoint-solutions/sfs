@@ -149,11 +149,6 @@ public class PutBlob implements Handler<SfsRequest> {
                             });
 
                 })
-                .flatMap(holder -> httpServerRequest.stopKeepAlive()
-                        .map(aVoid -> holder))
-                .onErrorResumeNext(throwable ->
-                        httpServerRequest.stopKeepAlive()
-                                .flatMap(aVoid -> Observable.<Holder2<SfsRequest, Optional<DigestBlob>>>error(throwable)))
                 .single()
                 .onErrorResumeNext(new HandleServerToBusy<>())
                 .subscribe(new Terminus<Holder2<SfsRequest, Optional<DigestBlob>>>(httpServerRequest) {

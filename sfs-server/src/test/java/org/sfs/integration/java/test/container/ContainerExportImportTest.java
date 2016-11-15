@@ -95,15 +95,15 @@ public class ContainerExportImportTest extends BaseTestVerticle {
     protected Observable<Void> prepareContainer(TestContext context) {
 
         return just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
+                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, containerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
-                .flatMap(new PostContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin)
+                .flatMap(new PostContainer(httpClient, accountName, containerName, authNonAdmin)
                         .setHeader(X_ADD_CONTAINER_META_PREFIX + X_MAX_OBJECT_REVISIONS, valueOf(3)))
                 .map(new ToVoid<>());
     }
@@ -145,16 +145,16 @@ public class ContainerExportImportTest extends BaseTestVerticle {
         prepareContainer(context)
 
                 // put three objects then list and assert
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName + "/4", authNonAdmin, new byte[]{}))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/4", authNonAdmin, new byte[]{}))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName + "/3", authNonAdmin, data2)
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/3", authNonAdmin, data2)
                         .setHeader(CONTENT_TYPE, PLAIN_TEXT_UTF_8.toString()))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName + "/2", authNonAdmin, data1))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/2", authNonAdmin, data1))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName + "/1", authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/1", authNonAdmin, data0))
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
                 .flatMap(aVoid -> containerExport(exportDirectory, compress, encrypt, secret))
                 .doOnNext(httpClientResponseAndBuffer -> {
                     assertEquals(context, HTTP_OK, httpClientResponseAndBuffer.getHttpClientResponse().statusCode());
@@ -162,7 +162,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, importContainerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
@@ -173,8 +173,8 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetContainer(HTTP_CLIENT, accountName, importContainerName, authAdmin)
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetContainer(httpClient, accountName, importContainerName, authAdmin)
                         .setMediaTypes(JSON_UTF_8))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -255,11 +255,11 @@ public class ContainerExportImportTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data1))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data1))
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
                 .flatMap(aVoid -> containerExport(exportDirectory, compress, encrypt, secret))
                 .doOnNext(httpClientResponseAndBuffer -> {
                     assertEquals(context, HTTP_OK, httpClientResponseAndBuffer.getHttpClientResponse().statusCode());
@@ -267,7 +267,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, importContainerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
@@ -278,8 +278,8 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetContainer(HTTP_CLIENT, accountName, importContainerName, authAdmin)
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetContainer(httpClient, accountName, importContainerName, authAdmin)
                         .setMediaTypes(JSON_UTF_8))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -307,7 +307,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     }
                     return (Void) null;
                 })
-                .flatMap(new GetObject(HTTP_CLIENT, accountName, importContainerName, objectName, authAdmin)
+                .flatMap(new GetObject(httpClient, accountName, importContainerName, objectName, authAdmin)
                         .setVersion(0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -316,7 +316,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                 .map(new HttpBodyLogger())
                 .map(new AssertObjectData(context, data0))
                 .map(new ToVoid<>())
-                .flatMap(new GetObject(HTTP_CLIENT, accountName, importContainerName, objectName, authAdmin)
+                .flatMap(new GetObject(httpClient, accountName, importContainerName, objectName, authAdmin)
                         .setVersion(1))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -358,11 +358,11 @@ public class ContainerExportImportTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new ToVoid<>())
-                .flatMap(new DeleteObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin))
+                .flatMap(new DeleteObject(httpClient, accountName, containerName, objectName, authNonAdmin))
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
                 .flatMap(aVoid -> containerExport(exportDirectory, compress, encrypt, secret))
                 .doOnNext(httpClientResponseAndBuffer -> {
                     assertEquals(context, HTTP_OK, httpClientResponseAndBuffer.getHttpClientResponse().statusCode());
@@ -370,11 +370,11 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, importContainerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
-                .flatMap(new PostContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin)
+                .flatMap(new PostContainer(httpClient, accountName, importContainerName, authNonAdmin)
                         .setHeader(X_ADD_CONTAINER_META_PREFIX + X_MAX_OBJECT_REVISIONS, valueOf(3)))
                 .map(new ToVoid<>())
                 .flatMap(aVoid -> containerImport(exportDirectory, importContainerName, encrypt, secret))
@@ -384,8 +384,8 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetContainer(HTTP_CLIENT, accountName, importContainerName, authAdmin)
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetContainer(httpClient, accountName, importContainerName, authAdmin)
                         .setMediaTypes(JSON_UTF_8))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -396,7 +396,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, 0, jsonArray.size());
                     return (Void) null;
                 })
-                .flatMap(new GetObject(HTTP_CLIENT, accountName, importContainerName, objectName, authAdmin)
+                .flatMap(new GetObject(httpClient, accountName, importContainerName, objectName, authAdmin)
                         .setVersion(0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -405,7 +405,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                 .map(new HttpBodyLogger())
                 .map(new AssertObjectData(context, data0))
                 .map(new ToVoid<>())
-                .flatMap(new GetObject(HTTP_CLIENT, accountName, importContainerName, objectName, authAdmin)
+                .flatMap(new GetObject(httpClient, accountName, importContainerName, objectName, authAdmin)
                         .setVersion(1))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NOT_FOUND))
@@ -444,9 +444,9 @@ public class ContainerExportImportTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data1))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data1))
                 .map(new ToVoid<>())
                 .map(aVoid -> fromPaths(accountName, containerName, objectName))
                 .flatMap(new LoadAccountAndContainerAndObject(vertxContext()))
@@ -457,7 +457,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                 .flatMap(new UpdateObject(vertxContext()))
                 .map(new ValidateOptimisticObjectLock())
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
                 .flatMap(aVoid -> containerExport(exportDirectory, compress, encrypt, secret))
                 .doOnNext(httpClientResponseAndBuffer -> {
                     assertEquals(context, HTTP_OK, httpClientResponseAndBuffer.getHttpClientResponse().statusCode());
@@ -465,11 +465,11 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, importContainerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
-                .flatMap(new PostContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin)
+                .flatMap(new PostContainer(httpClient, accountName, importContainerName, authNonAdmin)
                         .setHeader(X_ADD_CONTAINER_META_PREFIX + X_MAX_OBJECT_REVISIONS, valueOf(3)))
                 .map(new ToVoid<>())
                 .flatMap(aVoid -> containerImport(exportDirectory, importContainerName, encrypt, secret))
@@ -479,8 +479,8 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetContainer(HTTP_CLIENT, accountName, importContainerName, authAdmin)
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetContainer(httpClient, accountName, importContainerName, authAdmin)
                         .setMediaTypes(JSON_UTF_8))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -491,7 +491,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, 0, jsonArray.size());
                     return (Void) null;
                 })
-                .flatMap(new GetObject(HTTP_CLIENT, accountName, importContainerName, objectName, authAdmin)
+                .flatMap(new GetObject(httpClient, accountName, importContainerName, objectName, authAdmin)
                         .setVersion(0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
@@ -500,7 +500,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                 .map(new HttpBodyLogger())
                 .map(new AssertObjectData(context, data0))
                 .map(new ToVoid<>())
-                .flatMap(new GetObject(HTTP_CLIENT, accountName, importContainerName, objectName, authAdmin)
+                .flatMap(new GetObject(httpClient, accountName, importContainerName, objectName, authAdmin)
                         .setVersion(1))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NOT_FOUND))
@@ -561,16 +561,16 @@ public class ContainerExportImportTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName + "/segments/0", authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/segments/0", authNonAdmin, data0))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName + "/segments/1", authNonAdmin, data1))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/segments/1", authNonAdmin, data1))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName + "/segments/2", authNonAdmin, data2))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/segments/2", authNonAdmin, data2))
                 .map(new ToVoid<>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, new byte[]{})
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, new byte[]{})
                         .setHeader(X_OBJECT_MANIFEST, containerName + "/" + objectName + "/segments/"))
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
                 .flatMap(aVoid -> containerExport(exportDirectory, compress, encrypt, secret))
                 .doOnNext(httpClientResponseAndBuffer -> {
                     assertEquals(context, HTTP_OK, httpClientResponseAndBuffer.getHttpClientResponse().statusCode());
@@ -578,26 +578,26 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new DeleteObject(HTTP_CLIENT, accountName, containerName, objectName + "/segments/0", authNonAdmin)
+                .flatMap(new DeleteObject(httpClient, accountName, containerName, objectName + "/segments/0", authNonAdmin)
                         .setAllVersions(true))
                 .map(new ToVoid<>())
-                .flatMap(new DeleteObject(HTTP_CLIENT, accountName, containerName, objectName + "/segments/1", authNonAdmin)
+                .flatMap(new DeleteObject(httpClient, accountName, containerName, objectName + "/segments/1", authNonAdmin)
                         .setAllVersions(true))
                 .map(new ToVoid<>())
-                .flatMap(new DeleteObject(HTTP_CLIENT, accountName, containerName, objectName + "/segments/2", authNonAdmin)
+                .flatMap(new DeleteObject(httpClient, accountName, containerName, objectName + "/segments/2", authNonAdmin)
                         .setAllVersions(true))
                 .map(new ToVoid<>())
-                .flatMap(new DeleteObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin)
+                .flatMap(new DeleteObject(httpClient, accountName, containerName, objectName, authNonAdmin)
                         .setAllVersions(true))
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new DeleteContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new DeleteContainer(httpClient, accountName, containerName, authNonAdmin))
                 .map(new ToVoid<>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, importContainerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<>())
-                .flatMap(new PostContainer(HTTP_CLIENT, accountName, importContainerName, authNonAdmin)
+                .flatMap(new PostContainer(httpClient, accountName, importContainerName, authNonAdmin)
                         .setHeader(X_ADD_CONTAINER_META_PREFIX + X_MAX_OBJECT_REVISIONS, valueOf(3)))
                 .map(new ToVoid<>())
                 .flatMap(aVoid -> containerImport(exportDirectory, importContainerName, encrypt, secret))
@@ -607,8 +607,8 @@ public class ContainerExportImportTest extends BaseTestVerticle {
                     assertEquals(context, (Integer) HTTP_OK, jsonObject.getInteger("code"));
                 })
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetObject(HTTP_CLIENT, accountName, importContainerName, objectName, authNonAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetObject(httpClient, accountName, importContainerName, objectName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
                 .map(new AssertObjectHeaders(context, 0, false, concated.length, contactedMd5, contactedSha512, 0))
@@ -620,7 +620,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
     }
 
     protected Observable<HttpClientResponseAndBuffer> containerImport(Path importDirectory, String importContainerName, boolean encrypt, byte[] secret) {
-        ContainerImport func = new ContainerImport(HTTP_CLIENT, accountName, importContainerName, importDirectory, authAdmin);
+        ContainerImport func = new ContainerImport(httpClient, accountName, importContainerName, importDirectory, authAdmin);
         if (encrypt) {
             func.setHeader(X_SFS_SECRET, base64().encode(secret));
         }
@@ -628,7 +628,7 @@ public class ContainerExportImportTest extends BaseTestVerticle {
     }
 
     protected Observable<HttpClientResponseAndBuffer> containerExport(Path exportDirectory, boolean compress, boolean encrypt, byte[] secret) {
-        ContainerExport func = new ContainerExport(HTTP_CLIENT, accountName, containerName, exportDirectory, authAdmin);
+        ContainerExport func = new ContainerExport(httpClient, accountName, containerName, exportDirectory, authAdmin);
         if (compress) {
             func.setHeader(X_SFS_COMPRESS, "true");
         }

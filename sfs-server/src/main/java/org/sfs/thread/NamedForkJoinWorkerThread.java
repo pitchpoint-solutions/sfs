@@ -14,16 +14,14 @@
  * limitations under the License.
  */
 
-package org.sfs;
+package org.sfs.thread;
 
-import io.vertx.core.Vertx;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinWorkerThread;
 
-import java.util.concurrent.ExecutorService;
+public class NamedForkJoinWorkerThread extends ForkJoinWorkerThread {
 
-
-public interface SfsVertx extends Vertx {
-
-    ExecutorService getIoPool();
-
-    ExecutorService getBackgroundPool();
+    public NamedForkJoinWorkerThread(ForkJoinPool pool) {
+        super(pool);
+    }
 }

@@ -19,8 +19,10 @@ package org.sfs.filesystem.volume;
 import com.google.common.base.Optional;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableSet;
+import io.vertx.core.Context;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
@@ -127,10 +129,12 @@ public class VolumeManager {
     }
 
     protected Observable<Volume> newVolume0(VertxContext<Server> vertxContext, final int offset) {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
         return defer(() -> {
             final Path path = Paths.get(basePath.toString(), valueOf(volumeMap.size() + offset));
             AtomicBoolean exists = new AtomicBoolean(false);
-            return vertxContext.executeBlocking(
+            return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(),
                     () -> {
                         try {
                             createDirectory(path);

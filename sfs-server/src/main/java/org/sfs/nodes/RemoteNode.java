@@ -599,6 +599,7 @@ public class RemoteNode extends AbstractNode {
                                         JsonObject blob = jsonObject.getJsonObject("blob");
                                         return new DigestBlob(blob);
                                     });
+
                     NodeWriteStreamBlob writeStreamBlob = new NodeWriteStreamBlob(_this) {
                         @Override
                         public Observable<DigestBlob> consume(ReadStream<Buffer> src) {

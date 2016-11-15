@@ -17,6 +17,7 @@
 package org.sfs.filesystem;
 
 import com.google.common.base.Optional;
+import io.vertx.core.Context;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.impl.ConcurrentHashSet;
@@ -38,7 +39,6 @@ import org.sfs.io.WriteQueueSupport;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import rx.Observable;
-import rx.functions.Func0;
 
 import java.io.IOException;
 import java.nio.channels.AsynchronousFileChannel;
@@ -114,9 +114,10 @@ public class BlobFile {
     public Observable<Void> open(SfsVertx vertx, StandardOpenOption openOption, StandardOpenOption... openOptions) {
         this.vertx = vertx;
         this.executorService = vertx.getIoPool();
+        Context context = vertx.getOrCreateContext();
         return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STOPPED, STARTING)))
-                .flatMap(aVoid -> executeBlocking(vertx, () -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
                     try {
                         createDirectories(file.getParent());
 
@@ -187,13 +188,14 @@ public class BlobFile {
     }
 
     public Observable<Void> close(SfsVertx vertx) {
+        Context context = vertx.getOrCreateContext();
         return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STARTED, STOPPING) || status.compareAndSet(START_FAILED, STOPPING), "Status was %s expected %s or %s", status.get(), STARTED, START_FAILED))
                 .doOnNext(aVoid -> readOnly.compareAndSet(false, true))
                 .flatMap(new WaitForActiveWriters(vertx, activeWriters))
                 .flatMap(new WaitForEmptyWriteQueue(vertx, writeQueueSupport))
                 .doOnNext(aVoid -> periodics.forEach(vertx::cancelTimer))
-                .flatMap(aVoid -> executeBlocking(vertx, () -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
                     try {
                         if (channel != null) {
                             channel.close();
@@ -207,9 +209,10 @@ public class BlobFile {
     }
 
     public Observable<Long> size(SfsVertx vertx) {
+        Context context = vertx.getOrCreateContext();
         return aVoid()
                 .doOnNext(aVoid -> checkOpen())
-                .flatMap(aVoid -> executeBlocking(vertx, () -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
                     try {
                         checkNotNull(channel, "Channel is null. Was everything initialized??");
                         return channel.size();
@@ -220,38 +223,41 @@ public class BlobFile {
     }
 
     public Observable<Void> copy(SfsVertx vertx, BlobFile srcBlobFile, long srcPosition, long srcLength, long dstPosition, long dstLength) {
+        Context context = vertx.getOrCreateContext();
         return defer(() -> {
             srcBlobFile.checkOpen();
             checkOpen();
             checkCanWrite();
-            AsyncFileReader src = srcBlobFile.createReadStream(vertx, srcPosition, produceBufferSize, srcLength);
+            AsyncFileReader src = srcBlobFile.createReadStream(context, srcPosition, produceBufferSize, srcLength);
             LimitedReadStream value = new LimitedReadStream(src, srcLength);
             return consume(vertx, dstPosition, dstLength, value);
         });
     }
 
     public Observable<Void> copy(SfsVertx vertx, long srcPosition, long srcLength, BlobFile dstBlobFile, long dstPosition, long dstLength) {
+        Context context = vertx.getOrCreateContext();
         return defer(() -> {
             checkOpen();
             dstBlobFile.checkOpen();
             dstBlobFile.checkCanWrite();
             ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
             if (dstBlobFile.writeQueueSupport.writeQueueFull()) {
-                dstBlobFile.writeQueueSupport.drainHandler(vertx, drainHandler::complete);
+                dstBlobFile.writeQueueSupport.drainHandler(context, drainHandler::complete);
             } else {
                 drainHandler.complete(null);
             }
             return drainHandler.flatMap(aVoid -> {
-                LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(new BufferedEndableWriteStream(dstBlobFile.createWriteStream(vertx, dstPosition, true)), dstLength);
+                LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(new BufferedEndableWriteStream(dstBlobFile.createWriteStream(context, dstPosition, true)), dstLength);
                 return produce(vertx, srcPosition, srcLength, limitedWriteStream);
             });
         });
     }
 
     public Observable<Void> produce(SfsVertx vertx, long position, long length, BufferEndableWriteStream dst) {
+        Context context = vertx.getOrCreateContext();
         return defer(() -> {
             checkOpen();
-            AsyncFileReader src = createReadStream(vertx, position, produceBufferSize, length);
+            AsyncFileReader src = createReadStream(context, position, produceBufferSize, length);
             LimitedReadStream value = new LimitedReadStream(src, length);
             return pump(value, dst);
         });
@@ -259,19 +265,20 @@ public class BlobFile {
 
 
     public Observable<Void> consume(SfsVertx vertx, long position, long length, ReadStream<Buffer> src, boolean assertAlignment) {
+        Context context = vertx.getOrCreateContext();
         return defer(() -> {
             checkOpen();
             checkCanWrite();
             ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
             if (writeQueueSupport.writeQueueFull()) {
-                writeQueueSupport.drainHandler(vertx, drainHandler::complete);
+                writeQueueSupport.drainHandler(context, drainHandler::complete);
             } else {
                 drainHandler.complete(null);
             }
             return drainHandler.flatMap(aVoid ->
                     using(
                             () -> {
-                                AsyncFileWriter dst = createWriteStream(vertx, position, assertAlignment);
+                                AsyncFileWriter dst = createWriteStream(context, position, assertAlignment);
                                 activeWriters.add(dst);
                                 return dst;
                             },
@@ -295,12 +302,13 @@ public class BlobFile {
     }
 
     public Observable<Void> consume(SfsVertx vertx, long position, Buffer src, boolean assertAlignment) {
+        Context context = vertx.getOrCreateContext();
         return defer(() -> {
             checkOpen();
             checkCanWrite();
             ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
             if (writeQueueSupport.writeQueueFull()) {
-                writeQueueSupport.drainHandler(vertx, drainHandler::complete);
+                writeQueueSupport.drainHandler(context, drainHandler::complete);
             } else {
                 drainHandler.complete(null);
             }
@@ -308,7 +316,7 @@ public class BlobFile {
                     .flatMap(aVoid ->
                             using(
                                     () -> {
-                                        AsyncFileWriter dst = createWriteStream(vertx, position, assertAlignment);
+                                        AsyncFileWriter dst = createWriteStream(context, position, assertAlignment);
                                         activeWriters.add(dst);
                                         return dst;
                                     },
@@ -330,9 +338,9 @@ public class BlobFile {
 
     }
 
-    protected AsyncFileReader createReadStream(SfsVertx vertx, final long startPosition, int bufferSize, long length) {
+    protected AsyncFileReader createReadStream(Context context, final long startPosition, int bufferSize, long length) {
         AsyncFileReader reader = new AsyncFileReaderImpl(
-                vertx,
+                context,
                 startPosition,
                 bufferSize,
                 length,
@@ -341,7 +349,7 @@ public class BlobFile {
         return reader;
     }
 
-    protected AsyncFileWriter createWriteStream(SfsVertx vertx, long startPosition, boolean assertAlignment) {
+    protected AsyncFileWriter createWriteStream(Context context, long startPosition, boolean assertAlignment) {
         if (assertAlignment) {
             checkAligned(startPosition, blockSize);
         }
@@ -349,7 +357,7 @@ public class BlobFile {
                 new AsyncFileWriterImpl(
                         startPosition,
                         writeQueueSupport,
-                        vertx,
+                        context,
                         channel,
                         LOGGER);
 
@@ -357,7 +365,8 @@ public class BlobFile {
     }
 
     public Observable<Void> force(SfsVertx vertx, boolean metaData) {
-        return executeBlocking(vertx, () -> {
+        Context context = vertx.getOrCreateContext();
+        return RxHelper.executeBlocking(context, vertx.getIoPool(), () -> {
             checkOpen();
             try {
                 channel.force(metaData);
@@ -381,7 +390,4 @@ public class BlobFile {
         checkState(!readOnly.get(), "ReadOnly mode is set");
     }
 
-    protected <T> Observable<T> executeBlocking(SfsVertx vertx, Func0<T> func0) {
-        return RxHelper.executeBlocking(vertx, executorService, func0);
-    }
 }

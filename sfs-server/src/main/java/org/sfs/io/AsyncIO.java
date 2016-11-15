@@ -167,21 +167,4 @@ public class AsyncIO {
         });
     }
 
-    public static Observable<Void> close(VertxContext<Server> vertxContext, final WriteQueueSupport writeQueueSupport, final AsynchronousFileChannel channel) {
-        if (channel != null) {
-            return Defer.aVoid()
-                    .flatMap(new WaitForEmptyWriteQueue(vertxContext, writeQueueSupport))
-                    .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
-                        try {
-                            channel.force(true);
-                            channel.close();
-                        } catch (Throwable e) {
-                            LOGGER.warn("Unhandled Exception", e);
-                        }
-                        return null;
-                    }));
-        } else {
-            return Defer.aVoid();
-        }
-    }
 }
