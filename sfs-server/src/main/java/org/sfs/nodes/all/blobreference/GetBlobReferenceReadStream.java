@@ -63,7 +63,7 @@ public class GetBlobReferenceReadStream implements Func1<TransientBlobReference,
                 .flatMap(transientBlobReference1 -> {
                     String volumeId = transientBlobReference1.getVolumeId().get();
                     Long position = transientBlobReference1.getPosition().get();
-                    Optional<XNode> oXNode = clusterInfo.getNodesForVolume(vertxContext, volumeId);
+                    Optional<XNode> oXNode = clusterInfo.getNodeForVolume(vertxContext, volumeId);
                     if (!oXNode.isPresent()) {
                         LOGGER.warn("No nodes contain volume " + volumeId);
                         return Defer.just(Optional.<ReadStreamBlob>absent());

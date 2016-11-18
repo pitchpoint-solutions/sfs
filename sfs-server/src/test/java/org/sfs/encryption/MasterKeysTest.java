@@ -50,13 +50,13 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testGetExistingGetsNew(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(VERTX_CONTEXT))
+                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
                 .flatMap(masterKey -> {
                     String id = masterKey.getKeyId();
-                    return masterKeys.getExistingKey(VERTX_CONTEXT, id)
+                    return masterKeys.getExistingKey(vertxContext, id)
                             .map(Optional::get)
                             .map(masterKey1 -> {
                                 assertEquals(context, id, masterKey1.getKeyId());
@@ -69,13 +69,13 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testEncryptDecrypt(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         byte[] expectedDecrypted = "HELLO".getBytes(UTF_8);
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.encrypt(VERTX_CONTEXT, expectedDecrypted))
+                .flatMap(aVoid -> masterKeys.encrypt(vertxContext, expectedDecrypted))
                 .flatMap(encrypted ->
-                        masterKeys.decrypt(VERTX_CONTEXT, encrypted))
+                        masterKeys.decrypt(vertxContext, encrypted))
                 .map(Optional::get)
                 .map(decrypted -> {
                     assertArrayEquals(context, expectedDecrypted, decrypted);
@@ -86,12 +86,12 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testKeyRotate(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(VERTX_CONTEXT))
+                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
                 .map(MasterKey::getKeyId)
-                .flatMap(new LoadMasterKey(VERTX_CONTEXT))
+                .flatMap(new LoadMasterKey(vertxContext))
                 .map(Optional::get)
                 .map(pmk -> {
                     assertEquals(context, masterKeys.firstKey(), pmk.getId());
@@ -101,7 +101,7 @@ public class MasterKeysTest extends BaseTestVerticle {
                     pmk.setCreateTs(now);
                     return pmk;
                 })
-                .flatMap(pmk -> masterKeys.rotateIfRequired(VERTX_CONTEXT, pmk, false))
+                .flatMap(pmk -> masterKeys.rotateIfRequired(vertxContext, pmk, false))
                 .map(pmk -> {
                     assertEquals(context, masterKeys.nextKey(masterKeys.firstKey()), pmk.getId());
                     Calendar now = getInstance();
@@ -110,7 +110,7 @@ public class MasterKeysTest extends BaseTestVerticle {
                     pmk.setCreateTs(now);
                     return pmk;
                 })
-                .flatMap(pmk -> masterKeys.rotateIfRequired(VERTX_CONTEXT, pmk, false))
+                .flatMap(pmk -> masterKeys.rotateIfRequired(vertxContext, pmk, false))
                 .map(pmk -> {
                     assertEquals(context, masterKeys.nextKey(masterKeys.nextKey(masterKeys.firstKey())), pmk.getId());
                     Calendar now = getInstance();
@@ -125,13 +125,13 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testKeyReEncrypt(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         AtomicReference<byte[]> notExpectedArray = new AtomicReference<>();
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(VERTX_CONTEXT))
+                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
                 .map(MasterKey::getKeyId)
-                .flatMap(new LoadMasterKey(VERTX_CONTEXT))
+                .flatMap(new LoadMasterKey(vertxContext))
                 .map(Optional::get)
                 .map(pmk -> {
                     assertEquals(context, masterKeys.firstKey(), pmk.getId());
@@ -142,13 +142,13 @@ public class MasterKeysTest extends BaseTestVerticle {
                     notExpectedArray.set(pmk.getEncryptedKey().get());
                     return pmk;
                 })
-                .flatMap(new UpdateMasterKey(VERTX_CONTEXT))
+                .flatMap(new UpdateMasterKey(vertxContext))
                 .map(Optional::get)
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(aVoid -> masterKeys.maintain(VERTX_CONTEXT))
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetNewestMasterKey(VERTX_CONTEXT, SALTED_AES256_V01))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(aVoid -> masterKeys.maintain(vertxContext))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetNewestMasterKey(vertxContext, SALTED_AES256_V01))
                 .map(Optional::get)
                 .map(pmk -> {
                     assertEquals(context, masterKeys.firstKey(), pmk.getId());
@@ -162,13 +162,13 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testKeyNoReEncrypt(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         AtomicReference<byte[]> expectedArray = new AtomicReference<>();
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(VERTX_CONTEXT))
+                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
                 .map(MasterKey::getKeyId)
-                .flatMap(new LoadMasterKey(VERTX_CONTEXT))
+                .flatMap(new LoadMasterKey(vertxContext))
                 .map(Optional::get)
                 .map(pmk -> {
                     assertEquals(context, masterKeys.firstKey(), pmk.getId());
@@ -177,13 +177,13 @@ public class MasterKeysTest extends BaseTestVerticle {
                     expectedArray.set(pmk.getEncryptedKey().get());
                     return pmk;
                 })
-                .flatMap(new UpdateMasterKey(VERTX_CONTEXT))
+                .flatMap(new UpdateMasterKey(vertxContext))
                 .map(Optional::get)
                 .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(aVoid -> masterKeys.maintain(VERTX_CONTEXT))
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new GetNewestMasterKey(VERTX_CONTEXT, SALTED_AES256_V01))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(aVoid -> masterKeys.maintain(vertxContext))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new GetNewestMasterKey(vertxContext, SALTED_AES256_V01))
                 .map(Optional::get)
                 .map(pmk -> {
                     assertEquals(context, masterKeys.firstKey(), pmk.getId());
@@ -197,10 +197,10 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testExpireReEncryptTime(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(VERTX_CONTEXT))
+                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
                 .map(pmk -> {
                     Calendar now = getInstance();
                     long thePast = DAYS.toMillis(365);
@@ -226,10 +226,10 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testExpireRotationTime(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(VERTX_CONTEXT))
+                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
                 .map(pmk -> {
                     Calendar now = getInstance();
                     long thePast = DAYS.toMillis(365);
@@ -255,13 +255,13 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testCacheIsBeingUsed(TestContext context) {
-        MasterKeys masterKeys = VERTX_CONTEXT.verticle().masterKeys();
+        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
         Async async = context.async();
         just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(VERTX_CONTEXT))
+                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
                 .flatMap(masterKey -> {
                     masterKeys.setFailIfNotCached(true);
-                    return masterKeys.getExistingKey(VERTX_CONTEXT, masterKey.getKeyId());
+                    return masterKeys.getExistingKey(vertxContext, masterKey.getKeyId());
                 })
                 .map(new ToVoid<>())
                 .subscribe(new TestSubscriber(context, async));

@@ -60,15 +60,15 @@ public class ContainerMetadataTest extends BaseTestVerticle {
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new PostAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, containerName, auth, headers))
+                .flatMap(new PutContainer(httpClient, accountName, containerName, auth, headers))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(HTTP_CLIENT, accountName, containerName, auth))
+                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {
@@ -106,15 +106,15 @@ public class ContainerMetadataTest extends BaseTestVerticle {
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new PostAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, containerName, auth, headers))
+                .flatMap(new PutContainer(httpClient, accountName, containerName, auth, headers))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(HTTP_CLIENT, accountName, containerName, auth))
+                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {
@@ -154,15 +154,15 @@ public class ContainerMetadataTest extends BaseTestVerticle {
 
         Async async = context.async();
         just((Void) null)
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, auth))
+                .flatMap(new PostAccount(httpClient, accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, containerName, auth, headers))
+                .flatMap(new PutContainer(httpClient, accountName, containerName, auth, headers))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(HTTP_CLIENT, accountName, containerName, auth))
+                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {
@@ -190,13 +190,13 @@ public class ContainerMetadataTest extends BaseTestVerticle {
                         final ListMultimap<String, String> map = create();
                         map.put(name, "TEST_VALUE0");
                         return just((Void) null)
-                                .flatMap(new PostContainer(HTTP_CLIENT, accountName, containerName, auth, map));
+                                .flatMap(new PostContainer(httpClient, accountName, containerName, auth, map));
                     }
                 })
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(HTTP_CLIENT, accountName, containerName, auth))
+                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new Func1<HttpClientResponse, HttpClientResponse>() {

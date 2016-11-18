@@ -94,8 +94,7 @@ import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.Terminus;
 import org.sfs.rx.ToVoid;
-import org.sfs.rx.WaitForEmptyQueue;
-import org.sfs.thread.NamedThreadFactory;
+import org.sfs.thread.NamedCapacityFixedThreadPool;
 import org.sfs.util.ConfigHelper;
 import org.sfs.util.FileSystemLock;
 import rx.Observable;
@@ -110,10 +109,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -122,8 +118,6 @@ public class SfsSingletonServer extends Server implements Shareable {
     private static final AtomicBoolean STARTED = new AtomicBoolean(false);
     private VertxContext<Server> vertxContext;
 
-    private BlockingQueue<Runnable> ioQueue;
-    private BlockingQueue<Runnable> backgroundQueue;
     private ExecutorService ioPool;
     private ExecutorService backgroundPool;
 
@@ -210,35 +204,18 @@ public class SfsSingletonServer extends Server implements Shareable {
         int threadPoolIoSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.io.size", String.valueOf(Runtime.getRuntime().availableProcessors() * 2)));
         Preconditions.checkArgument(threadPoolIoSize > 0, "threadpool.io.size must be greater than 0");
 
+        int threadPoolBackgroundSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.background.size", String.valueOf(Runtime.getRuntime().availableProcessors() * 2)));
+        Preconditions.checkArgument(threadPoolBackgroundSize > 0, "threadpool.background.size must be greater than 0");
+
         int threadPoolBackgroundQueueSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.background.queuesize", "10000"));
         Preconditions.checkArgument(threadPoolBackgroundQueueSize > 0, "threadpool.background.queuesize must be greater than 0");
 
-        int threadPoolBackgroundSize = new Integer(ConfigHelper.getFieldOrEnv(config, "threadpool.background.size", "200"));
-        Preconditions.checkArgument(threadPoolBackgroundSize > 0, "threadpool.background.size must be greater than 0");
-
-        ioQueue = new LinkedBlockingQueue<>(threadPoolIoQueueSize);
-        backgroundQueue = new LinkedBlockingQueue<>(threadPoolBackgroundQueueSize);
-
-        ioPool =
-                new ThreadPoolExecutor(
-                        0,
-                        threadPoolIoSize,
-                        60,
-                        TimeUnit.SECONDS,
-                        ioQueue,
-                        new NamedThreadFactory("sfs-io-pool"));
-        backgroundPool =
-                new ThreadPoolExecutor(
-                        0,
-                        threadPoolBackgroundSize,
-                        60,
-                        TimeUnit.SECONDS,
-                        backgroundQueue,
-                        new NamedThreadFactory("sfs-blocking-action-pool"));
+        ioPool = NamedCapacityFixedThreadPool.newInstance(threadPoolIoSize, threadPoolIoQueueSize, "sfs-io-pool");
+        backgroundPool = NamedCapacityFixedThreadPool.newInstance(threadPoolBackgroundSize, threadPoolBackgroundQueueSize, "sfs-blocking-action-pool");
 
         this.vertxContext = new VertxContext<>(this);
 
-        nodes = new Nodes(ioQueue, backgroundQueue);
+        nodes = new Nodes();
 
         verticleMaxHeaderSize = new Integer(ConfigHelper.getFieldOrEnv(config, "http.maxheadersize", "8192"));
         Preconditions.checkArgument(verticleMaxHeaderSize > 0, "http.maxheadersize must be greater than 0");
@@ -472,8 +449,6 @@ public class SfsSingletonServer extends Server implements Shareable {
                     LOGGER.error("Unhandled Exception", throwable);
                     return Defer.aVoid();
                 })
-                .flatMap(new WaitForEmptyQueue(vertxContext, ioQueue))
-                .flatMap(new WaitForEmptyQueue(vertxContext, backgroundQueue))
                 .doOnNext(aVoid -> {
                     for (String envVar : ConfigHelper.getEnvVars()) {
                         System.out.println("ENV " + envVar);

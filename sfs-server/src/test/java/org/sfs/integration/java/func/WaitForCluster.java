@@ -17,71 +17,36 @@
 package org.sfs.integration.java.func;
 
 import io.vertx.core.Vertx;
-import io.vertx.core.http.HttpClient;
-import io.vertx.core.http.HttpClientRequest;
-import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import org.sfs.nodes.HttpClientResponseException;
+import org.sfs.Server;
+import org.sfs.VertxContext;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
+import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
-import rx.Subscriber;
 import rx.functions.Func1;
 
-import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
-import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
-import static java.net.HttpURLConnection.HTTP_OK;
 
 public class WaitForCluster implements Func1<Void, Observable<Void>> {
 
     private static final Logger LOGGER = getLogger(WaitForCluster.class);
-    private Vertx vertx;
-    private final HttpClient httpClient;
+    private VertxContext<Server> vertxContext;
 
-    public WaitForCluster(Vertx vertx, HttpClient httpClient) {
-        this.vertx = vertx;
-        this.httpClient = httpClient;
+    public WaitForCluster(VertxContext<Server> vertxContext) {
+        this.vertxContext = vertxContext;
     }
 
     @Override
     public Observable<Void> call(Void aVoid) {
         ObservableFuture<Void> handler = RxHelper.observableFuture();
+        Vertx vertx = vertxContext.vertx();
         vertx.setPeriodic(100, timerId -> {
-            ObservableFuture<HttpClientResponse> internalHandler = RxHelper.observableFuture();
-            HttpClientRequest httpClientRequest =
-                    httpClient.get("/admin/001/is_online", internalHandler::complete)
-                            .exceptionHandler(internalHandler::fail)
-                            .setTimeout(10000);
-            httpClientRequest.end();
-            internalHandler
-                    .subscribe(new Subscriber<HttpClientResponse>() {
-
-                        HttpClientResponse result;
-
-                        @Override
-                        public void onCompleted() {
-                            if (HTTP_OK == result.statusCode()) {
-                                vertx.cancelTimer(timerId);
-                                handler.complete(null);
-                            } else if (HTTP_NO_CONTENT == result.statusCode()) {
-
-                            } else {
-                                onError(new HttpClientResponseException(result, buffer()));
-                            }
-                        }
-
-                        @Override
-                        public void onError(Throwable e) {
-                            vertx.cancelTimer(timerId);
-                            handler.fail(e);
-                        }
-
-                        @Override
-                        public void onNext(HttpClientResponse httpClientResponse) {
-                            result = httpClientResponse;
-                        }
-                    });
+            TransientServiceDef masterNode = vertxContext.verticle().getClusterInfo().getCurrentMasterNode();
+            if (masterNode != null) {
+                vertx.cancelTimer(timerId);
+                handler.complete(null);
+            }
         });
         return handler;
     }

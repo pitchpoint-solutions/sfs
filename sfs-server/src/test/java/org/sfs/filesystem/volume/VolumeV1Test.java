@@ -38,8 +38,7 @@ import org.sfs.protobuf.XVolume;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
-import org.sfs.thread.CapacityLinkedBlockingQueue;
-import org.sfs.thread.NamedThreadFactory;
+import org.sfs.thread.NamedCapacityFixedThreadPool;
 import org.sfs.util.VertxAssert;
 import org.sfs.vo.TransientXVolume;
 import rx.Observable;
@@ -50,10 +49,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Calendar;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -63,6 +59,8 @@ public class VolumeV1Test {
     private Path path;
     @Rule
     public final RunTestOnContext rule = new RunTestOnContext();
+    private ExecutorService ioPool;
+    private ExecutorService backgroundPool;
 
     @Before
     public void start() {
@@ -71,6 +69,8 @@ public class VolumeV1Test {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        ioPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-io-pool");
+        backgroundPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-blocking-action-pool");
     }
 
     @After
@@ -78,29 +78,16 @@ public class VolumeV1Test {
         if (path != null) {
             rule.vertx().fileSystem().deleteRecursiveBlocking(path.toString(), true);
         }
+        if (ioPool != null) {
+            ioPool.shutdown();
+        }
+        if (backgroundPool != null) {
+            backgroundPool.shutdown();
+        }
     }
 
     @Test
     public void testWriteMany(TestContext context) {
-        BlockingQueue<Runnable> ioQueue = new CapacityLinkedBlockingQueue<>(500);
-        BlockingQueue<Runnable> backgroundQueue = new CapacityLinkedBlockingQueue<>(500);
-
-        ExecutorService ioPool =
-                new ThreadPoolExecutor(
-                        200,
-                        200,
-                        0L,
-                        TimeUnit.MILLISECONDS,
-                        ioQueue,
-                        new NamedThreadFactory("sfs-io-pool"));
-        ExecutorService backgroundPool =
-                new ThreadPoolExecutor(
-                        200,
-                        200,
-                        0L,
-                        TimeUnit.MILLISECONDS,
-                        backgroundQueue,
-                        new NamedThreadFactory("sfs-blocking-action-pool"));
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
         final VolumeV1 sfsDataV1 = new VolumeV1(path);
         AtomicInteger count = new AtomicInteger(0);
@@ -110,8 +97,6 @@ public class VolumeV1Test {
                     ObservableFuture<Void> handler = RxHelper.observableFuture();
                     rule.vertx().setPeriodic(1000, event -> sfsDataV1.volumeInfo(sfsVertx)
                             .doOnNext(transientXVolume -> System.out.println("Stats: " + transientXVolume.toJsonObject().encodePrettily()))
-                            .doOnNext(transientXVolume -> System.out.println("sfs-io-pool-size: " + ioQueue.size()))
-                            .doOnNext(transientXVolume -> System.out.println("sfs-blocking-action-pool-size: " + backgroundQueue.size()))
                             .subscribe(new Subscriber<TransientXVolume>() {
                                 @Override
                                 public void onCompleted() {
@@ -185,8 +170,6 @@ public class VolumeV1Test {
     @Test
     public void testSingleWriteReadHashSizeAckDeleteTtlCreateDateTime(TestContext context) {
 
-        ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-        ExecutorService ioPool = Executors.newFixedThreadPool(200);
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final Buffer expectedBuffer = Buffer.buffer("HELLO");
@@ -231,8 +214,6 @@ public class VolumeV1Test {
     @Test
     public void testSingleDeleteRealloc(TestContext context) {
 
-        ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-        ExecutorService ioPool = Executors.newFixedThreadPool(200);
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final Buffer expectedBuffer = Buffer.buffer("HELLO");
@@ -259,8 +240,6 @@ public class VolumeV1Test {
     @Test
     public void testSingleSweeperUnacknowledgedRealloc(TestContext context) {
 
-        ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-        ExecutorService ioPool = Executors.newFixedThreadPool(200);
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final Buffer expectedBuffer = Buffer.buffer("HELLO");
@@ -286,8 +265,6 @@ public class VolumeV1Test {
     @Test
     public void testSingleSweeperDeleteRealloc(TestContext context) {
 
-        ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-        ExecutorService ioPool = Executors.newFixedThreadPool(200);
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final Calendar oneYearAgo = Calendar.getInstance();
@@ -340,8 +317,6 @@ public class VolumeV1Test {
     @Test
     public void testGetDataStreamWithInvalidPosition(TestContext context) {
 
-        ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-        ExecutorService ioPool = Executors.newFixedThreadPool(200);
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final Calendar oneYearAgo = Calendar.getInstance();
@@ -382,8 +357,7 @@ public class VolumeV1Test {
 
     @Test
     public void testSetWithInvalidPosition(TestContext context) {
-        ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-        ExecutorService ioPool = Executors.newFixedThreadPool(200);
+
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final Calendar oneYearAgo = Calendar.getInstance();
@@ -450,8 +424,7 @@ public class VolumeV1Test {
 
     @Test
     public void testVolumeCopy(TestContext context) throws IOException {
-        ExecutorService backgroundPool = Executors.newFixedThreadPool(200);
-        ExecutorService ioPool = Executors.newFixedThreadPool(200);
+
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final Buffer expectedBuffer = Buffer.buffer("HELLO");

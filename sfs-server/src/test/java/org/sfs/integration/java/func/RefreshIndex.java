@@ -19,6 +19,8 @@ package org.sfs.integration.java.func;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
+import org.sfs.rx.Defer;
+import org.sfs.rx.HttpClientResponseBodyBuffer;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
@@ -29,7 +31,6 @@ import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.http.HttpHeaders.AUTHORIZATION;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
-import static rx.Observable.create;
 
 public class RefreshIndex implements Func1<Void, Observable<Void>> {
 
@@ -53,9 +54,13 @@ public class RefreshIndex implements Func1<Void, Observable<Void>> {
                                     .setTimeout(10000);
                     httpClientRequest.end();
                     return handler
-                            .doOnNext(httpClientResponse -> {
-                                checkState(httpClientResponse.statusCode() == HTTP_OK);
-                            })
+                            .flatMap(httpClientResponse ->
+                                    Defer.just(httpClientResponse)
+                                            .flatMap(new HttpClientResponseBodyBuffer(HTTP_OK))
+                                            .doOnNext(buffer -> {
+                                                checkState(httpClientResponse.statusCode() == HTTP_OK);
+                                                ;
+                                            }))
                             .map(new ToVoid<>());
                 });
 

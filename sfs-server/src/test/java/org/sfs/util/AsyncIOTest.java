@@ -37,7 +37,7 @@ public class AsyncIOTest extends BaseTestVerticle {
     public void copyZeroLength(TestContext context) throws IOException {
         Path tmpFile = Files.createTempFile(tmpDir, "", "");
 
-        AsyncFile asyncFile = VERTX.fileSystem().openBlocking(tmpFile.toString(), new OpenOptions());
+        AsyncFile asyncFile = vertx.fileSystem().openBlocking(tmpFile.toString(), new OpenOptions());
         final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
 
         Async async = context.async();

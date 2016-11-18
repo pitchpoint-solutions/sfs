@@ -286,7 +286,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                 .setRead(true)
                 .setWrite(true);
 
-        VERTX.fileSystem()
+        vertx.fileSystem()
                 .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
         rh
@@ -325,7 +325,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                                 .setRead(true)
                                 .setWrite(true);
 
-                        VERTX.fileSystem()
+                        vertx.fileSystem()
                                 .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
                         return rh;
@@ -359,7 +359,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                                 .setRead(true)
                                 .setWrite(true);
 
-                        VERTX.fileSystem()
+                        vertx.fileSystem()
                                 .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
                         return rh;

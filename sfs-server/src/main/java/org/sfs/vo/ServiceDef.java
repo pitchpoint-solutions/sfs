@@ -46,8 +46,6 @@ public abstract class ServiceDef<T extends ServiceDef> {
     private Long freeMemory;
     private Long totalMemory;
     private Long maxMemory;
-    private Integer backgroundPoolQueueSize;
-    private Integer ioPoolQueueSize;
     private List<HostAndPort> publishAddresses = new ArrayList<>();
     private List<XVolume<? extends XVolume>> volumes = new ArrayList<>();
 
@@ -80,24 +78,6 @@ public abstract class ServiceDef<T extends ServiceDef> {
 
     public T setMaster(Boolean master) {
         this.master = master;
-        return (T) this;
-    }
-
-    public Optional<Integer> getBackgroundPoolQueueSize() {
-        return fromNullable(backgroundPoolQueueSize);
-    }
-
-    public T setBackgroundPoolQueueSize(Integer backgroundPoolQueueSize) {
-        this.backgroundPoolQueueSize = backgroundPoolQueueSize;
-        return (T) this;
-    }
-
-    public Optional<Integer> getIoPoolQueueSize() {
-        return fromNullable(ioPoolQueueSize);
-    }
-
-    public T setIoPoolQueueSize(Integer ioPoolQueueSize) {
-        this.ioPoolQueueSize = ioPoolQueueSize;
         return (T) this;
     }
 
@@ -200,8 +180,6 @@ public abstract class ServiceDef<T extends ServiceDef> {
         setFreeMemory(t.freeMemory);
         setMaxMemory(t.maxMemory);
         setTotalMemory(t.totalMemory);
-        setIoPoolQueueSize(t.ioPoolQueueSize);
-        setBackgroundPoolQueueSize(t.backgroundPoolQueueSize);
         setFileSystem(t.fileSystem != null ? t.fileSystem.copy() : null);
         if (t.volumes != null) {
             setVolumes(
@@ -230,8 +208,6 @@ public abstract class ServiceDef<T extends ServiceDef> {
         this.maxMemory = other.maxMemory;
         this.totalMemory = other.totalMemory;
         this.fileSystem = other.fileSystem;
-        this.ioPoolQueueSize = other.ioPoolQueueSize;
-        this.backgroundPoolQueueSize = other.backgroundPoolQueueSize;
         this.publishAddresses.clear();
         addAll(this.publishAddresses, other.publishAddresses);
         this.volumes.clear();
@@ -249,8 +225,6 @@ public abstract class ServiceDef<T extends ServiceDef> {
         this.freeMemory = jsonObject.getLong("free_memory");
         this.maxMemory = jsonObject.getLong("max_memory");
         this.totalMemory = jsonObject.getLong("total_memory");
-        this.backgroundPoolQueueSize = jsonObject.getInteger("threadpool_background_queue_size");
-        this.ioPoolQueueSize = jsonObject.getInteger("threadpool_io_queue_size");
 
         JsonObject jsonFileSystem = jsonObject.getJsonObject("file_system");
         if (jsonFileSystem != null) {
@@ -294,9 +268,7 @@ public abstract class ServiceDef<T extends ServiceDef> {
                 .put("available_processors", availableProcessors)
                 .put("free_memory", freeMemory)
                 .put("max_memory", maxMemory)
-                .put("total_memory", totalMemory)
-                .put("threadpool_background_queue_size", backgroundPoolQueueSize)
-                .put("threadpool_io_queue_size", ioPoolQueueSize);
+                .put("total_memory", totalMemory);
 
         if (fileSystem != null) {
             JsonObject jsonFileSystem = fileSystem.toJsonObject();

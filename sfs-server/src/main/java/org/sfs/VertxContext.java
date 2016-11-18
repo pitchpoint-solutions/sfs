@@ -63,27 +63,4 @@ public class VertxContext<A extends Server> {
         return ioPool;
     }
 
-    public <R> Observable<R> executeBlocking(final Func0<R> func) {
-        return executeBlocking(vertx, func);
-    }
-
-    public <R> Observable<R> executeBlockingObservable(final Func0<Observable<R>> func) {
-        return executeBlockingObservable(vertx, func);
-    }
-
-    public static <R> Observable<R> executeBlocking(SfsVertx vertx, Func0<R> func) {
-        return defer(() -> {
-            ObservableFuture<R> handler = RxHelper.observableFuture();
-            vertx.executeBlocking(func, handler.toHandler());
-            return handler;
-        });
-    }
-
-    public static <R> Observable<R> executeBlockingObservable(SfsVertx vertx, Func0<Observable<R>> func) {
-        return defer(() -> {
-            ObservableFuture<R> handler = RxHelper.observableFuture();
-            vertx.executeBlockingObservable(func::call, handler.toHandler());
-            return handler;
-        });
-    }
 }

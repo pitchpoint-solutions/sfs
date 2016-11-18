@@ -23,15 +23,17 @@ import com.amazonaws.services.kms.model.DecryptRequest;
 import com.amazonaws.services.kms.model.EncryptRequest;
 import com.amazonaws.services.kms.model.ReEncryptRequest;
 import com.google.common.base.Preconditions;
+import io.vertx.core.Context;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import org.sfs.Server;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
 import org.sfs.rx.Defer;
+import org.sfs.rx.RxHelper;
 import org.sfs.util.ConfigHelper;
 import rx.Observable;
-import rx.functions.Func0;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -54,7 +56,8 @@ public class AwsKms implements Kms {
     public Observable<Void> start(VertxContext<Server> vertxContext,
                                   JsonObject config) {
         AwsKms _this = this;
-
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
         return Defer.aVoid()
                 .filter(aVoid -> started.compareAndSet(false, true))
                 .flatMap(aVoid -> {
@@ -71,7 +74,7 @@ public class AwsKms implements Kms {
                     Preconditions.checkArgument(_this.secretKey != null, "keystore.aws.kms.secret_key is required");
 
 
-                    return vertxContext.executeBlocking(
+                    return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(),
                             () -> {
                                 kms = new AWSKMSClient(new AWSCredentials() {
                                     @Override
@@ -97,31 +100,32 @@ public class AwsKms implements Kms {
 
     @Override
     public Observable<Encrypted> encrypt(VertxContext<Server> vertxContext, byte[] plainBytes) {
-        return Observable.defer(new Func0<Observable<Encrypted>>() {
-            @Override
-            public Observable<Encrypted> call() {
-                byte[] cloned = Arrays.copyOf(plainBytes, plainBytes.length);
-                return vertxContext.executeBlocking(() -> {
-                    try {
-                        EncryptRequest req =
-                                new EncryptRequest()
-                                        .withKeyId(keyId)
-                                        .withPlaintext(ByteBuffer.wrap(cloned));
-                        ByteBuffer buffer = kms.encrypt(req).getCiphertextBlob();
-                        byte[] b = new byte[buffer.remaining()];
-                        buffer.get(b);
-                        return new Encrypted(b, String.format("xppsaws:%s", keyId));
-                    } finally {
-                        Arrays.fill(cloned, (byte) 0);
-                    }
-                });
-            }
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return Observable.defer(() -> {
+            byte[] cloned = Arrays.copyOf(plainBytes, plainBytes.length);
+            return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+                try {
+                    EncryptRequest req =
+                            new EncryptRequest()
+                                    .withKeyId(keyId)
+                                    .withPlaintext(ByteBuffer.wrap(cloned));
+                    ByteBuffer buffer = kms.encrypt(req).getCiphertextBlob();
+                    byte[] b = new byte[buffer.remaining()];
+                    buffer.get(b);
+                    return new Encrypted(b, String.format("xppsaws:%s", keyId));
+                } finally {
+                    Arrays.fill(cloned, (byte) 0);
+                }
+            });
         });
     }
 
     @Override
     public Observable<Encrypted> reencrypt(VertxContext<Server> vertxContext, byte[] cipherBytes) {
-        return Observable.defer(() -> vertxContext.executeBlocking(() -> {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return Observable.defer(() -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
             ReEncryptRequest req =
                     new ReEncryptRequest()
                             .withDestinationKeyId(keyId)
@@ -135,7 +139,9 @@ public class AwsKms implements Kms {
 
     @Override
     public Observable<byte[]> decrypt(VertxContext<Server> vertxContext, byte[] cipherBytes) {
-        return Observable.defer(() -> vertxContext.executeBlocking(() -> {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return Observable.defer(() -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
             DecryptRequest req =
                     new DecryptRequest()
                             .withCiphertextBlob(ByteBuffer.wrap(cipherBytes.clone()));
@@ -147,6 +153,8 @@ public class AwsKms implements Kms {
     }
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
         return Defer.aVoid()
                 .filter(aVoid -> started.compareAndSet(true, false))
                 .flatMap(aVoid -> {
@@ -155,7 +163,7 @@ public class AwsKms implements Kms {
                         properties = null;
                     }
                     if (kms != null) {
-                        return vertxContext.executeBlocking(() -> {
+                        return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
                             try {
                                 kms.shutdown();
                             } catch (Throwable e) {

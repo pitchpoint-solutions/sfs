@@ -16,9 +16,9 @@
 
 package org.sfs.util;
 
-import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
+import org.sfs.SfsVertx;
 import org.sfs.rx.RxHelper;
 import rx.Observable;
 
@@ -73,13 +73,5 @@ public class PrngRandom {
     public void nextBytesBlocking(byte[] destination) {
         SecureRandom secureRandom = getSecureRandom();
         secureRandom.nextBytes(destination);
-    }
-
-    public Observable<Void> nextBytes(Vertx vertx, byte[] destination) {
-        return RxHelper.executeBlocking(vertx, () -> {
-            SecureRandom secureRandom = getSecureRandom();
-            secureRandom.nextBytes(destination);
-            return (Void) null;
-        });
     }
 }

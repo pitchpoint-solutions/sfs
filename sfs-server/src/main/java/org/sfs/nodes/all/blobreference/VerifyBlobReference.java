@@ -17,7 +17,6 @@
 package org.sfs.nodes.all.blobreference;
 
 import com.google.common.base.Optional;
-import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
@@ -63,7 +62,7 @@ public class VerifyBlobReference implements Func1<TransientBlobReference, Observ
                 .flatMap(transientBlobReference1 -> {
                     String volumeId = transientBlobReference.getVolumeId().get();
                     long position = transientBlobReference.getPosition().get();
-                    Optional<XNode> oXNode = clusterInfo.getNodesForVolume(vertxContext, volumeId);
+                    Optional<XNode> oXNode = clusterInfo.getNodeForVolume(vertxContext, volumeId);
                     if (!oXNode.isPresent()) {
                         LOGGER.warn("No nodes contain volume " + volumeId);
                         return Defer.just(false);

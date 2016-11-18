@@ -32,19 +32,17 @@ import rx.Subscriber;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.TreeMap;
 
 import static com.google.common.base.Optional.fromNullable;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.FluentIterable.from;
-import static com.google.common.collect.Iterables.size;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Boolean.TRUE;
 import static java.util.Collections.emptyList;
@@ -58,12 +56,12 @@ public class ClusterInfo {
     private final long refreshInterval = SECONDS.toMillis(1);
     private boolean started = false;
     private VertxContext<Server> vertxContext;
-    private List<TransientServiceDef> allNodes;
-    private Map<String, TransientServiceDef> nodesByStartedVolume;
-    private NavigableMap<Long, Set<String>> startedVolumeIdByUseableSpace;
-    private int numberOfObjectReplicas;
-    private TransientServiceDef currentMaintainerNode;
-    private List<TransientServiceDef> masterNodes;
+    private volatile List<TransientServiceDef> allNodes;
+    private volatile Map<String, TransientServiceDef> nodesByStartedVolume;
+    private volatile NavigableMap<Long, Set<String>> startedVolumeIdByUseableSpace;
+    private volatile int numberOfStartedVolumes;
+    private volatile TransientServiceDef currentMaintainerNode;
+    private volatile List<TransientServiceDef> masterNodes;
     private Long timerId;
 
     public Observable<Void> open(VertxContext<Server> vertxContext) {
@@ -96,8 +94,8 @@ public class ClusterInfo {
         return refreshInterval;
     }
 
-    public int getNumberOfObjectReplicas() {
-        return numberOfObjectReplicas;
+    public int getNumberOfStartedVolumes() {
+        return numberOfStartedVolumes;
     }
 
     public NavigableMap<Long, Set<String>> getStartedVolumeIdByUseableSpace() {
@@ -122,16 +120,15 @@ public class ClusterInfo {
 
     public Observable<Boolean> isOnline() {
         return Observable.defer(() -> {
-            int expectedNodeCount = getNumberOfObjectReplicas();
-            int count = size(getDataNodes());
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Expected node count was " + expectedNodeCount + ", Active node count was " + count);
+            try {
+                return Defer.just(getCurrentMasterNode() != null);
+            } catch (Throwable e) {
+                return Defer.just(false);
             }
-            return Observable.just(count >= expectedNodeCount);
         });
     }
 
-    public Optional<XNode> getNodesForVolume(VertxContext<Server> vertxContext, String volumeId) {
+    public Optional<XNode> getNodeForVolume(VertxContext<Server> vertxContext, String volumeId) {
         Nodes nodes = vertxContext.verticle().nodes();
         TransientServiceDef serviceDef = nodesByStartedVolume.get(volumeId);
         if (serviceDef != null) {
@@ -155,12 +152,8 @@ public class ClusterInfo {
     public TransientServiceDef getCurrentMasterNode() {
         checkStarted();
         List<TransientServiceDef> snapshot = masterNodes;
-        if (snapshot.isEmpty()) {
-            Preconditions.checkState(snapshot.isEmpty(), "no elected master node");
-        }
-        if (snapshot.size() > 1) {
-            Preconditions.checkState(snapshot.size() > 1, "more than one elected master node");
-        }
+        Preconditions.checkState(!snapshot.isEmpty(), "no elected master node");
+        Preconditions.checkState(snapshot.size() <= 1, "more than one elected master node");
         return snapshot.get(0);
     }
 
@@ -233,11 +226,11 @@ public class ClusterInfo {
                 .map(new ToVoid<>())
                 .doOnNext(aVoid -> {
 
-                    int updatedReplicaCount = 0;
+                    int updatedNumberOfStartedVolumes = 0;
 
-                    Map<String, TransientServiceDef> updatedNodesByStartedVolume = new ConcurrentHashMap<>();
-                    NavigableMap<Long, Set<String>> updatedStartedVolumeIdByUseableSpace = new ConcurrentSkipListMap<>();
-                    List<TransientServiceDef> updatedMasterNodes = new CopyOnWriteArrayList<>();
+                    Map<String, TransientServiceDef> updatedNodesByStartedVolume = new HashMap<>();
+                    NavigableMap<Long, Set<String>> updatedStartedVolumeIdByUseableSpace = new TreeMap<>();
+                    List<TransientServiceDef> updatedMasterNodes = new ArrayList<>();
 
                     TransientServiceDef candidateMaintainerNode = null;
 
@@ -270,7 +263,7 @@ public class ClusterInfo {
 
                                     long useableSpace = oUseableSpace.get();
 
-                                    updatedReplicaCount++;
+                                    updatedNumberOfStartedVolumes++;
                                     Set<String> volumeIdsForSpace = updatedStartedVolumeIdByUseableSpace.get(useableSpace);
                                     if (volumeIdsForSpace == null) {
                                         volumeIdsForSpace = new HashSet<>();
@@ -285,7 +278,7 @@ public class ClusterInfo {
                         }
                     }
 
-                    numberOfObjectReplicas = updatedReplicaCount;
+                    numberOfStartedVolumes = updatedNumberOfStartedVolumes;
                     startedVolumeIdByUseableSpace = updatedStartedVolumeIdByUseableSpace;
                     nodesByStartedVolume = updatedNodesByStartedVolume;
                     currentMaintainerNode = candidateMaintainerNode;

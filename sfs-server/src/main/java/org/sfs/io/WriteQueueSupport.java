@@ -17,21 +17,25 @@
 package org.sfs.io;
 
 
-import com.google.common.util.concurrent.AtomicLongMap;
 import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
+import org.sfs.util.AtomicIntMap;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class WriteQueueSupport<A> {
 
     private final long maxWrites;
     private final long lowWater;
-    private final AtomicLongMap<A> queues = AtomicLongMap.create();
+    private final AtomicIntMap<A> queues = new AtomicIntMap<>();
+    private final ConcurrentMap<A, ContextHandlerList> writeQueueEmptyHandlers = new ConcurrentHashMap<>();
     private final Set<ContextHandler> drainHandlers = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
 
@@ -48,18 +52,15 @@ public class WriteQueueSupport<A> {
         return lowWater;
     }
 
-    public void drainHandler(Vertx vertx, Handler<Void> handler) {
-        drainHandler(vertx.getOrCreateContext(), handler);
-    }
-
     public void drainHandler(Context context, Handler<Void> handler) {
         drainHandlers.add(new ContextHandler(context, handler));
         notifyDrainHandlers();
     }
 
-    public WriteQueueSupport<A> remove(A writer) {
-        queues.remove(writer);
+    public WriteQueueSupport<A> remove(A entity) {
+        queues.remove(entity);
         notifyDrainHandlers();
+        notifyEmptyHandlers(entity);
         return this;
     }
 
@@ -67,8 +68,35 @@ public class WriteQueueSupport<A> {
         return queues.sum() >= maxWrites;
     }
 
-    public void incrementWritesOutstanding(A writer, long delta) {
+    public void incrementWritesOutstanding(A writer, int delta) {
         queues.addAndGet(writer, delta);
+    }
+
+    public void decrementWritesOutstanding(A writer, int delta) {
+        queues.addAndGet(writer, -delta);
+        queues.removeIfLteZero(writer);
+        notifyDrainHandlers();
+        notifyEmptyHandlers(writer);
+    }
+
+    public void emptyHandler(A writer, Context context, Handler<Void> handler) {
+        ContextHandler contextHandler = new ContextHandler(context, handler);
+        while (true) {
+            ContextHandlerList existing = writeQueueEmptyHandlers.get(writer);
+            if (existing != null) {
+                ContextHandlerList updated = new ContextHandlerList(new ArrayList<>(existing.getList()));
+                updated.add(contextHandler);
+                if (writeQueueEmptyHandlers.replace(writer, existing, updated)) {
+                    break;
+                }
+            } else {
+                ContextHandlerList updated = new ContextHandlerList(Collections.singletonList(contextHandler));
+                if (writeQueueEmptyHandlers.putIfAbsent(writer, updated) == null) {
+                    break;
+                }
+            }
+        }
+        notifyEmptyHandlers(writer);
     }
 
     public boolean writeQueueEmpty(A writer) {
@@ -79,8 +107,19 @@ public class WriteQueueSupport<A> {
         return queues.sum();
     }
 
+    protected void notifyEmptyHandlers(A writer) {
+        if (queues.get(writer) <= 0) {
+            ContextHandlerList contextHandlerList = writeQueueEmptyHandlers.remove(writer);
+            if (contextHandlerList != null) {
+                for (ContextHandler contextHandler : contextHandlerList.getList()) {
+                    contextHandler.dispatch();
+                }
+            }
+        }
+    }
+
     protected void notifyDrainHandlers() {
-        long size = queues.sum();
+        int size = queues.sum();
         if (size <= lowWater) {
             Iterator<ContextHandler> iterator = drainHandlers.iterator();
             while (iterator.hasNext()) {
@@ -103,6 +142,23 @@ public class WriteQueueSupport<A> {
 
         public void dispatch() {
             context.runOnContext(event -> handler.handle(null));
+        }
+    }
+
+    private static class ContextHandlerList {
+
+        private final List<ContextHandler> list;
+
+        public ContextHandlerList(List<ContextHandler> list) {
+            this.list = list;
+        }
+
+        public List<ContextHandler> getList() {
+            return list;
+        }
+
+        public void add(ContextHandler contextHandler) {
+            list.add(contextHandler);
         }
     }
 }

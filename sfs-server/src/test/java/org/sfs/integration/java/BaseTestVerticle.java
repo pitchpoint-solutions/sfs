@@ -48,6 +48,7 @@ import rx.Observable;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
 
@@ -70,18 +71,18 @@ import static rx.Observable.just;
 public class BaseTestVerticle {
 
     private static final Logger LOGGER = getLogger(BaseTestVerticle.class);
-    protected Path ROOT_TMP_DIR;
-    private Path ES_TMP_DIR;
-    private String ES_CLUSTER_NAME;
-    private String ES_NODE_NAME;
-    private String ES_HOST;
-    protected Client ES_CLIENT;
+    protected Path rootTmpDir;
+    private Path esTempDir;
+    private String esClusterName;
+    private String esNodeName;
+    private String esHost;
+    protected Client esClient;
     protected Path tmpDir;
-    private Node ES_NODE;
-    protected Vertx VERTX;
-    protected HttpClient HTTP_CLIENT;
-    protected HttpClient HTTPS_CLIENT;
-    protected VertxContext<Server> VERTX_CONTEXT;
+    private Node esNode;
+    protected Vertx vertx;
+    protected HttpClient httpClient;
+    protected HttpClient httpsClient;
+    protected VertxContext<Server> vertxContext;
 
     @Rule
     public RunTestOnContext rule = new RunTestOnContext();
@@ -89,57 +90,57 @@ public class BaseTestVerticle {
 
     @Before
     public void before(TestContext context) {
+        vertx = rule.vertx();
         Async async = context.async();
         aVoid()
                 .flatMap(aVoid -> {
-                    VERTX = rule.vertx();
                     String clusteruuid = UUID.randomUUID().toString();
                     try {
-                        ROOT_TMP_DIR = createTempDirectory("");
-                        ES_TMP_DIR = createTempDirectory(ROOT_TMP_DIR, format("test-cluster-%s", clusteruuid));
-                        tmpDir = createTempDirectory(ROOT_TMP_DIR, valueOf(currentTimeMillis()));
+                        rootTmpDir = createTempDirectory("");
+                        esTempDir = createTempDirectory(rootTmpDir, format("test-cluster-%s", clusteruuid));
+                        tmpDir = createTempDirectory(rootTmpDir, valueOf(currentTimeMillis()));
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
 
                     int esPort = findFreePort(9300, 9400);
-                    ES_HOST = "127.0.0.1:" + esPort;
-                    ES_CLUSTER_NAME = format("test-cluster-%s", clusteruuid);
-                    ES_NODE_NAME = format("test-server-node-%s", clusteruuid);
+                    esHost = "127.0.0.1:" + esPort;
+                    esClusterName = format("test-cluster-%s", clusteruuid);
+                    esNodeName = format("test-server-node-%s", clusteruuid);
 
                     Builder settings = settingsBuilder();
                     settings.put("script.groovy.sandbox.enabled", false);
-                    settings.put("cluster.name", ES_CLUSTER_NAME);
-                    settings.put("node.name", ES_NODE_NAME);
+                    settings.put("cluster.name", esClusterName);
+                    settings.put("node.name", esNodeName);
                     settings.put("http.enabled", false);
                     settings.put("discovery.zen.ping.multicast.enabled", false);
-                    settings.put("discovery.zen.ping.unicast.hosts", ES_HOST);
+                    settings.put("discovery.zen.ping.unicast.hosts", esHost);
                     settings.put("transport.tcp.port", esPort);
                     settings.put("network.host", "127.0.0.1");
                     settings.put("node.data", true);
                     settings.put("node.master", true);
-                    settings.put("path.home", ES_TMP_DIR);
-                    ES_NODE = nodeBuilder()
+                    settings.put("path.home", esTempDir);
+                    esNode = nodeBuilder()
                             .settings(settings)
                             .node();
-                    ES_CLIENT = ES_NODE.client();
+                    esClient = esNode.client();
 
                     JsonObject verticleConfig;
 
-                    Buffer buffer = VERTX.fileSystem().readFileBlocking(currentThread().getContextClassLoader().getResource("intgtestconfig.json").getFile());
+                    Buffer buffer = vertx.fileSystem().readFileBlocking(currentThread().getContextClassLoader().getResource("intgtestconfig.json").getFile());
                     verticleConfig = new JsonObject(buffer.toString(UTF_8));
                     verticleConfig.put("fs.home", tmpDir.toString());
 
                     if (!verticleConfig.containsKey("elasticsearch.cluster.name")) {
-                        verticleConfig.put("elasticsearch.cluster.name", ES_CLUSTER_NAME);
+                        verticleConfig.put("elasticsearch.cluster.name", esClusterName);
                     }
 
                     if (!verticleConfig.containsKey("elasticsearch.node.name")) {
-                        verticleConfig.put("elasticsearch.node.name", ES_NODE_NAME);
+                        verticleConfig.put("elasticsearch.node.name", esNodeName);
                     }
 
                     if (!verticleConfig.containsKey("elasticsearch.discovery.zen.ping.unicast.hosts")) {
-                        verticleConfig.put("elasticsearch.discovery.zen.ping.unicast.hosts", new JsonArray().add(ES_HOST));
+                        verticleConfig.put("elasticsearch.discovery.zen.ping.unicast.hosts", new JsonArray().add(esHost));
                     }
 
                     if (!verticleConfig.containsKey("http.listen.addresses")) {
@@ -165,13 +166,13 @@ public class BaseTestVerticle {
                             .setKeepAlive(false)
                             .setLogActivity(true)
                             .setSsl(true);
-                    HTTP_CLIENT = VERTX.createHttpClient(httpClientOptions);
-                    HTTPS_CLIENT = VERTX.createHttpClient(httpsClientOptions);
+                    httpClient = vertx.createHttpClient(httpClientOptions);
+                    httpsClient = vertx.createHttpClient(httpsClientOptions);
 
                     SfsServer sfsServer = new SfsServer();
 
                     ObservableFuture<String> handler = RxHelper.observableFuture();
-                    VERTX.deployVerticle(
+                    vertx.deployVerticle(
                             sfsServer,
                             new DeploymentOptions()
                                     .setConfig(verticleConfig),
@@ -179,10 +180,9 @@ public class BaseTestVerticle {
                     return handler
                             .map(new ToVoid<>())
                             .doOnNext(aVoid1 -> {
-                                VERTX_CONTEXT = sfsServer.vertxContext();
-                                checkState(VERTX_CONTEXT != null, "VertxContext was null on Verticle %s", sfsServer);
+                                vertxContext = sfsServer.vertxContext();
+                                checkState(vertxContext != null, "VertxContext was null on Verticle %s", sfsServer);
                             })
-                            .flatMap(new WaitForCluster(VERTX, HTTP_CLIENT))
                             .onErrorResumeNext(throwable -> {
                                 throwable.printStackTrace();
                                 return cleanup().flatMap(aVoid1 -> Observable.<Void>error(throwable));
@@ -191,41 +191,43 @@ public class BaseTestVerticle {
     }
 
     protected VertxContext<Server> vertxContext() {
-        return VERTX_CONTEXT;
+        return vertxContext;
     }
 
     protected Observable<Void> cleanup() {
-        Set<String> deploymentIds = VERTX.deploymentIDs();
+        Set<String> deploymentIds = vertx != null ? vertx.deploymentIDs() : Collections.emptySet();
         return from(deploymentIds)
                 .flatMap(deploymentId -> {
                     ObservableFuture<Void> handler = RxHelper.observableFuture();
-                    VERTX.undeploy(deploymentId, handler.toHandler());
+                    vertx.undeploy(deploymentId, handler.toHandler());
                     return handler;
                 })
+                .count()
+                .map(new ToVoid<>())
                 .onErrorResumeNext(throwable -> {
                     throwable.printStackTrace();
                     return just(null);
                 })
                 .doOnNext(aVoid -> {
-                    if (ES_NODE != null) {
-                        ES_NODE.close();
+                    if (esNode != null) {
+                        esNode.close();
                     }
-                    if (ROOT_TMP_DIR != null) {
-                        VERTX.fileSystem().deleteRecursiveBlocking(ROOT_TMP_DIR.toString(), true);
+                    if (rootTmpDir != null && vertx != null) {
+                        vertx.fileSystem().deleteRecursiveBlocking(rootTmpDir.toString(), true);
                     }
                 })
                 .doOnNext(aVoid -> {
-                    ROOT_TMP_DIR = null;
-                    ES_TMP_DIR = null;
-                    ES_CLUSTER_NAME = null;
-                    ES_NODE_NAME = null;
-                    ES_HOST = null;
-                    ES_CLIENT = null;
+                    rootTmpDir = null;
+                    esTempDir = null;
+                    esClusterName = null;
+                    esNodeName = null;
+                    esHost = null;
+                    esClient = null;
                     tmpDir = null;
-                    ES_NODE = null;
-                    VERTX = null;
-                    HTTP_CLIENT = null;
-                    VERTX_CONTEXT = null;
+                    esNode = null;
+                    vertx = null;
+                    httpClient = null;
+                    vertxContext = null;
                 });
     }
 

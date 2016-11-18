@@ -58,7 +58,7 @@ public class VerifySegmentQuick implements Func1<TransientSegment, Observable<Bo
                     new VolumeReplicaGroup(vertxContext, replicas)
                             .setAllowSameNode(allowSameNode);
 
-            boolean verified = size(transientSegment.verifiedAckdBlobs()) >= volumeReplicaGroup.getQuorumMinNumberOfReplicas();
+            boolean verified = size(transientSegment.verifiedAckdBlobs()) >= volumeReplicaGroup.getQuorumMinNumberOfCopies();
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("end verifysegmentquick object=" + transientSegment.getParent().getParent().getId() + ", version=" + transientSegment.getParent().getId() + ", segment=" + transientSegment.getId() + ", verified=" + verified);
             }

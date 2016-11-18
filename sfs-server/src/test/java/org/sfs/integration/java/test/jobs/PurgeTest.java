@@ -17,6 +17,7 @@
 package org.sfs.integration.java.test.jobs;
 
 import com.google.common.base.Optional;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.json.JsonArray;
@@ -38,6 +39,8 @@ import org.sfs.integration.java.func.PutContainer;
 import org.sfs.integration.java.func.PutObject;
 import org.sfs.integration.java.func.RefreshIndex;
 import org.sfs.integration.java.func.VerifyRepairAllContainersExecute;
+import org.sfs.integration.java.func.WaitForCluster;
+import org.sfs.jobs.Jobs;
 import org.sfs.jobs.VerifyRepairAllContainerObjects;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.HttpClientResponseHeaderLogger;
@@ -76,13 +79,14 @@ public class PurgeTest extends BaseTestVerticle {
 
     protected Observable<Void> prepareContainer(TestContext context) {
         return just((Void) null)
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getNodeStats().forceUpdate(VERTX_CONTEXT))
-                .flatMap(aVoid -> VERTX_CONTEXT.verticle().getClusterInfo().forceRefresh(VERTX_CONTEXT))
-                .flatMap(new PostAccount(HTTP_CLIENT, accountName, authAdmin))
+                .flatMap(aVoid -> vertxContext.verticle().getNodeStats().forceUpdate(vertxContext))
+                .flatMap(aVoid -> vertxContext.verticle().getClusterInfo().forceRefresh(vertxContext))
+                .flatMap(new WaitForCluster(vertxContext))
+                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(HTTP_CLIENT, accountName, containerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient, accountName, containerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
@@ -91,30 +95,29 @@ public class PurgeTest extends BaseTestVerticle {
     }
 
     @Test
-    public void testPurgeExpiredTwoVersionsNoVersionsRemaining(TestContext context) {
+    public void testForceRemoveVolume(TestContext context) {
         byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
         getCurrentInstance().nextBytesBlocking(data0);
-        final long currentTimeInMillis = currentTimeMillis();
 
         Async async = context.async();
 
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(Optional::get);
                     }
                 })
@@ -128,7 +131,76 @@ public class PurgeTest extends BaseTestVerticle {
                     Calendar past = getInstance();
                     past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
+                    IndexRequestBuilder request = elasticsearch.get()
+                            .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
+                    jsonObject.put("update_ts", toDateTimeString(past));
+                    request.setSource(jsonObject.encode());
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
+                            .map(indexResponseOptional -> jsonObject);
+                })
+                .map(new ToVoid<JsonObject>())
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin)
+                        .setHeader(Jobs.Parameters.FORCE_REMOVE_VOLUMES, Iterables.getFirst(vertxContext.verticle().nodes().volumeManager().volumes(), null)))
+                .map(new ToVoid<>())
+                .flatMap(new Func1<Void, Observable<GetResponse>>() {
+                    @Override
+                    public Observable<GetResponse> call(Void aVoid) {
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
+                        GetRequestBuilder request = elasticsearch.get()
+                                .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
+                                .map(Optional::get);
+                    }
+                })
+                .map(getResponse -> {
+                    assertFalse(context, getResponse.isExists());
+                    return getResponse;
+                })
+                .map(new ToVoid<GetResponse>())
+                .subscribe(new TestSubscriber(context, async));
+    }
+
+    @Test
+    public void testPurgeExpiredTwoVersionsNoVersionsRemaining(TestContext context) {
+        byte[] data0 = new byte[TINY_DATA_THRESHOLD + 1];
+        getCurrentInstance().nextBytesBlocking(data0);
+        final long currentTimeInMillis = currentTimeMillis();
+
+        Async async = context.async();
+
+        prepareContainer(context)
+
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
+                .map(new HttpClientResponseHeaderLogger())
+                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                .map(new ToVoid<HttpClientResponse>())
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
+                .map(new HttpClientResponseHeaderLogger())
+                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                .map(new ToVoid<HttpClientResponse>())
+                .flatMap(new Func1<Void, Observable<GetResponse>>() {
+                    @Override
+                    public Observable<GetResponse> call(Void aVoid) {
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
+                        GetRequestBuilder request = elasticsearch.get()
+                                .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
+                                .map(Optional::get);
+                    }
+                })
+                .map(getResponse -> {
+                    JsonObject jsonObject = new JsonObject(getResponse.getSourceAsString());
+                    JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
+                    assertEquals(context, 2, versions.size());
+                    return jsonObject;
+                })
+                .flatMap(jsonObject -> {
+                    Calendar past = getInstance();
+                    past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
+
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
                             .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                     JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -138,20 +210,20 @@ public class PurgeTest extends BaseTestVerticle {
                     }
                     jsonObject.put("update_ts", toDateTimeString(past));
                     request.setSource(jsonObject.encode());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                             .map(indexResponseOptional -> jsonObject);
                 })
                 .map(new ToVoid<JsonObject>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin))
                 .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(Optional::get);
                     }
                 })
@@ -172,21 +244,21 @@ public class PurgeTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(Optional::get);
                     }
                 })
@@ -200,7 +272,7 @@ public class PurgeTest extends BaseTestVerticle {
                     Calendar past = getInstance();
                     past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
                             .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                     JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -211,20 +283,20 @@ public class PurgeTest extends BaseTestVerticle {
                     }
                     jsonObject.put("update_ts", toDateTimeString(past));
                     request.setSource(jsonObject.encode());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                             .map(indexResponseOptional -> jsonObject);
                 })
                 .map(new ToVoid<JsonObject>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin))
                 .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(Optional::get);
                     }
                 })
@@ -251,21 +323,21 @@ public class PurgeTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(Optional::get);
                     }
                 })
@@ -279,7 +351,7 @@ public class PurgeTest extends BaseTestVerticle {
                     Calendar past = getInstance();
                     past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
                             .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                     JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -289,20 +361,20 @@ public class PurgeTest extends BaseTestVerticle {
                     }
                     jsonObject.put("update_ts", toDateTimeString(past));
                     request.setSource(jsonObject.encode());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                             .map(indexResponseOptional -> jsonObject);
                 })
                 .map(new ToVoid<JsonObject>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin))
                 .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(Optional::get);
                     }
                 })
@@ -322,19 +394,19 @@ public class PurgeTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
                             .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                             .map(Optional::get);
                 })
                 .map(getResponse -> {
@@ -347,7 +419,7 @@ public class PurgeTest extends BaseTestVerticle {
                     Calendar past = getInstance();
                     past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
                             .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                     JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -358,18 +430,18 @@ public class PurgeTest extends BaseTestVerticle {
                     }
                     jsonObject.put("update_ts", toDateTimeString(past));
                     request.setSource(jsonObject.encode());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                             .map(indexResponseOptional -> jsonObject);
                 })
                 .map(new ToVoid<JsonObject>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin))
                 .map(new ToVoid<>())
                 .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
                             .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                             .map(Optional::get);
                 })
                 .map(getResponse -> {
@@ -394,19 +466,19 @@ public class PurgeTest extends BaseTestVerticle {
         Async async = context.async();
         prepareContainer(context)
 
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     GetRequestBuilder request = elasticsearch.get()
                             .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                             .map(Optional::get);
                 })
                 .map(getResponse -> {
@@ -419,7 +491,7 @@ public class PurgeTest extends BaseTestVerticle {
                     Calendar past = getInstance();
                     past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                    Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                     IndexRequestBuilder request = elasticsearch.get()
                             .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                     JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -443,20 +515,20 @@ public class PurgeTest extends BaseTestVerticle {
                     }
                     jsonObject.put("update_ts", toDateTimeString(past));
                     request.setSource(jsonObject.encode());
-                    return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                             .map(indexResponseOptional -> jsonObject);
                 })
                 .map(new ToVoid<JsonObject>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin))
                 .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(Optional::get);
                     }
                 })
@@ -478,21 +550,21 @@ public class PurgeTest extends BaseTestVerticle {
 
         Async async = context.async();
         prepareContainer(context)
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(new Func1<Optional<GetResponse>, GetResponse>() {
                                     @Override
                                     public GetResponse call(Optional<GetResponse> getResponseOptional) {
@@ -516,7 +588,7 @@ public class PurgeTest extends BaseTestVerticle {
                         Calendar past = getInstance();
                         past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         IndexRequestBuilder request = elasticsearch.get()
                                 .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                         JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -541,7 +613,7 @@ public class PurgeTest extends BaseTestVerticle {
                         }
                         jsonObject.put("update_ts", toDateTimeString(past));
                         request.setSource(jsonObject.encode());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                                 .map(new Func1<Optional<IndexResponse>, JsonObject>() {
                                     @Override
                                     public JsonObject call(Optional<IndexResponse> indexResponseOptional) {
@@ -551,16 +623,16 @@ public class PurgeTest extends BaseTestVerticle {
                     }
                 })
                 .map(new ToVoid<JsonObject>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin))
                 .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(new Func1<Optional<GetResponse>, GetResponse>() {
                                     @Override
                                     public GetResponse call(Optional<GetResponse> getResponseOptional) {
@@ -596,21 +668,21 @@ public class PurgeTest extends BaseTestVerticle {
 
         Async async = context.async();
         prepareContainer(context)
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(new Func1<Optional<GetResponse>, GetResponse>() {
                                     @Override
                                     public GetResponse call(Optional<GetResponse> getResponseOptional) {
@@ -634,7 +706,7 @@ public class PurgeTest extends BaseTestVerticle {
                         Calendar past = getInstance();
                         past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         IndexRequestBuilder request = elasticsearch.get()
                                 .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                         JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -659,7 +731,7 @@ public class PurgeTest extends BaseTestVerticle {
                         }
                         jsonObject.put("update_ts", toDateTimeString(past));
                         request.setSource(jsonObject.encode());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                                 .map(new Func1<Optional<IndexResponse>, JsonObject>() {
                                     @Override
                                     public JsonObject call(Optional<IndexResponse> indexResponseOptional) {
@@ -669,16 +741,16 @@ public class PurgeTest extends BaseTestVerticle {
                     }
                 })
                 .map(new ToVoid<JsonObject>())
-                .flatMap(new RefreshIndex(HTTP_CLIENT, authAdmin))
-                .flatMap(new VerifyRepairAllContainersExecute(HTTP_CLIENT, authAdmin))
+                .flatMap(new RefreshIndex(httpClient, authAdmin))
+                .flatMap(new VerifyRepairAllContainersExecute(httpClient, authAdmin))
                 .map(new ToVoid<>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(new Func1<Optional<GetResponse>, GetResponse>() {
                                     @Override
                                     public GetResponse call(Optional<GetResponse> getResponseOptional) {
@@ -717,32 +789,32 @@ public class PurgeTest extends BaseTestVerticle {
 
         Async async = context.async();
         prepareContainer(context)
-                .flatMap(new PostContainer(HTTP_CLIENT, accountName, containerName, authAdmin, headers))
+                .flatMap(new PostContainer(httpClient, accountName, containerName, authAdmin, headers))
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(HTTP_CLIENT, accountName, containerName, objectName, authNonAdmin, data0))
+                .flatMap(new PutObject(httpClient, accountName, containerName, objectName, authNonAdmin, data0))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
                 .flatMap(new Func1<Void, Observable<GetResponse>>() {
                     @Override
                     public Observable<GetResponse> call(Void aVoid) {
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         GetRequestBuilder request = elasticsearch.get()
                                 .prepareGet(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultGetTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultGetTimeout())
                                 .map(new Func1<Optional<GetResponse>, GetResponse>() {
                                     @Override
                                     public GetResponse call(Optional<GetResponse> getResponseOptional) {
@@ -766,7 +838,7 @@ public class PurgeTest extends BaseTestVerticle {
                         Calendar past = getInstance();
                         past.setTimeInMillis(System.currentTimeMillis() - (VerifyRepairAllContainerObjects.CONSISTENCY_THRESHOLD * 2));
 
-                        Elasticsearch elasticsearch = VERTX_CONTEXT.verticle().elasticsearch();
+                        Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
                         IndexRequestBuilder request = elasticsearch.get()
                                 .prepareIndex(elasticsearch.objectIndex(containerName), elasticsearch.defaultType(), fromPaths(accountName, containerName, objectName).objectPath().get());
                         JsonArray versions = jsonObject.getJsonArray("versions", new JsonArray());
@@ -788,7 +860,7 @@ public class PurgeTest extends BaseTestVerticle {
                         }
                         jsonObject.put("update_ts", toDateTimeString(past));
                         request.setSource(jsonObject.encode());
-                        return elasticsearch.execute(VERTX_CONTEXT, request, elasticsearch.getDefaultIndexTimeout())
+                        return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultIndexTimeout())
                                 .map(new Func1<Optional<IndexResponse>, JsonObject>() {
                                     @Override
                                     public JsonObject call(Optional<IndexResponse> indexResponseOptional) {

@@ -17,7 +17,6 @@
 package org.sfs.nodes.all.blobreference;
 
 import com.google.common.base.Optional;
-import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
 import org.sfs.VertxContext;
@@ -28,13 +27,9 @@ import org.sfs.vo.TransientBlobReference;
 import rx.Observable;
 import rx.functions.Func1;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.collect.Iterables.isEmpty;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static org.sfs.rx.Defer.just;
-import static org.sfs.rx.RxHelper.iterate;
 
 public class DeleteBlobReference implements Func1<TransientBlobReference, Observable<Boolean>> {
 
@@ -56,7 +51,7 @@ public class DeleteBlobReference implements Func1<TransientBlobReference, Observ
                 .flatMap(transientBlobReference1 -> {
                     String volumeId = transientBlobReference1.getVolumeId().get();
                     long position = transientBlobReference1.getPosition().get();
-                    Optional<XNode> oXNode = clusterInfo.getNodesForVolume(vertxContext, volumeId);
+                    Optional<XNode> oXNode = clusterInfo.getNodeForVolume(vertxContext, volumeId);
                     if (!oXNode.isPresent()) {
                         LOGGER.warn("No nodes contain volume " + volumeId);
                         return Defer.just(false);

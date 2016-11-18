@@ -46,7 +46,6 @@ import org.sfs.validate.ValidateHeaderNotExists;
 import org.sfs.validate.ValidateObjectPath;
 import org.sfs.validate.ValidateOptimisticObjectLock;
 import org.sfs.validate.ValidateParamNotExists;
-import org.sfs.validate.ValidateReplicateGroupIsPresent;
 import org.sfs.validate.ValidateTtl;
 import org.sfs.vo.ObjectPath;
 import org.sfs.vo.PersistentObject;
@@ -102,7 +101,6 @@ public class PutObject implements Handler<SfsRequest> {
                         .flatMap(new Authenticate(httpServerRequest))
                         .flatMap(new ValidateActionAuthenticated(httpServerRequest))
                         .map(aVoid -> httpServerRequest)
-                        .flatMap(new ValidateReplicateGroupIsPresent(httpServerRequest.vertxContext()))
                         .map(new ValidateParamNotExists(MULTIPART_MANIFEST))
                         .map(new ValidateHeaderNotExists(X_COPY_FROM))
                         .map(new ValidateHeaderIsBase16LowercaseEncoded(ETAG))

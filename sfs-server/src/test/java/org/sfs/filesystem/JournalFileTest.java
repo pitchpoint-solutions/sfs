@@ -35,15 +35,12 @@ import org.sfs.io.Block;
 import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.NullEndableWriteStream;
-import org.sfs.thread.NamedThreadFactory;
+import org.sfs.thread.NamedCapacityFixedThreadPool;
 import rx.Observable;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.google.common.hash.Hashing.sha512;
@@ -58,7 +55,6 @@ import static java.nio.file.Files.createTempDirectory;
 import static java.nio.file.Files.size;
 import static java.nio.file.Files.write;
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.sfs.filesystem.JournalFile.DEFAULT_BLOCK_SIZE;
 import static org.sfs.io.Block.encodeFrame;
 import static org.sfs.protobuf.XVolume.XJournal.Header.newBuilder;
@@ -76,27 +72,13 @@ public class JournalFileTest {
     @Rule
     public final RunTestOnContext rule = new RunTestOnContext();
     private SfsVertx sfsVertx;
+    private ExecutorService ioPool;
+    private ExecutorService backgroundPool;
 
     @Before
     public void start() {
-        BlockingQueue<Runnable> ioQueue = new LinkedBlockingQueue<>(500);
-        BlockingQueue<Runnable> backgroundQueue = new LinkedBlockingQueue<>(500);
-        ExecutorService ioPool =
-                new ThreadPoolExecutor(
-                        200,
-                        200,
-                        0L,
-                        MILLISECONDS,
-                        ioQueue,
-                        new NamedThreadFactory("sfs-io-pool"));
-        ExecutorService backgroundPool =
-                new ThreadPoolExecutor(
-                        200,
-                        200,
-                        0L,
-                        MILLISECONDS,
-                        backgroundQueue,
-                        new NamedThreadFactory("sfs-blocking-action-pool"));
+        ioPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-io-pool");
+        backgroundPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-blocking-action-pool");
         sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
         try {
             path = createTempDirectory("");
@@ -109,6 +91,12 @@ public class JournalFileTest {
     public void stop(TestContext context) {
         if (path != null) {
             rule.vertx().fileSystem().deleteRecursiveBlocking(path.toString(), true);
+        }
+        if (ioPool != null) {
+            ioPool.shutdown();
+        }
+        if (backgroundPool != null) {
+            backgroundPool.shutdown();
         }
     }
 

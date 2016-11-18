@@ -16,6 +16,8 @@
 
 package org.sfs;
 
+import io.vertx.core.Context;
+import org.sfs.rx.RxHelper;
 import rx.Observable;
 
 import java.io.IOException;
@@ -37,7 +39,9 @@ public class SfsFileSystem {
         this.workingDirectory = workingDirectory;
         this.tmpDirectory = Paths.get(workingDirectory.toString(), "tmp");
         this.backupDirectory = Paths.get(workingDirectory.toString(), "backup");
-        return vertxContext.executeBlocking(() -> {
+        SfsVertx vertx = vertxContext.vertx();
+        Context context = vertx.getOrCreateContext();
+        return RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
             try {
                 Files.createDirectories(workingDirectory);
                 Files.createDirectories(tmpDirectory);

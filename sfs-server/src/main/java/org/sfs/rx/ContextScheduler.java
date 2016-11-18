@@ -41,7 +41,6 @@ public class ContextScheduler extends Scheduler {
     private final Vertx vertx;
     private final boolean blocking;
     private final boolean ordered;
-    private final RxJavaSchedulersHook schedulersHook = RxJavaSchedulersHook.getDefaultInstance();
     private final Context context;
 
     public ContextScheduler(Context context, boolean blocking) {

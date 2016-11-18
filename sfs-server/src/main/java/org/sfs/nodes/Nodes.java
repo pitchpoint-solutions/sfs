@@ -20,9 +20,11 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.net.HostAndPort;
+import io.vertx.core.Context;
 import io.vertx.core.Vertx;
 import io.vertx.core.logging.Logger;
 import org.sfs.Server;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.VolumeManager;
 import org.sfs.rx.Defer;
@@ -42,7 +44,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -75,12 +76,8 @@ public class Nodes {
     private long nodeStatsRefreshInterval;
     private ImmutableList<HostAndPort> clusterHosts;
     private ImmutableList<HostAndPort> publishAddresses;
-    private final BlockingQueue<Runnable> ioQueue;
-    private final BlockingQueue<Runnable> backgroundQueue;
 
-    public Nodes(BlockingQueue<Runnable> ioQueue, BlockingQueue<Runnable> backgroundQueue) {
-        this.ioQueue = ioQueue;
-        this.backgroundQueue = backgroundQueue;
+    public Nodes() {
     }
 
     public Observable<Void> open(
@@ -164,16 +161,10 @@ public class Nodes {
         return masterNode;
     }
 
-    public int getBackgroundQueueSize() {
-        return backgroundQueue.size();
-    }
-
-    public int getIoQueueSize() {
-        return backgroundQueue.size();
-    }
-
     private Observable<String> initNode(VertxContext<Server> vertxContext) {
-        return vertxContext.executeBlocking(
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(),
                 () -> {
                     try {
                         createDirectories(nodeIdPath.getParent());
@@ -190,7 +181,7 @@ public class Nodes {
                     return (Void) null;
                 })
                 .flatMap(new Sleep(vertxContext, 1000))
-                .flatMap(aVoid -> vertxContext.executeBlocking(() -> {
+                .flatMap(aVoid -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
                     try {
                         return new String(readAllBytes(nodeIdPath), UTF_8);
                     } catch (IOException e) {

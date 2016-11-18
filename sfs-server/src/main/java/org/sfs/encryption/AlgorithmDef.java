@@ -17,6 +17,7 @@
 package org.sfs.encryption;
 
 import io.vertx.core.Vertx;
+import org.sfs.SfsVertx;
 import org.sfs.encryption.impl.SAES256v01;
 import org.sfs.rx.RxHelper;
 import org.sfs.util.PrngRandom;
@@ -76,12 +77,12 @@ public enum AlgorithmDef {
 
     public abstract byte[] generateSaltBlocking();
 
-    public Observable<byte[]> generateKey(Vertx vertx) {
-        return RxHelper.executeBlocking(vertx, this::generateKeyBlocking);
+    public Observable<byte[]> generateKey(SfsVertx vertx) {
+        return RxHelper.executeBlocking(vertx.getOrCreateContext(), vertx.getBackgroundPool(), this::generateKeyBlocking);
     }
 
-    public Observable<byte[]> generateSalt(Vertx vertx) {
-        return RxHelper.executeBlocking(vertx, this::generateSaltBlocking);
+    public Observable<byte[]> generateSalt(SfsVertx vertx) {
+        return RxHelper.executeBlocking(vertx.getOrCreateContext(), vertx.getBackgroundPool(),this::generateSaltBlocking);
     }
 
     public static AlgorithmDef fromNameIfExists(String name) {

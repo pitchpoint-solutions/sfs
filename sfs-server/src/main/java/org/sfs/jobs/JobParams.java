@@ -25,8 +25,12 @@ import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
 
 public class JobParams {
 
+    public static String getFirstOptionalParam(MultiMap params, String name) {
+        return params.get(name);
+    }
+
     public static String getFirstRequiredParam(MultiMap params, String name) {
-        String value = params.get(name);
+        String value = getFirstOptionalParam(params, name);
         if (Strings.isNullOrEmpty(value)) {
             JsonObject jsonObject = new JsonObject()
                     .put("message", String.format("%s is required", name));

@@ -76,54 +76,6 @@ public class SfsVertxImpl implements SfsVertx {
     }
 
     @Override
-    public <T> void executeBlocking(Func0<T> action, Handler<AsyncResult<T>> asyncResultHandler) {
-        Context context = getOrCreateContext();
-        backgroundPool.execute(() -> {
-            T resultr = null;
-            try {
-                T result = action.call();
-                resultr = result;
-                context.runOnContext(event -> Future.succeededFuture(result).setHandler(asyncResultHandler));
-            } catch (Throwable e) {
-                LOGGER.error("Result was " + resultr + ", Context was " + context + ", Handler was " + asyncResultHandler, e);
-                context.runOnContext(event -> Future.<T>failedFuture(e).setHandler(asyncResultHandler));
-            }
-        });
-    }
-
-    @Override
-    public <T> void executeBlockingObservable(Func0<Observable<T>> action, Handler<AsyncResult<T>> asyncResultHandler) {
-        Context context = getOrCreateContext();
-        backgroundPool.execute(() -> {
-            try {
-                Observable<T> o = action.call();
-                o.single()
-                        .subscribe(new Subscriber<T>() {
-
-                            T result;
-
-                            @Override
-                            public void onCompleted() {
-                                context.runOnContext(event -> Future.succeededFuture(result).setHandler(asyncResultHandler));
-                            }
-
-                            @Override
-                            public void onError(Throwable e) {
-                                context.runOnContext(event -> Future.<T>failedFuture(e).setHandler(asyncResultHandler));
-                            }
-
-                            @Override
-                            public void onNext(T t) {
-                                result = t;
-                            }
-                        });
-            } catch (Throwable e) {
-                context.runOnContext(event -> Future.<T>failedFuture(e).setHandler(asyncResultHandler));
-            }
-        });
-    }
-
-    @Override
     public boolean cancelTimer(long id) {
         return vertx.cancelTimer(id);
     }

@@ -16,7 +16,9 @@
 
 package org.sfs.util;
 
+import io.vertx.core.Context;
 import org.sfs.Server;
+import org.sfs.SfsVertx;
 import org.sfs.VertxContext;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
@@ -42,7 +44,9 @@ public class FileSystemLock {
     }
 
     public Observable<Boolean> tryLock(VertxContext<Server> vertxContext) {
-        return vertxContext.executeBlocking(() -> {
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
             try {
                 createFile(name);
                 name.toFile().deleteOnExit();
@@ -64,7 +68,9 @@ public class FileSystemLock {
     }
 
     private void lock(VertxContext<Server> vertxContext, long startTime, ObservableFuture<Void> handler) {
-        vertxContext.executeBlocking(
+        SfsVertx sfsVertx = vertxContext.vertx();
+        Context context = sfsVertx.getOrCreateContext();
+        RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(),
                 () -> {
                     try {
                         createFile(name);

@@ -16,6 +16,9 @@
 
 package org.sfs.jobs;
 
+import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
+import com.google.common.collect.Sets;
 import io.vertx.core.MultiMap;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
@@ -29,6 +32,9 @@ import org.sfs.io.AsyncIO;
 import org.sfs.rx.Defer;
 import org.sfs.vo.ObjectPath;
 import rx.Observable;
+
+import java.util.Collections;
+import java.util.Set;
 
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 
@@ -56,6 +62,12 @@ public class VerifyRepairObject extends AbstractJob {
 
         Elasticsearch elasticSearch = vertxContext.verticle().elasticsearch();
 
+        String unparsedForceRemoveVolumes =
+                JobParams.getFirstOptionalParam(parameters, Jobs.Parameters.FORCE_REMOVE_VOLUMES);
+        Set<String> forceRemoveVolumes = Strings.isNullOrEmpty(unparsedForceRemoveVolumes)
+                ? Collections.emptySet()
+                : Sets.newHashSet(Splitter.on(',').omitEmptyStrings().trimResults().split(unparsedForceRemoveVolumes));
+
         String objectId = JobParams.getFirstRequiredParam(parameters, Jobs.Parameters.OBJECT_ID);
 
         ObjectPath objectPath = ObjectPath.fromPaths(objectId);
@@ -72,7 +84,7 @@ public class VerifyRepairObject extends AbstractJob {
                         .setTypes(elasticSearch.defaultType())
                         .setReturnVersion(true);
 
-        SearchHitMaintainObjectEndableWrite consumer = new SearchHitMaintainObjectEndableWrite(vertxContext);
+        SearchHitMaintainObjectEndableWrite consumer = new SearchHitMaintainObjectEndableWrite(vertxContext, forceRemoveVolumes);
 
         LOGGER.info("Starting maintain of object " + objectId);
 

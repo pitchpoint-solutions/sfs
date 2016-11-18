@@ -24,6 +24,7 @@ import io.vertx.ext.unit.TestContext;
 import io.vertx.ext.unit.junit.RunTestOnContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,6 +37,7 @@ import org.sfs.io.AsyncIO;
 import org.sfs.io.MultiEndableWriteStream;
 import org.sfs.io.WriteQueueSupport;
 import org.sfs.rx.ToVoid;
+import org.sfs.thread.NamedCapacityFixedThreadPool;
 import rx.Observable;
 
 import java.io.IOException;
@@ -47,26 +49,37 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 @RunWith(VertxUnitRunner.class)
 public class MultiWriteStreamTest {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MultiWriteStreamTest.class);
-    private ExecutorService backgroundBool = Executors.newFixedThreadPool(10);
-    private ExecutorService ioPool = Executors.newFixedThreadPool(10);
+
     @Rule
     public final RunTestOnContext rule = new RunTestOnContext();
 
+    private ExecutorService backgroundPool;
+    private ExecutorService ioPool;
+
+    @Before
+    public void start() {
+        ioPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-io-pool");
+        backgroundPool = NamedCapacityFixedThreadPool.newInstance(200, "sfs-blocking-action-pool");
+    }
+
     @After
-    public void after(TestContext context) {
-        backgroundBool.shutdown();
-        ioPool.shutdown();
+    public void stop(TestContext context) {
+        if (ioPool != null) {
+            ioPool.shutdown();
+        }
+        if (backgroundPool != null) {
+            backgroundPool.shutdown();
+        }
     }
 
     @Test
     public void test(TestContext context) throws IOException {
-        SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundBool, ioPool);
+        SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
 
         final byte[] dataBuffer = new byte[1024 * 1024 * 2];
 
@@ -93,14 +106,14 @@ public class MultiWriteStreamTest {
                         WriteQueueSupport q3 = new WriteQueueSupport(8192);
                         Set<OpenOption> options = Sets.newHashSet(StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
 
-                        AsynchronousFileChannel ain = AsynchronousFileChannel.open(tmpFile, options, backgroundBool);
-                        AsynchronousFileChannel aout1 = AsynchronousFileChannel.open(out1, options, backgroundBool);
-                        AsynchronousFileChannel aout2 = AsynchronousFileChannel.open(out2, options, backgroundBool);
-                        AsynchronousFileChannel aout3 = AsynchronousFileChannel.open(out3, options, backgroundBool);
-                        AsyncFileReaderImpl r1 = new AsyncFileReaderImpl(sfsVertx, 0, 8192, dataBuffer.length, ain, LOGGER);
-                        AsyncFileWriterImpl w1 = new AsyncFileWriterImpl(0, q1, sfsVertx, aout1, LOGGER);
-                        AsyncFileWriterImpl w2 = new AsyncFileWriterImpl(0, q2, sfsVertx, aout2, LOGGER);
-                        AsyncFileWriterImpl w3 = new AsyncFileWriterImpl(0, q3, sfsVertx, aout3, LOGGER);
+                        AsynchronousFileChannel ain = AsynchronousFileChannel.open(tmpFile, options, ioPool);
+                        AsynchronousFileChannel aout1 = AsynchronousFileChannel.open(out1, options, ioPool);
+                        AsynchronousFileChannel aout2 = AsynchronousFileChannel.open(out2, options, ioPool);
+                        AsynchronousFileChannel aout3 = AsynchronousFileChannel.open(out3, options, ioPool);
+                        AsyncFileReaderImpl r1 = new AsyncFileReaderImpl(sfsVertx.getOrCreateContext(), 0, 8192, dataBuffer.length, ain, LOGGER);
+                        AsyncFileWriterImpl w1 = new AsyncFileWriterImpl(0, q1, sfsVertx.getOrCreateContext(), aout1, LOGGER);
+                        AsyncFileWriterImpl w2 = new AsyncFileWriterImpl(0, q2, sfsVertx.getOrCreateContext(), aout2, LOGGER);
+                        AsyncFileWriterImpl w3 = new AsyncFileWriterImpl(0, q3, sfsVertx.getOrCreateContext(), aout3, LOGGER);
                         LOGGER.debug("Start Attempt " + integer + ", w1=" + w1 + ", w2=" + w2 + ", w3=" + w3);
                         MultiEndableWriteStream multiWriteStreamConsumer = new MultiEndableWriteStream(w1, w2, w3);
                         return AsyncIO.pump(r1, multiWriteStreamConsumer)
