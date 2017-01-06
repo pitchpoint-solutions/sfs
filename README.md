@@ -24,28 +24,32 @@
 * The entire implementation is event driven and non blocking. Built using vert.x.
 
 ## Quickstart on Linux
-* docker run -d -P --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=sfs_example_elasticsearch
-* HOSTNAME=`hostname` && export HOST_IP=`ping -c1 -n ${HOSTNAME} | head -n1 | sed "s/.*(\([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\)).*/\1/g"`;
-* export DOCKER_ES_PORT=`docker port sfs_example_elasticsearch 9300/tcp | sed -E 's/(.+):(.+)/\2/'`
-* docker run -d -P --add-host localhost:127.0.0.1 -e SFS_HTTP_LISTEN_ADDRESSES=0.0.0.0:80 -e SFS_HTTP_PUBLISH_ADDRESSES=127.0.0.1:80 -e SFS_REMOTENODE_SECRET=YWJjMTIzCg== -e SFS_KEYSTORE_AWS_KMS_ENDPOINT=https://kms.us-east-1.amazonaws.com -e SFS_KEYSTORE_AWS_KMS_KEY_ID=arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab -e SFS_KEYSTORE_AWS_KMS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -e SFS_KEYSTORE_AWS_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAWSEXAMPLEKEY -e SFS_KEYSTORE_AZURE_KMS_ENDPOINT=https://yourvaultname.vault.azure.net -e SFS_KEYSTORE_AZURE_KMS_KEY_ID=6603bbb5-cf2e-4367-8327-43ba49ba74b0 -e SFS_KEYSTORE_AZURE_KMS_ACCESS_KEY_ID=a14970c2-397c-4af2-867e-b3480f9eaac6 -e SFS_KEYSTORE_AZURE_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAZUREEXAMPLEKEY -e SFS_ELASTICSEARCH_CLUSTER_NAME=sfs_example_elasticsearch -e SFS_ELASTICSEARCH_NODE_NAME=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_HOSTS=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_MULTICAST_ENABLED=false -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_ENABLED=true --detach --name sfs_example_middlware -P pitchpointsolutions/simple-file-server
-* export DOCKER_SFS_PORT=`docker port sfs_example_middlware 80/tcp | sed -E 's/(.+):(.+)/\2/'`
-* curl -v -XGET "http://localhost:${DOCKER_SFS_PORT}/admin/001/healthcheck"
-* curl -XPOST -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account"
-* curl -XPUT -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container"
-* curl -XPUT -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" -d 'abc123'
-* curl -XGET -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" 
+```
+docker run -d -P --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=sfs_example_elasticsearch
+HOSTNAME=`hostname` && export HOST_IP=`ping -c1 -n ${HOSTNAME} | head -n1 | sed "s/.*(\([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\)).*/\1/g"`;
+export DOCKER_ES_PORT=`docker port sfs_example_elasticsearch 9300/tcp | sed -E 's/(.+):(.+)/\2/'`
+docker run -d -P --add-host localhost:127.0.0.1 -e SFS_HTTP_LISTEN_ADDRESSES=0.0.0.0:80 -e SFS_HTTP_PUBLISH_ADDRESSES=127.0.0.1:80 -e SFS_REMOTENODE_SECRET=YWJjMTIzCg== -e SFS_KEYSTORE_AWS_KMS_ENDPOINT=https://kms.us-east-1.amazonaws.com -e SFS_KEYSTORE_AWS_KMS_KEY_ID=arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab -e SFS_KEYSTORE_AWS_KMS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -e SFS_KEYSTORE_AWS_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAWSEXAMPLEKEY -e SFS_KEYSTORE_AZURE_KMS_ENDPOINT=https://yourvaultname.vault.azure.net -e SFS_KEYSTORE_AZURE_KMS_KEY_ID=6603bbb5-cf2e-4367-8327-43ba49ba74b0 -e SFS_KEYSTORE_AZURE_KMS_ACCESS_KEY_ID=a14970c2-397c-4af2-867e-b3480f9eaac6 -e SFS_KEYSTORE_AZURE_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAZUREEXAMPLEKEY -e SFS_ELASTICSEARCH_CLUSTER_NAME=sfs_example_elasticsearch -e SFS_ELASTICSEARCH_NODE_NAME=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_HOSTS=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_MULTICAST_ENABLED=false -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_ENABLED=true --detach --name sfs_example_middlware -P pitchpointsolutions/simple-file-server
+export DOCKER_SFS_PORT=`docker port sfs_example_middlware 80/tcp | sed -E 's/(.+):(.+)/\2/'`
+curl -v -XGET "http://localhost:${DOCKER_SFS_PORT}/admin/001/healthcheck"
+curl -XPOST -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account"
+curl -XPUT -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container"
+curl -XPUT -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" -d 'abc123'
+curl -XGET -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object"
+ ```
 
 ## Quickstart using Docker Machine
-* docker run -d -P --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=sfs_example_elasticsearch
-* export HOST_IP=`docker-machine ip`;
-* export DOCKER_ES_PORT=`docker port sfs_example_elasticsearch 9300/tcp | sed -E 's/(.+):(.+)/\2/'`
-* docker run -d -P --add-host localhost:127.0.0.1 -e SFS_HTTP_LISTEN_ADDRESSES=0.0.0.0:80 -e SFS_HTTP_PUBLISH_ADDRESSES=127.0.0.1:80 -e SFS_REMOTENODE_SECRET=YWJjMTIzCg== -e SFS_KEYSTORE_AWS_KMS_ENDPOINT=https://kms.us-east-1.amazonaws.com -e SFS_KEYSTORE_AWS_KMS_KEY_ID=arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab -e SFS_KEYSTORE_AWS_KMS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -e SFS_KEYSTORE_AWS_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAWSEXAMPLEKEY -e SFS_KEYSTORE_AZURE_KMS_ENDPOINT=https://yourvaultname.vault.azure.net -e SFS_KEYSTORE_AZURE_KMS_KEY_ID=6603bbb5-cf2e-4367-8327-43ba49ba74b0 -e SFS_KEYSTORE_AZURE_KMS_ACCESS_KEY_ID=a14970c2-397c-4af2-867e-b3480f9eaac6 -e SFS_KEYSTORE_AZURE_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAZUREEXAMPLEKEY -e SFS_ELASTICSEARCH_CLUSTER_NAME=sfs_example_elasticsearch -e SFS_ELASTICSEARCH_NODE_NAME=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_HOSTS=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_MULTICAST_ENABLED=false -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_ENABLED=true --detach --name sfs_example_middlware -P pitchpointsolutions/simple-file-server
-* export DOCKER_SFS_PORT=`docker port sfs_example_middlware 80/tcp | sed -E 's/(.+):(.+)/\2/'`
-* curl -v -XGET "http://${HOST_IP}:${DOCKER_SFS_PORT}/admin/001/healthcheck"
-* curl -XPOST -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account"
-* curl -XPUT -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container"
-* curl -XPUT -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" -d 'abc123'
-* curl -XGET -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" 
+```
+docker run -d -P --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=sfs_example_elasticsearch
+export HOST_IP=`docker-machine ip`;
+export DOCKER_ES_PORT=`docker port sfs_example_elasticsearch 9300/tcp | sed -E 's/(.+):(.+)/\2/'`
+docker run -d -P --add-host localhost:127.0.0.1 -e SFS_HTTP_LISTEN_ADDRESSES=0.0.0.0:80 -e SFS_HTTP_PUBLISH_ADDRESSES=127.0.0.1:80 -e SFS_REMOTENODE_SECRET=YWJjMTIzCg== -e SFS_KEYSTORE_AWS_KMS_ENDPOINT=https://kms.us-east-1.amazonaws.com -e SFS_KEYSTORE_AWS_KMS_KEY_ID=arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab -e SFS_KEYSTORE_AWS_KMS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -e SFS_KEYSTORE_AWS_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAWSEXAMPLEKEY -e SFS_KEYSTORE_AZURE_KMS_ENDPOINT=https://yourvaultname.vault.azure.net -e SFS_KEYSTORE_AZURE_KMS_KEY_ID=6603bbb5-cf2e-4367-8327-43ba49ba74b0 -e SFS_KEYSTORE_AZURE_KMS_ACCESS_KEY_ID=a14970c2-397c-4af2-867e-b3480f9eaac6 -e SFS_KEYSTORE_AZURE_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAZUREEXAMPLEKEY -e SFS_ELASTICSEARCH_CLUSTER_NAME=sfs_example_elasticsearch -e SFS_ELASTICSEARCH_NODE_NAME=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_HOSTS=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_MULTICAST_ENABLED=false -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_ENABLED=true --detach --name sfs_example_middlware -P pitchpointsolutions/simple-file-server
+export DOCKER_SFS_PORT=`docker port sfs_example_middlware 80/tcp | sed -E 's/(.+):(.+)/\2/'`
+curl -v -XGET "http://${HOST_IP}:${DOCKER_SFS_PORT}/admin/001/healthcheck"
+curl -XPOST -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account"
+curl -XPUT -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container"
+curl -XPUT -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" -d 'abc123'
+curl -XGET -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object"
+```
 
 
 ## Master Keys
