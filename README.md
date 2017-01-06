@@ -23,6 +23,30 @@
 * Adding new sfs nodes to the cluster is a simple as starting the docker image on another server. New data will always be written to the nodes with the most available storage space. Existing data will not be rebalanced.  
 * The entire implementation is event driven and non blocking. Built using vert.x.
 
+## Quickstart on Linux
+* docker run -d -P --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=sfs_example_elasticsearch
+* HOSTNAME=`hostname` && export HOST_IP=`ping -c1 -n ${HOSTNAME} | head -n1 | sed "s/.*(\([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\)).*/\1/g"`;
+* export DOCKER_ES_PORT=`docker port sfs_example_elasticsearch 9300/tcp | sed -E 's/(.+):(.+)/\2/'`
+* docker run -d -P --add-host localhost:127.0.0.1 -e SFS_HTTP_LISTEN_ADDRESSES=0.0.0.0:80 -e SFS_HTTP_PUBLISH_ADDRESSES=127.0.0.1:80 -e SFS_REMOTENODE_SECRET=YWJjMTIzCg== -e SFS_KEYSTORE_AWS_KMS_ENDPOINT=https://kms.us-east-1.amazonaws.com -e SFS_KEYSTORE_AWS_KMS_KEY_ID=arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab -e SFS_KEYSTORE_AWS_KMS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -e SFS_KEYSTORE_AWS_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAWSEXAMPLEKEY -e SFS_KEYSTORE_AZURE_KMS_ENDPOINT=https://yourvaultname.vault.azure.net -e SFS_KEYSTORE_AZURE_KMS_KEY_ID=6603bbb5-cf2e-4367-8327-43ba49ba74b0 -e SFS_KEYSTORE_AZURE_KMS_ACCESS_KEY_ID=a14970c2-397c-4af2-867e-b3480f9eaac6 -e SFS_KEYSTORE_AZURE_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAZUREEXAMPLEKEY -e SFS_ELASTICSEARCH_CLUSTER_NAME=sfs_example_elasticsearch -e SFS_ELASTICSEARCH_NODE_NAME=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_HOSTS=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_MULTICAST_ENABLED=false -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_ENABLED=true --detach --name sfs_example_middlware -P pitchpointsolutions/simple-file-server
+* export DOCKER_SFS_PORT=`docker port sfs_example_middlware 80/tcp | sed -E 's/(.+):(.+)/\2/'`
+* curl -v -XGET "http://localhost:${DOCKER_SFS_PORT}/admin/001/healthcheck"
+* curl -XPOST -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account"
+* curl -XPUT -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container"
+* curl -XPUT -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" -d 'abc123'
+* curl -XGET -u admin:admin "http://localhost:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" 
+
+## Quickstart using Docker Machine
+* docker run -d -P --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=sfs_example_elasticsearch
+* export HOST_IP=`docker-machine ip`;
+* export DOCKER_ES_PORT=`docker port sfs_example_elasticsearch 9300/tcp | sed -E 's/(.+):(.+)/\2/'`
+* docker run -d -P --add-host localhost:127.0.0.1 -e SFS_HTTP_LISTEN_ADDRESSES=0.0.0.0:80 -e SFS_HTTP_PUBLISH_ADDRESSES=127.0.0.1:80 -e SFS_REMOTENODE_SECRET=YWJjMTIzCg== -e SFS_KEYSTORE_AWS_KMS_ENDPOINT=https://kms.us-east-1.amazonaws.com -e SFS_KEYSTORE_AWS_KMS_KEY_ID=arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab -e SFS_KEYSTORE_AWS_KMS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -e SFS_KEYSTORE_AWS_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAWSEXAMPLEKEY -e SFS_KEYSTORE_AZURE_KMS_ENDPOINT=https://yourvaultname.vault.azure.net -e SFS_KEYSTORE_AZURE_KMS_KEY_ID=6603bbb5-cf2e-4367-8327-43ba49ba74b0 -e SFS_KEYSTORE_AZURE_KMS_ACCESS_KEY_ID=a14970c2-397c-4af2-867e-b3480f9eaac6 -e SFS_KEYSTORE_AZURE_KMS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAZUREEXAMPLEKEY -e SFS_ELASTICSEARCH_CLUSTER_NAME=sfs_example_elasticsearch -e SFS_ELASTICSEARCH_NODE_NAME=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_HOSTS=${HOST_IP}:${DOCKER_ES_PORT} -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_MULTICAST_ENABLED=false -e SFS_ELASTICSEARCH_DISCOVERY_ZEN_PING_UNICAST_ENABLED=true --detach --name sfs_example_middlware -P pitchpointsolutions/simple-file-server
+* export DOCKER_SFS_PORT=`docker port sfs_example_middlware 80/tcp | sed -E 's/(.+):(.+)/\2/'`
+* curl -v -XGET "http://${HOST_IP}:${DOCKER_SFS_PORT}/admin/001/healthcheck"
+* curl -XPOST -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account"
+* curl -XPUT -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container"
+* curl -XPUT -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" -d 'abc123'
+* curl -XGET -u admin:admin "http://${HOST_IP}:${DOCKER_SFS_PORT}/openstackswift001/my_account/my-container/my_object" 
+
 
 ## Master Keys
 * On first use 1 master is key is generated if one does not exist
@@ -224,61 +248,61 @@ Oracle Java 8 and Maven 3 should be used for building.
 ## Containers
 
 ###### Create a Container ######
-    curl -XPUT -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container"
+    curl -XPUT -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container"
 ###### Update a Container ######
-    curl -XPOST -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: true" -H "X-Container-Meta-Max-Object-Revisions: 3" "http://localhost:8092/openstackswift001/my_account/my_container"    
+    curl -XPOST -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: true" -H "X-Container-Meta-Max-Object-Revisions: 3" "http://localhost:8092/openstackswift001/my_account/my-container"    
 ###### Get Container Metadata ######
-    curl -XHEAD -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container"
+    curl -XHEAD -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container"
 ###### List Objects in Container ######
-     curl -XGET -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container?format=xml&prefix=&limit=10000&delimiter=%2F"
+     curl -XGET -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container?format=xml&prefix=&limit=10000&delimiter=%2F"
 ###### List Objects in subfolder ######
-    curl -XGET -u admin:admin "http://localhost:8092/sfs/openstackswift001/my_account/my_container?format=xml&prefix=subfolder%2F&limit=10000&delimiter=%2F
+    curl -XGET -u admin:admin "http://localhost:8092/sfs/openstackswift001/my_account/my-container?format=xml&prefix=subfolder%2F&limit=10000&delimiter=%2F
 ###### Create a Container the by default encrypts objects and retains at most 3 object revisions ######
-    curl -XPUT -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: true" -H "X-Container-Meta-Max-Object-Revisions: 3" "http://localhost:8092/openstackswift001/my_account/my_container"
+    curl -XPUT -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: true" -H "X-Container-Meta-Max-Object-Revisions: 3" "http://localhost:8092/openstackswift001/my_account/my-container"
 ###### Create a Container and control the number of object index shards, the number of object index replicas and the number of object replicas ######
-    curl -XPUT -u admin:admin -H "x-sfs-object-index-shards: 12" -H "x-sfs-object-index-replicas: 2" -H "x-sfs-object-replicas: 2" "http://localhost:8092/openstackswift001/my_account/my_container"
+    curl -XPUT -u admin:admin -H "x-sfs-object-index-shards: 12" -H "x-sfs-object-index-replicas: 2" -H "x-sfs-object-replicas: 2" "http://localhost:8092/openstackswift001/my_account/my-container"
 ###### Update a Container so that by default it encrypts objects and retains at most 2 object revisions ######
-    curl -XPOST -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: true" -H "X-Container-Meta-Max-Object-Revisions: 2" "http://localhost:8092/openstackswift001/my_account/my_container"
+    curl -XPOST -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: true" -H "X-Container-Meta-Max-Object-Revisions: 2" "http://localhost:8092/openstackswift001/my_account/my-container"
 ###### Update a Container so that by default it doesn't encrypt objects and retains at most 1 object revisions ######
-    curl -XPOST -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: false" -H "X-Container-Meta-Max-Object-Revisions: 1" "http://localhost:8092/openstackswift001/my_account/my_container"
+    curl -XPOST -u admin:admin -H "X-Container-Meta-Server-Side-Encryption: false" -H "X-Container-Meta-Max-Object-Revisions: 1" "http://localhost:8092/openstackswift001/my_account/my-container"
 ###### Update a Container so that one object index replica in maintained for each object index shard and one each object replicated once ######
-    curl -XPOST -u admin:admin -H "x-sfs-object-index-replicas: 1" -H "x-sfs-object-replicas: 1" "http://localhost:8092/openstackswift001/my_account/my_container"
+    curl -XPOST -u admin:admin -H "x-sfs-object-index-replicas: 1" -H "x-sfs-object-replicas: 1" "http://localhost:8092/openstackswift001/my_account/my-container"
 ###### Delete a Container (if it's empty) ######
-    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container"  
+    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container"  
     
     
 ## Object Storage 
    
 ###### Upload and object ######
-    curl -XPUT -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container/my_object" -d 'abc123'
+    curl -XPUT -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container/my_object" -d 'abc123'
 ###### Upload and object and have it be stored encrypted ######
-    curl -XPUT -u admin:admin -H "X-Server-Side-Encryption: true" "http://localhost:8092/openstackswift001/my_account/my_container/my_object" -d 'abc123'
+    curl -XPUT -u admin:admin -H "X-Server-Side-Encryption: true" "http://localhost:8092/openstackswift001/my_account/my-container/my_object" -d 'abc123'
 ###### Get object metadata ######
-    curl -XHEAD -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container/my_object"
+    curl -XHEAD -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container/my_object"
 ###### Get object ######
-    curl -XGET -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container/my_object" 
+    curl -XGET -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container/my_object" 
 ###### Delete an object (will create delete marker) ######
-    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container/my_object" 
+    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container/my_object" 
 ###### Really Delete and object ######
-    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container/my_object?version=all"     
+    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container/my_object?version=all"     
 ###### Really Delete and object version ######
-    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container/my_object?version=1"   
+    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container/my_object?version=1"   
 ###### Really Delete and multiple object version ######
-    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my_container/my_object?version=1,2,3" 
+    curl -XDELETE -u admin:admin "http://localhost:8092/openstackswift001/my_account/my-container/my_object?version=1,2,3" 
     
     
 ## Container Import and Export    
 
 ###### Export a container ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" "http://localhost:8092/export_container/my_account/my_container"
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my-container_export" "http://localhost:8092/export_container/my_account/my-container"
 ###### Export a container and compress the export ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" -H "x-sfs-compress: true" "http://localhost:8092/export_container/my_account/my_container"   
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my-container_export" -H "x-sfs-compress: true" "http://localhost:8092/export_container/my_account/my-container"   
 ###### Export a container, compress and encrypt the export ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" -H "x-sfs-compress: true" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/export_container/my_account/my_container"       
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my-container_export" -H "x-sfs-compress: true" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/export_container/my_account/my-container"       
 ###### Import a container into a container named target_container ######
-    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my_container_export" "http://localhost:8092/import_container/my_account/target_containers"    
+    curl -XPOST -u admin:admin -H "x-sfs-dest-directory: /data/my-container_export" "http://localhost:8092/import_container/my_account/target_containers"    
 ###### Import an encrypted container into a container named target_container ######
-    curl -XPOST -u admin:admin -H "x-sfs-src-directory: /data/my_container_export" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/import_container/my_account/target_container"       
+    curl -XPOST -u admin:admin -H "x-sfs-src-directory: /data/my-container_export" -H "x-sfs-secret: YWJjMTIzCg==" "http://localhost:8092/import_container/my_account/target_container"       
     
     
 ## Health Check
@@ -290,13 +314,13 @@ Oracle Java 8 and Maven 3 should be used for building.
 ## Misc. Administration
 
 ###### Verify/Repair an object ######
-    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects/my_account/my_container/my_object"
+    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects/my_account/my-container/my_object"
 ###### Execute Verify/Repair a container ######
-    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects/my_account/my_container"  
+    curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects/my_account/my-container"  
 ###### Wait for Verify/Repair of a container for 30 seconds ######
-    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects/my_account/my_container"      
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects/my_account/my-container"      
 ###### Stop Verify/Repair of a container waiting 30 seconds for it to stop ######
-    curl -XDELETE -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects/my_account/my_container"     
+    curl -XDELETE -u admin:admin -H "timeout: 30000" "http://localhost:8092/verify_repair_objects/my_account/my-container"     
 ###### Verify/Repair all container ######
     curl -XPOST -u admin:admin "http://localhost:8092/verify_repair_objects"         
 ###### Wait for Verify/Repair of all container ######
