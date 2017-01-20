@@ -21,7 +21,7 @@
 * A container can be exported into into a file and imported into another container. The dynamic large object manifest will also be updated if it references objects in the container that was exported. The container export format is independent of the index and data file format so that an export can be imported into any sfs version that supports the export file format.
 * Container exports can be compressed and encrypted using AES256-GCM if the appropriate http headers are supplied to the http export api
 * Adding new sfs nodes to the cluster is a simple as starting the docker image on another server. New data will always be written to the nodes with the most available storage space. Existing data will not be rebalanced.  
-* The entire implementation is event driven and non blocking. Built using vert.x.
+* The entire implementation is event driven and non blocking. Built using [Vert.x](http://vertx.io/).
 
 ## Mailing Lists
 
