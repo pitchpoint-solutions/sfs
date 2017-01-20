@@ -23,6 +23,35 @@
 * Adding new sfs nodes to the cluster is a simple as starting the docker image on another server. New data will always be written to the nodes with the most available storage space. Existing data will not be rebalanced.  
 * The entire implementation is event driven and non blocking. Built using vert.x.
 
+## Latest release
+
+The most recent release of sfs is [release-1.20170106133707](https://hub.docker.com/r/pitchpointsolutions/simple-file-server/tags/).
+
+To run release-1.20170106133707
+
+```
+docker run ... pitchpointsolutions/simple-file-server:release-1.20170106133707
+```
+
+To run the latest release-1
+
+```
+docker pull pitchpointsolutions/simple-file-server:release-1
+docker run ... pitchpointsolutions/simple-file-server:release-1
+```
+
+## Snapshots
+
+Snapshots of sfs are built from the master branch
+
+To run the latest snapshot
+
+```
+docker pull pitchpointsolutions/simple-file-server:latest
+docker run ... pitchpointsolutions/simple-file-server:latest
+```
+
+
 ## Quickstart on Linux
 ```
 docker run -d -P --name sfs_example_elasticsearch elasticsearch:2.4.1 -Des.cluster.name=sfs_example_elasticsearch
