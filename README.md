@@ -23,6 +23,10 @@
 * Adding new sfs nodes to the cluster is a simple as starting the docker image on another server. New data will always be written to the nodes with the most available storage space. Existing data will not be rebalanced.  
 * The entire implementation is event driven and non blocking. Built using vert.x.
 
+## Mailing Lists
+
+- [Discussion](http://groups.google.com/group/sfs-discuss)
+
 ## Latest release
 
 The most recent release of sfs is [release-1.20170106133707](https://hub.docker.com/r/pitchpointsolutions/simple-file-server/tags/).
