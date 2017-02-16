@@ -115,7 +115,7 @@ public abstract class Terminus<T> extends Subscriber<T> {
                         Buffer buffer = buffer(entity.encodePrettily(), UTF_8.toString());
                         response.setStatusCode(status)
                                 .write(buffer)
-                                .end(buffer);
+                                .end();
                     }
                 }
 
