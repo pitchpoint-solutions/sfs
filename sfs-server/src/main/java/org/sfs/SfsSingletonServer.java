@@ -613,6 +613,7 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .setUsePooledBuffers(true)
                 .setAcceptBacklog(10000)
                 .setReuseAddress(true)
+                .setIdleTimeout(30)
                 .setHandle100ContinueAutomatically(true);
         vertxContext.vertx().createHttpServer(httpServerOptions)
                 .requestHandler(router::accept)
