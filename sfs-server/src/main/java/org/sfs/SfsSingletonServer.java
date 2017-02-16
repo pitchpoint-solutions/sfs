@@ -137,7 +137,9 @@ public class SfsSingletonServer extends Server implements Shareable {
     private Set<HostAndPort> parsedPublishAddresses = new LinkedHashSet<>();
     private Set<HostAndPort> clusterHosts = new LinkedHashSet<>();
     private List<HttpServer> httpServers = new ArrayList<>();
-    private int verticleMaxHeaderSize;
+    private int httpServerMaxHeaderSize;
+    private int httpServerIdleConnectionTimeout;
+    private int remoteNodeIdleConnectionTimeout;
     private boolean started = false;
     private Throwable startException = null;
     private int remoteNodeMaxPoolSize;
@@ -217,11 +219,17 @@ public class SfsSingletonServer extends Server implements Shareable {
 
         nodes = new Nodes();
 
-        verticleMaxHeaderSize = new Integer(ConfigHelper.getFieldOrEnv(config, "http.maxheadersize", "8192"));
-        Preconditions.checkArgument(verticleMaxHeaderSize > 0, "http.maxheadersize must be greater than 0");
+        httpServerMaxHeaderSize = new Integer(ConfigHelper.getFieldOrEnv(config, "http.maxheadersize", "8192"));
+        Preconditions.checkArgument(httpServerMaxHeaderSize > 0, "http.maxheadersize must be greater than 0");
+
+        httpServerIdleConnectionTimeout = new Integer(ConfigHelper.getFieldOrEnv(config, "http.idleconnectiontimeout", String.valueOf(TimeUnit.MINUTES.toMillis(20))));
+        Preconditions.checkArgument(httpServerIdleConnectionTimeout > 0, "http.idleconnectiontimeout must be greater than 0");
 
         int nodeStatsRefreshInterval = new Integer(ConfigHelper.getFieldOrEnv(config, "node_stats_refresh_interval", String.valueOf(TimeUnit.SECONDS.toMillis(1))));
         Preconditions.checkArgument(nodeStatsRefreshInterval > 0, "node_stats_refresh_interval must be greater than 0");
+
+        remoteNodeIdleConnectionTimeout = new Integer(ConfigHelper.getFieldOrEnv(config, "remotenode.idleconnectiontimeout", "30"));
+        Preconditions.checkArgument(remoteNodeIdleConnectionTimeout > 0, "remotenode.idleconnectiontimeout must be greater than 0");
 
         remoteNodeMaxPoolSize = new Integer(ConfigHelper.getFieldOrEnv(config, "remotenode.maxpoolsize", "25"));
         Preconditions.checkArgument(remoteNodeMaxPoolSize > 0, "remotenode.maxpoolsize must be greater than 0");
@@ -582,7 +590,7 @@ public class SfsSingletonServer extends Server implements Shareable {
             if (!listeningHostAddresses.contains(hostAndPort)) {
                 if (createHttpServer) {
                     LOGGER.info("Creating http listener on " + hostAndPort);
-                    return createHttpServer(vertxContext, hostAndPort, verticleMaxHeaderSize, createRouter(vertxContext))
+                    return createHttpServer(vertxContext, hostAndPort, createRouter(vertxContext))
                             .onErrorResumeNext(throwable -> {
                                 LOGGER.warn("Failed to start listener " + hostAndPort.toString(), throwable);
                                 return Defer.just(null);
@@ -605,15 +613,15 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .map(_continue -> httpServers);
     }
 
-    protected Observable<HttpServer> createHttpServer(VertxContext<Server> vertxContext, HostAndPort hostAndPort, int verticleMaxHeaderSize, Router router) {
+    protected Observable<HttpServer> createHttpServer(VertxContext<Server> vertxContext, HostAndPort hostAndPort, Router router) {
         ObservableFuture<HttpServer> handler = RxHelper.observableFuture();
         HttpServerOptions httpServerOptions = new HttpServerOptions()
-                .setMaxHeaderSize(verticleMaxHeaderSize)
+                .setMaxHeaderSize(httpServerMaxHeaderSize)
                 .setCompressionSupported(false)
                 .setUsePooledBuffers(true)
                 .setAcceptBacklog(10000)
                 .setReuseAddress(true)
-                .setIdleTimeout(30)
+                .setIdleTimeout(httpServerIdleConnectionTimeout)
                 .setHandle100ContinueAutomatically(true);
         vertxContext.vertx().createHttpServer(httpServerOptions)
                 .requestHandler(router::accept)
@@ -630,7 +638,7 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .setPipelining(false)
                 .setMaxWaitQueueSize(200)
                 .setReuseAddress(true)
-                .setIdleTimeout(30)
+                .setIdleTimeout(remoteNodeIdleConnectionTimeout)
                 .setSsl(https);
 
         return v.createHttpClient(httpClientOptions);
