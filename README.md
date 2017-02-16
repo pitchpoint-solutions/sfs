@@ -376,16 +376,18 @@ Oracle Java 8 and Maven 3 should be used for building.
     curl -XPOST -u admin:admin "http://localhost:8092/reencrypt_masterkeys"     
 ###### Wait for Re Encrypt Master Keys if they're older than 30 days ######
     curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/reencrypt_masterkeys"
+###### Get Object Index Entry ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/metadata_objects/my_account/my-container/my_object"
+###### Get Container Index Entry ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/metadata_containers/my_account/my-container"
+###### Get Account Index Entry ######
+    curl -XGET -u admin:admin -H "timeout: 30000" "http://localhost:8092/metadata_accounts/my_account"   
          
-         
+                
 ## Road Map
 * Make the recycling block allocator more intelligent.
 * Implement volume compaction so that disk space can be reclaimed if a massive delete is executed. For example: if you have a 1TB of data in volume and you delete 500GB of data it may be a good thing reclaim 500GB of disk space instead of waiting for the deleted blocks to be overwrriten with new data.
 * Allow object data to be replicated to the same node as the primary and then have it spread across the cluster when more nodes come online. 
-* Make the master key rotation inverval configurable
-* Make the master key re-encryption interval configurable
-* Make the container key rotation interval configurable
-* Make the container key re-encryption interval configurable
 * Improve container export functionality so that it can copy non local storage like sftp sites or cloud provider object storage
 * Improve container export functionality to support differential exports
 * Improve volume block allocation to pre-allocate space (fallocate)

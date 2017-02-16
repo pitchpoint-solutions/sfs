@@ -71,6 +71,7 @@ public class Jobs {
         AssignDocumentsToNodeJob assignDocumentsToNodeJob = new AssignDocumentsToNodeJob();
         VerifyRepairAllContainerObjects verifyRepairAllContainerObjects = new VerifyRepairAllContainerObjects();
         VerifyRepairContainerObjects verifyRepairContainerObjects = new VerifyRepairContainerObjects();
+        VerifyRepairObject verifyRepairObject = new VerifyRepairObject();
         ReEncryptContainerKeys reEncryptContainerKeys = new ReEncryptContainerKeys();
         ReEncryptMasterKeys reEncryptMasterKeys = new ReEncryptMasterKeys();
         RepairMasterKeys repairMasterKeys = new RepairMasterKeys();
@@ -78,6 +79,7 @@ public class Jobs {
         register(assignDocumentsToNodeJob);
         register(verifyRepairAllContainerObjects);
         register(verifyRepairContainerObjects);
+        register(verifyRepairObject);
         register(reEncryptContainerKeys);
         register(reEncryptMasterKeys);
         register(repairMasterKeys);
