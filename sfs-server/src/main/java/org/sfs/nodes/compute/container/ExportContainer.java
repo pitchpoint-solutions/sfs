@@ -66,7 +66,6 @@ import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 import static org.sfs.filesystem.containerdump.DumpFileWriter.DUMP_FILE_NAME;
 import static org.sfs.io.AsyncIO.pump;
 import static org.sfs.rx.Defer.aVoid;
-import static org.sfs.rx.RxHelper.executeBlocking;
 import static org.sfs.util.KeepAliveHttpServerResponse.DELIMITER_BUFFER;
 import static org.sfs.util.SfsHttpHeaders.X_SFS_COMPRESS;
 import static org.sfs.util.SfsHttpHeaders.X_SFS_DEST_DIRECTORY;
@@ -83,7 +82,6 @@ public class ExportContainer implements Handler<SfsRequest> {
 
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
         SfsVertx sfsVertx = vertxContext.vertx();
-        Context context = sfsVertx.getOrCreateContext();
 
         aVoid()
                 .flatMap(new Authenticate(httpServerRequest))
@@ -181,14 +179,17 @@ public class ExportContainer implements Handler<SfsRequest> {
                             .flatMap(journalFile -> journalFile.close(vertxContext.vertx())
                                     .map(aVoid -> journalFile))
                             .flatMap(journalFile ->
-                                    RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
-                                        try {
-                                            write(get(destDirectory).resolve(".successful"), new byte[0], CREATE_NEW, WRITE);
-                                            return (Void) null;
-                                        } catch (IOException e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    })
+                                    {
+                                        Context context = vertxContext.vertx().getOrCreateContext();
+                                        return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+                                            try {
+                                                write(get(destDirectory).resolve(".successful"), new byte[0], CREATE_NEW, WRITE);
+                                                return (Void) null;
+                                            } catch (IOException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        });
+                                    }
                             )
                             .doOnNext(aVoid -> LOGGER.info("Done exporting container " + persistentContainer.getId() + " to " + destDirectory))
                             .onErrorResumeNext(throwable -> {

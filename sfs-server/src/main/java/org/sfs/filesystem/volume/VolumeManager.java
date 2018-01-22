@@ -130,11 +130,10 @@ public class VolumeManager {
 
     protected Observable<Volume> newVolume0(VertxContext<Server> vertxContext, final int offset) {
         SfsVertx sfsVertx = vertxContext.vertx();
-        Context context = sfsVertx.getOrCreateContext();
-        return defer(() -> {
+        return defer(() -> { ;
             final Path path = Paths.get(basePath.toString(), valueOf(volumeMap.size() + offset));
             AtomicBoolean exists = new AtomicBoolean(false);
-            return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(),
+            return RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(),
                     () -> {
                         try {
                             createDirectory(path);
@@ -183,7 +182,7 @@ public class VolumeManager {
                         throw new VolumeNotFoundException("Volume " + volumeId + " is not managed by this volume manager");
                     }
                     if (STARTED.equals(volume.status())) {
-                        return volume.open(vertxContext.vertx());
+                        return volume.close(vertxContext.vertx());
                     } else {
                         throw new VolumeNotStartedException();
                     }

@@ -18,6 +18,7 @@ package org.sfs;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.Context;
 import io.vertx.core.http.HttpClient;
 import org.sfs.auth.AuthProviderService;
 import org.sfs.elasticsearch.Elasticsearch;
@@ -34,6 +35,8 @@ import org.sfs.nodes.Nodes;
 import java.util.concurrent.ExecutorService;
 
 public abstract class Server extends AbstractVerticle implements SfsVerticle {
+
+    public abstract Context getContext();
 
     public abstract ExecutorService getIoPool();
 

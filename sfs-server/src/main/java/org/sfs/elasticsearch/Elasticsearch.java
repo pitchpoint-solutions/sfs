@@ -89,17 +89,18 @@ public class Elasticsearch {
     private long defaultScrollTimeout;
     private int shards;
     private int replicas;
+    private boolean isMasterNode;
     private AtomicReference<Status> status = new AtomicReference<>(Status.STOPPED);
 
     public Elasticsearch() {
     }
 
     public Observable<Void> start(final VertxContext<Server> vertxContext, final JsonObject config, boolean isMasterNode) {
+        this.isMasterNode = isMasterNode;
         SfsVertx sfsVertx = vertxContext.vertx();
-        Context context = sfsVertx.getOrCreateContext();
         return Defer.aVoid()
                 .filter(aVoid -> status.compareAndSet(Status.STOPPED, Status.STARTING))
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(),
+                .flatMap(aVoid -> RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(),
                         () -> {
                             if (elasticSearchClient == null) {
                                 LOGGER.debug("Starting Elasticsearch");
@@ -156,6 +157,7 @@ public class Elasticsearch {
                         }))
                 .flatMap(aVoid -> waitForGreen(vertxContext))
                 .flatMap(aVoid -> prepareCommonIndex(vertxContext, isMasterNode))
+                .flatMap(aVoid -> waitForGreen(vertxContext))
                 .doOnNext(aVoid -> Preconditions.checkState(status.compareAndSet(Status.STARTING, Status.STARTED)))
                 .doOnNext(aVoid -> LOGGER.debug("Started Elasticsearch"));
     }
@@ -262,6 +264,16 @@ public class Elasticsearch {
         return deleteIndex(vertxContext, objectIndexName);
     }
 
+    public Observable<Void> resetAllIndexesForTest(VertxContext<Server> vertxContext) {
+        return Observable.just((Void) null)
+                .flatMap(new ListSfsIndexes(vertxContext))
+                .flatMap(new IndexDelete(vertxContext))
+                .count()
+                .map(count -> null)
+                .flatMap(aVoid -> prepareCommonIndex(vertxContext, isMasterNode));
+
+    }
+
     protected Observable<Void> deleteIndex(VertxContext<Server> vertxContext, String index) {
         return Defer.just(index)
                 .flatMap(new IndexDelete(vertxContext))
@@ -365,23 +377,24 @@ public class Elasticsearch {
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
         SfsVertx vertx = vertxContext.vertx();
-        Context context = vertx.getOrCreateContext();
         return Defer.aVoid()
                 .filter(aVoid -> status.compareAndSet(Status.STARTED, Status.STOPPING) || status.compareAndSet(Status.STARTING, Status.STOPPING))
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), (() -> {
-                    LOGGER.debug("Stopping Elasticsearch");
-                    if (elasticSearchClient != null) {
-                        try {
-                            elasticSearchClient.close();
-                        } catch (Throwable e) {
-                            LOGGER.warn(e.getLocalizedMessage(), e);
+                .flatMap(aVoid -> {
+                    return RxHelper.executeBlocking(vertx.getOrCreateContext(), vertx.getBackgroundPool(), (() -> {
+                        LOGGER.debug("Stopping Elasticsearch");
+                        if (elasticSearchClient != null) {
+                            try {
+                                elasticSearchClient.close();
+                            } catch (Throwable e) {
+                                LOGGER.warn(e.getLocalizedMessage(), e);
+                            }
+                            elasticSearchClient = null;
                         }
-                        elasticSearchClient = null;
-                    }
-                    LOGGER.debug("Stopped Elasticsearch");
-                    return (Void) null;
-                }))
-                .doOnNext(aVoid1 -> Preconditions.checkState(status.compareAndSet(Status.STOPPING, Status.STOPPED))));
+                        LOGGER.debug("Stopped Elasticsearch");
+                        return (Void) null;
+                    }))
+                            .doOnNext(aVoid1 -> Preconditions.checkState(status.compareAndSet(Status.STOPPING, Status.STOPPED)));
+                });
 
     }
 
@@ -390,9 +403,9 @@ public class Elasticsearch {
     }
 
     public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> Observable<Optional<Response>> execute(Vertx vertx, final RequestBuilder actionRequestBuilder, long timeoutMs) {
-        Context context = vertx.getOrCreateContext();
         return Defer.aVoid()
                 .flatMap(aVoid -> {
+                    Context context = vertx.getOrCreateContext();
                     ObservableFuture<Response> observableFuture = RxHelper.observableFuture();
                     actionRequestBuilder.execute(new ActionListener<Response>() {
                         @Override

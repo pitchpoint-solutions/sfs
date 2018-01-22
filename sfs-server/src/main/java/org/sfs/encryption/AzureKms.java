@@ -85,7 +85,6 @@ public class AzureKms implements Kms {
     public Observable<Void> start(VertxContext<Server> vertxContext,
                                   JsonObject config) {
         SfsVertx sfsVertx = vertxContext.vertx();
-        Context context = sfsVertx.getOrCreateContext();
         return aVoid()
                 .filter(aVoid -> started.compareAndSet(false, true))
                 .flatMap(aVoid -> {
@@ -105,7 +104,7 @@ public class AzureKms implements Kms {
 
                     azureKeyIdentifier = format("%s/keys/%s", endpoint, keyId);
 
-                    return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+                    return RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(), () -> {
                         try {
                             kms = createKeyVaultClient(vertxContext);
                         } catch (Exception e) {
@@ -161,7 +160,7 @@ public class AzureKms implements Kms {
     public Observable<Encrypted> encrypt(VertxContext<Server> vertxContext, byte[] plainBytes) {
         SfsVertx sfsVertx = vertxContext.vertx();
         Context context = sfsVertx.getOrCreateContext();
-        return defer(() -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+        return defer(() -> RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(), () -> {
             String algorithm = AlgorithmName;
             Future<KeyOperationResult> encrypted = kms.encryptAsync(azureKeyIdentifier, algorithm, plainBytes);
             try {
@@ -191,8 +190,7 @@ public class AzureKms implements Kms {
     @Override
     public Observable<byte[]> decrypt(VertxContext<Server> vertxContext, byte[] cipherBytes) {
         SfsVertx sfsVertx = vertxContext.vertx();
-        Context context = sfsVertx.getOrCreateContext();
-        return defer(() -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+        return defer(() -> RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(), () -> {
             try {
                 CipherText instance = parseFrom(cipherBytes.clone());
                 String keyIdentifier = instance.getKeyIdentifier();
@@ -209,7 +207,6 @@ public class AzureKms implements Kms {
 
     public Observable<Void> stop(VertxContext<Server> vertxContext) {
         SfsVertx sfsVertx = vertxContext.vertx();
-        Context context = sfsVertx.getOrCreateContext();
         return aVoid()
                 .filter(aVoid -> started.compareAndSet(true, false))
                 .flatMap(aVoid -> {
@@ -218,7 +215,7 @@ public class AzureKms implements Kms {
                         properties = null;
                     }
                     if (kms != null) {
-                        return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+                        return RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(), () -> {
                             try {
                                 kms.close();
                             } catch (Throwable e) {

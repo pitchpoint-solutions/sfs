@@ -71,7 +71,6 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
     private boolean openedReadStream = false;
     private boolean ended = false;
     private boolean encryptTempFile;
-    private Context context;
 
     public FileBackedBuffer(SfsVertx sfsVertx, int fileThreshold, boolean encryptTempFile, Path tempFileDirectory) {
         this.sfsVertx = sfsVertx;
@@ -79,7 +78,6 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
         this.fileThreshold = fileThreshold;
         this.memory = buffer();
         this.tempFileDirectory = tempFileDirectory;
-        this.context = sfsVertx.getOrCreateContext();
     }
 
     public FileBackedBuffer(SfsVertx sfsVertx, int fileThreshold, Path tempFileDirectory) {
@@ -98,7 +96,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
         checkReadStreamNotOpen();
         openedReadStream = true;
         if (fileOpen) {
-            AsyncFileReader asyncFileReader = new AsyncFileReaderImpl(context, 0, 8192, countingEndableWriteStream.count(), channel, LOGGER);
+            AsyncFileReader asyncFileReader = new AsyncFileReaderImpl(sfsVertx.getOrCreateContext(), 0, 8192, countingEndableWriteStream.count(), channel, LOGGER);
             if (encryptTempFile) {
                 return algorithm.decrypt(asyncFileReader);
             } else {
@@ -202,7 +200,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
 
     public Observable<Void> close() {
         if (channel != null || tempFile != null) {
-            return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+            return RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(), () -> {
                 if (channel != null) {
                     try {
                         channel.close();
@@ -269,7 +267,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
                     throw new RuntimeException(e);
                 }
                 WriteQueueSupport<AsyncFileWriter> writeQueueSupport = new WriteQueueSupport<>(MAX_WRITES);
-                fileWriteStreamConsumer = new AsyncFileWriterImpl(0L, writeQueueSupport, context, channel, LOGGER);
+                fileWriteStreamConsumer = new AsyncFileWriterImpl(0L, writeQueueSupport, sfsVertx.getOrCreateContext(), channel, LOGGER);
                 countingEndableWriteStream = new CountingEndableWriteStream(fileWriteStreamConsumer);
                 fileWriteStreamConsumer = countingEndableWriteStream;
                 if (encryptTempFile) {

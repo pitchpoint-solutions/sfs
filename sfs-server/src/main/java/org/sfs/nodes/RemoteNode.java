@@ -342,7 +342,6 @@ public class RemoteNode extends AbstractNode {
 
     @Override
     public Observable<Optional<ReadStreamBlob>> createReadStream(String volumeId, final long position, final Optional<Long> oOffset, final Optional<Long> oLength) {
-
         return Defer.aVoid()
                 .flatMap(aVoid ->
                         nodes.connectFirstAvailable(
@@ -558,6 +557,7 @@ public class RemoteNode extends AbstractNode {
                                     if (LOGGER.isDebugEnabled()) {
                                         LOGGER.debug("createWriteStream " + url);
                                     }
+                                    LOGGER.debug("Current Thread 3 is {}, http client is {}", Thread.currentThread(), httpClient);
 
                                     ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
@@ -576,7 +576,6 @@ public class RemoteNode extends AbstractNode {
                                     return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
                                 }))
                 .map(httpClientRequestAndResponse -> {
-
                     HttpClientRequest httpClientRequest = httpClientRequestAndResponse.getRequest();
                     HttpClientResponse httpClientResponse = httpClientRequestAndResponse.getResponse();
 

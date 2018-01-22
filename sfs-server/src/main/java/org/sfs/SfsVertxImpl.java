@@ -30,6 +30,7 @@ import io.vertx.core.WorkerExecutor;
 import io.vertx.core.datagram.DatagramSocket;
 import io.vertx.core.datagram.DatagramSocketOptions;
 import io.vertx.core.dns.DnsClient;
+import io.vertx.core.dns.DnsClientOptions;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.file.FileSystem;
 import io.vertx.core.http.HttpClient;
@@ -44,13 +45,10 @@ import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
 import io.vertx.core.shareddata.SharedData;
 import io.vertx.core.spi.VerticleFactory;
-import org.sfs.rx.Defer;
-import rx.Observable;
-import rx.Subscriber;
-import rx.functions.Func0;
 
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 public class SfsVertxImpl implements SfsVertx {
 
@@ -63,6 +61,36 @@ public class SfsVertxImpl implements SfsVertx {
         this.vertx = vertx;
         this.backgroundPool = backgroundPool;
         this.ioPool = ioPool;
+    }
+
+    @Override
+    public DnsClient createDnsClient(DnsClientOptions dnsClientOptions) {
+        return vertx.createDnsClient(dnsClientOptions);
+    }
+
+    @Override
+    public void deployVerticle(Class<? extends Verticle> aClass, DeploymentOptions deploymentOptions) {
+        vertx.deployVerticle(aClass, deploymentOptions);
+    }
+
+    @Override
+    public void deployVerticle(Supplier<Verticle> supplier, DeploymentOptions deploymentOptions) {
+        vertx.deployVerticle(supplier, deploymentOptions);
+    }
+
+    @Override
+    public void deployVerticle(Class<? extends Verticle> aClass, DeploymentOptions deploymentOptions, Handler<AsyncResult<String>> handler) {
+        vertx.deployVerticle(aClass, deploymentOptions, handler);
+    }
+
+    @Override
+    public void deployVerticle(Supplier<Verticle> supplier, DeploymentOptions deploymentOptions, Handler<AsyncResult<String>> handler) {
+        vertx.deployVerticle(supplier, deploymentOptions, handler);
+    }
+
+    @Override
+    public boolean isNativeTransportEnabled() {
+        return vertx.isNativeTransportEnabled();
     }
 
     @Override

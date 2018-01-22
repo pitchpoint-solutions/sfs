@@ -19,23 +19,14 @@ package org.sfs.io;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.file.AsyncFile;
-import io.vertx.core.logging.Logger;
-import io.vertx.core.logging.LoggerFactory;
 import io.vertx.core.streams.ReadStream;
 import io.vertx.core.streams.WriteStream;
-import org.sfs.Server;
-import org.sfs.VertxContext;
-import org.sfs.rx.Defer;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import rx.Observable;
 
-import java.nio.channels.AsynchronousFileChannel;
-
 
 public class AsyncIO {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(AsyncIO.class);
 
     public static Observable<Void> append(Buffer buffer, final WriteStream<Buffer> ws) {
         return Observable.defer(() -> {

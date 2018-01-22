@@ -18,10 +18,8 @@ package org.sfs.integration.java.test.container;
 
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.json.JsonArray;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.filesystem.volume.VolumeV1;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.integration.java.func.AssertHttpClientResponseStatusCode;
@@ -31,7 +29,6 @@ import org.sfs.integration.java.func.PostAccount;
 import org.sfs.integration.java.func.PutContainer;
 import org.sfs.integration.java.func.PutObject;
 import org.sfs.integration.java.func.RefreshIndex;
-import org.sfs.integration.java.func.WaitForCluster;
 import org.sfs.rx.BufferToJsonArray;
 import org.sfs.rx.HttpClientResponseBodyBuffer;
 import org.sfs.rx.ToVoid;
@@ -68,14 +65,11 @@ public class ContainerDestroyTest extends BaseTestVerticle {
     protected Observable<Void> prepareContainer(TestContext context) {
 
         return just((Void) null)
-                .flatMap(aVoid -> vertxContext.verticle().getNodeStats().forceUpdate(vertxContext))
-                .flatMap(aVoid -> vertxContext.verticle().getClusterInfo().forceRefresh(vertxContext))
-                .flatMap(new WaitForCluster(vertxContext))
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
+                .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient(), accountName, containerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .count()
@@ -84,102 +78,102 @@ public class ContainerDestroyTest extends BaseTestVerticle {
 
     @Test
     public void testDestroyContainerWithSmallObjects(TestContext context) {
-        final byte[] data0 = "HELLO0".getBytes(UTF_8);
-        final byte[] data1 = "HELLO1".getBytes(UTF_8);
-        final byte[] data2 = "HELLO2".getBytes(UTF_8);
+        runOnServerContext(context, () -> {
+            final byte[] data0 = "HELLO0".getBytes(UTF_8);
+            final byte[] data1 = "HELLO1".getBytes(UTF_8);
+            final byte[] data2 = "HELLO2".getBytes(UTF_8);
 
-        Async async = context.async();
-        prepareContainer(context)
+            return prepareContainer(context)
 
-                // put three objects then list and assert
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/4", authNonAdmin, new byte[]{}))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/3", authNonAdmin, data2)
-                        .setHeader(CONTENT_TYPE, PLAIN_TEXT_UTF_8.toString()))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/2", authNonAdmin, data1))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/1", authNonAdmin, data0))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetContainer(httpClient, accountName, containerName, authNonAdmin)
-                        .setMediaTypes(JSON_UTF_8))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
-                .flatMap(new HttpClientResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new BufferToJsonArray())
-                .map(new Func1<JsonArray, Void>() {
-                    @Override
-                    public Void call(JsonArray jsonArray) {
-                        assertEquals(context, 4, jsonArray.size());
-                        return null;
-                    }
-                })
-                .flatMap(new DestroyContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .flatMap(new HttpClientResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetContainer(httpClient, accountName, containerName, authNonAdmin)
-                        .setMediaTypes(JSON_UTF_8))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NOT_FOUND))
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+                    // put three objects then list and assert
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/4", authNonAdmin, new byte[]{}))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/3", authNonAdmin, data2)
+                            .setHeader(CONTENT_TYPE, PLAIN_TEXT_UTF_8.toString()))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/2", authNonAdmin, data1))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/1", authNonAdmin, data0))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetContainer(httpClient(), accountName, containerName, authNonAdmin)
+                            .setMediaTypes(JSON_UTF_8))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
+                    .flatMap(new HttpClientResponseBodyBuffer())
+                    .map(new HttpBodyLogger())
+                    .map(new BufferToJsonArray())
+                    .map(new Func1<JsonArray, Void>() {
+                        @Override
+                        public Void call(JsonArray jsonArray) {
+                            assertEquals(context, 4, jsonArray.size());
+                            return null;
+                        }
+                    })
+                    .flatMap(new DestroyContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .flatMap(new HttpClientResponseBodyBuffer())
+                    .map(new HttpBodyLogger())
+                    .map(new ToVoid<>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetContainer(httpClient(), accountName, containerName, authNonAdmin)
+                            .setMediaTypes(JSON_UTF_8))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NOT_FOUND))
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testDestroyContainerWithLargeObjects(TestContext context) {
-        final byte[] data0 = new byte[VolumeV1.TINY_DATA_THRESHOLD * 2];
-        final byte[] data1 = new byte[VolumeV1.TINY_DATA_THRESHOLD * 2];
-        final byte[] data2 = new byte[VolumeV1.TINY_DATA_THRESHOLD * 2];
+        runOnServerContext(context, () -> {
+            final byte[] data0 = new byte[VolumeV1.TINY_DATA_THRESHOLD * 2];
+            final byte[] data1 = new byte[VolumeV1.TINY_DATA_THRESHOLD * 2];
+            final byte[] data2 = new byte[VolumeV1.TINY_DATA_THRESHOLD * 2];
 
-        PrngRandom.getCurrentInstance().nextBytesBlocking(data0);
-        PrngRandom.getCurrentInstance().nextBytesBlocking(data1);
-        PrngRandom.getCurrentInstance().nextBytesBlocking(data2);
+            PrngRandom.getCurrentInstance().nextBytesBlocking(data0);
+            PrngRandom.getCurrentInstance().nextBytesBlocking(data1);
+            PrngRandom.getCurrentInstance().nextBytesBlocking(data2);
 
-        Async async = context.async();
-        prepareContainer(context)
+            return prepareContainer(context)
 
-                // put three objects then list and assert
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/4", authNonAdmin, new byte[]{}))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/3", authNonAdmin, data2)
-                        .setHeader(CONTENT_TYPE, PLAIN_TEXT_UTF_8.toString()))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/2", authNonAdmin, data1))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutObject(httpClient, accountName, containerName, objectName + "/1", authNonAdmin, data0))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetContainer(httpClient, accountName, containerName, authNonAdmin)
-                        .setMediaTypes(JSON_UTF_8))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
-                .flatMap(new HttpClientResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new BufferToJsonArray())
-                .map(new Func1<JsonArray, Void>() {
-                    @Override
-                    public Void call(JsonArray jsonArray) {
-                        assertEquals(context, 4, jsonArray.size());
-                        return null;
-                    }
-                })
-                .flatMap(new DestroyContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .flatMap(new HttpClientResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetContainer(httpClient, accountName, containerName, authNonAdmin)
-                        .setMediaTypes(JSON_UTF_8))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NOT_FOUND))
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+                    // put three objects then list and assert
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/4", authNonAdmin, new byte[]{}))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/3", authNonAdmin, data2)
+                            .setHeader(CONTENT_TYPE, PLAIN_TEXT_UTF_8.toString()))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/2", authNonAdmin, data1))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutObject(httpClient(), accountName, containerName, objectName + "/1", authNonAdmin, data0))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetContainer(httpClient(), accountName, containerName, authNonAdmin)
+                            .setMediaTypes(JSON_UTF_8))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
+                    .flatMap(new HttpClientResponseBodyBuffer())
+                    .map(new HttpBodyLogger())
+                    .map(new BufferToJsonArray())
+                    .map(new Func1<JsonArray, Void>() {
+                        @Override
+                        public Void call(JsonArray jsonArray) {
+                            assertEquals(context, 4, jsonArray.size());
+                            return null;
+                        }
+                    })
+                    .flatMap(new DestroyContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .flatMap(new HttpClientResponseBodyBuffer())
+                    .map(new HttpBodyLogger())
+                    .map(new ToVoid<>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetContainer(httpClient(), accountName, containerName, authNonAdmin)
+                            .setMediaTypes(JSON_UTF_8))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NOT_FOUND))
+                    .map(new ToVoid<>());
+        });
     }
 
 }

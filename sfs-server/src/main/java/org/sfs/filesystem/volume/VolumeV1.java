@@ -138,69 +138,71 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<TransientXVolume> volumeInfo(SfsVertx vertx) {
-        Context context = vertx.getOrCreateContext();
         return Defer.aVoid()
                 .doOnNext(aVoid -> {
                     checkStarted();
                 })
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
+                .flatMap(aVoid -> {
+                    Context context = vertx.getOrCreateContext();
+                    return RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
 
-                    try {
-                        FileStore fileStore = Files.getFileStore(basePath);
-
-                        long usableSpace = fileStore.getUsableSpace();
-                        long actualUsableSpace;
                         try {
-                            actualUsableSpace = LongMath.checkedAdd(indexFileAllocator.getBytesFree(usableSpace), dataFileAllocator.getBytesFree(usableSpace));
-                        } catch (ArithmeticException e) {
-                            actualUsableSpace = usableSpace;
+                            FileStore fileStore = Files.getFileStore(basePath);
+
+                            long usableSpace = fileStore.getUsableSpace();
+                            long actualUsableSpace;
+                            try {
+                                actualUsableSpace = LongMath.checkedAdd(indexFileAllocator.getBytesFree(usableSpace), dataFileAllocator.getBytesFree(usableSpace));
+                            } catch (ArithmeticException e) {
+                                actualUsableSpace = usableSpace;
+                            }
+
+                            TransientXAllocatedFile indexFileInfo = new TransientXAllocatedFile()
+                                    .setFile(indexFilePath.toString())
+                                    .setFileSizeBytes(Files.size(indexFilePath))
+                                    .setBytesFree(indexFileAllocator.getBytesFree(usableSpace))
+                                    .setFreeRangeCount(indexFileAllocator.getNumberOfFreeRanges())
+                                    .setLockCount(indexFile.getLockCount())
+                                    .setWriteQueueBytesPending(indexFile.getWriteQueueSize())
+                                    .setWriteQueueBytesFull(indexFile.getWriteQueueMaxWrites())
+                                    .setWriteQueueBytesDrained(indexFile.getWriteQueueLowWater());
+
+                            TransientXAllocatedFile dataFileInfo = new TransientXAllocatedFile()
+                                    .setFile(dataFilePath.toString())
+                                    .setFileSizeBytes(Files.size(dataFilePath))
+                                    .setBytesFree(dataFileAllocator.getBytesFree(usableSpace))
+                                    .setFreeRangeCount(dataFileAllocator.getNumberOfFreeRanges())
+                                    .setLockCount(blobFile.getLockCount())
+                                    .setWriteQueueBytesPending(blobFile.getWriteQueueSize())
+                                    .setWriteQueueBytesFull(blobFile.getWriteQueueMaxWrites())
+                                    .setWriteQueueBytesDrained(blobFile.getWriteQueueLowWater());
+
+
+                            TransientXFileSystem fileSystemInfo = new TransientXFileSystem()
+                                    .setDevice(fileStore.name())
+                                    .setPath(basePath.toString())
+                                    .setTotalSpace(fileStore.getTotalSpace())
+                                    .setUnallocatedSpace(fileStore.getUnallocatedSpace())
+                                    .setUsableSpace(usableSpace)
+                                    .setType(fileStore.type())
+                                    .setPartition(basePath.getRoot().toString());
+
+
+                            TransientXVolume volumeInfo = new TransientXVolume()
+                                    .setId(volumeId)
+                                    .setIndexFile(indexFileInfo)
+                                    .setDataFile(dataFileInfo)
+                                    .setFileSystem(fileSystemInfo)
+                                    .setUsableSpace(actualUsableSpace)
+                                    .setStatus(volumeState.get());
+
+                            return volumeInfo;
+
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
                         }
-
-                        TransientXAllocatedFile indexFileInfo = new TransientXAllocatedFile()
-                                .setFile(indexFilePath.toString())
-                                .setFileSizeBytes(Files.size(indexFilePath))
-                                .setBytesFree(indexFileAllocator.getBytesFree(usableSpace))
-                                .setFreeRangeCount(indexFileAllocator.getNumberOfFreeRanges())
-                                .setLockCount(indexFile.getLockCount())
-                                .setWriteQueueBytesPending(indexFile.getWriteQueueSize())
-                                .setWriteQueueBytesFull(indexFile.getWriteQueueMaxWrites())
-                                .setWriteQueueBytesDrained(indexFile.getWriteQueueLowWater());
-
-                        TransientXAllocatedFile dataFileInfo = new TransientXAllocatedFile()
-                                .setFile(dataFilePath.toString())
-                                .setFileSizeBytes(Files.size(dataFilePath))
-                                .setBytesFree(dataFileAllocator.getBytesFree(usableSpace))
-                                .setFreeRangeCount(dataFileAllocator.getNumberOfFreeRanges())
-                                .setLockCount(blobFile.getLockCount())
-                                .setWriteQueueBytesPending(blobFile.getWriteQueueSize())
-                                .setWriteQueueBytesFull(blobFile.getWriteQueueMaxWrites())
-                                .setWriteQueueBytesDrained(blobFile.getWriteQueueLowWater());
-
-
-                        TransientXFileSystem fileSystemInfo = new TransientXFileSystem()
-                                .setDevice(fileStore.name())
-                                .setPath(basePath.toString())
-                                .setTotalSpace(fileStore.getTotalSpace())
-                                .setUnallocatedSpace(fileStore.getUnallocatedSpace())
-                                .setUsableSpace(usableSpace)
-                                .setType(fileStore.type())
-                                .setPartition(basePath.getRoot().toString());
-
-
-                        TransientXVolume volumeInfo = new TransientXVolume()
-                                .setId(volumeId)
-                                .setIndexFile(indexFileInfo)
-                                .setDataFile(dataFileInfo)
-                                .setFileSystem(fileSystemInfo)
-                                .setUsableSpace(actualUsableSpace)
-                                .setStatus(volumeState.get());
-
-                        return volumeInfo;
-
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }));
+                    });
+                });
     }
 
     @Override
@@ -332,26 +334,28 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<Void> open(SfsVertx vertx) {
-        final VolumeV1 _this = this;
-        Context context = vertx.getOrCreateContext();
+        final VolumeV1 _this = this;;
         return Defer.aVoid()
                 .doOnNext(aVoid -> Preconditions.checkState(volumeState.compareAndSet(Status.STOPPED, Status.STARTING)))
                 .doOnNext(aVoid -> logger.info("Starting volume " + basePath.toString()))
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
-                    try {
+                .flatMap(aVoid -> {
+                    Context context = vertx.getOrCreateContext();
+                    return RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
+                        try {
 
-                        Files.createDirectories(basePath);
+                            Files.createDirectories(basePath);
 
-                        metaFilePath = metaFilePath(basePath).normalize();
-                        dataFilePath = dataFilePath(basePath).normalize();
-                        indexFilePath = indexFilePath(basePath).normalize();
+                            metaFilePath = metaFilePath(basePath).normalize();
+                            dataFilePath = dataFilePath(basePath).normalize();
+                            indexFilePath = indexFilePath(basePath).normalize();
 
-                        return (Void) null;
+                            return (Void) null;
 
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }))
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                })
                 .doOnNext(aVoid -> logger.info("Starting Metadata Initialization"))
                 .doOnNext(aVoid -> metaFile = new MetaFile(metaFilePath))
                 .flatMap(aVoid -> metaFile.open(vertx, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE))

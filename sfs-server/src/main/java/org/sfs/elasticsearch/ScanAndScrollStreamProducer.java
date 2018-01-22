@@ -62,7 +62,6 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
     private boolean emitting = false;
     private boolean scrollNoHit = false;
     private boolean queried = false;
-    private final Context context;
     private long count = 0;
     private boolean aborted = false;
 
@@ -70,7 +69,6 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
         this.vertxContext = vertxContext;
         this.elasticsearch = vertxContext.verticle().elasticsearch();
         this.query = query;
-        this.context = vertxContext.vertx().getOrCreateContext();
     }
 
     @Override
@@ -160,7 +158,7 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
                             if (endHandler != null) {
                                 Handler<Void> handler = endHandler;
                                 endHandler = null;
-                                vertxContext.vertx().runOnContext(event -> handler.handle(null));
+                                vertxContext.runOnContext(event -> handler.handle(null));
                             }
                         }
 
@@ -230,7 +228,7 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
             }
             try {
                 handler.handle(next);
-                context.runOnContext(event -> emit());
+                vertxContext.runOnContext(event -> emit());
             } catch (Throwable e) {
                 handleError(e);
             } finally {

@@ -27,6 +27,7 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.sfs.RunTestOnContextRx;
 import org.sfs.SfsVertx;
 import org.sfs.SfsVertxImpl;
 import org.sfs.TestSubscriber;
@@ -58,7 +59,7 @@ public class VolumeV1Test {
 
     private Path path;
     @Rule
-    public final RunTestOnContext rule = new RunTestOnContext();
+    public final RunTestOnContextRx rule = new RunTestOnContextRx();
     private ExecutorService ioPool;
     private ExecutorService backgroundPool;
 
@@ -86,7 +87,7 @@ public class VolumeV1Test {
         }
     }
 
-    @Test
+    @Test(timeout = 120000)
     public void testWriteMany(TestContext context) {
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
         final VolumeV1 sfsDataV1 = new VolumeV1(path);
@@ -114,7 +115,7 @@ public class VolumeV1Test {
                                 }
                             }));
 
-                    Observable.interval(1, TimeUnit.MILLISECONDS, RxHelper.scheduler(rule.vertx().getOrCreateContext()))
+                    Observable.interval(1, TimeUnit.MILLISECONDS)
                             .limit(10000)
                             .map(aLong -> count.getAndIncrement())
                             .doOnNext(integer -> {

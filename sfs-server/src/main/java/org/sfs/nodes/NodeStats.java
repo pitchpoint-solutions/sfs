@@ -139,41 +139,43 @@ public class NodeStats {
     protected Observable<Void> generate(VertxContext<Server> vertxContext) {
         NodeStats _this = this;
         SfsVertx sfsVertx = vertxContext.vertx();
-        Context context = sfsVertx.getOrCreateContext();
         return aVoid()
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
-                    try {
-                        Nodes nodes = vertxContext.verticle().nodes();
-                        List<HostAndPort> publishAddresses = nodes.getPublishAddresses();
+                .flatMap(aVoid -> {
+                    Context context = sfsVertx.getOrCreateContext();
+                    return RxHelper.executeBlocking(context, sfsVertx.getBackgroundPool(), () -> {
+                        try {
+                            Nodes nodes = vertxContext.verticle().nodes();
+                            List<HostAndPort> publishAddresses = nodes.getPublishAddresses();
 
-                        Path workingDirectory = vertxContext.verticle().sfsFileSystem().workingDirectory();
-                        FileStore fileStore = getFileStore(workingDirectory);
+                            Path workingDirectory = vertxContext.verticle().sfsFileSystem().workingDirectory();
+                            FileStore fileStore = getFileStore(workingDirectory);
 
-                        TransientXFileSystem fileSystemInfo = new TransientXFileSystem()
-                                .setDevice(fileStore.name())
-                                .setPath(workingDirectory.toString())
-                                .setTotalSpace(fileStore.getTotalSpace())
-                                .setUnallocatedSpace(fileStore.getUnallocatedSpace())
-                                .setUsableSpace(fileStore.getUsableSpace())
-                                .setType(fileStore.type())
-                                .setPartition(workingDirectory.getRoot().toString());
+                            TransientXFileSystem fileSystemInfo = new TransientXFileSystem()
+                                    .setDevice(fileStore.name())
+                                    .setPath(workingDirectory.toString())
+                                    .setTotalSpace(fileStore.getTotalSpace())
+                                    .setUnallocatedSpace(fileStore.getUnallocatedSpace())
+                                    .setUsableSpace(fileStore.getUsableSpace())
+                                    .setType(fileStore.type())
+                                    .setPartition(workingDirectory.getRoot().toString());
 
-                        Runtime runtime = getRuntime();
+                            Runtime runtime = getRuntime();
 
-                        return new TransientServiceDef(nodes.getNodeId())
-                                .setAvailableProcessors(runtime.availableProcessors())
-                                .setFreeMemory(runtime.freeMemory())
-                                .setMaxMemory(runtime.maxMemory())
-                                .setTotalMemory(runtime.totalMemory())
-                                .setDataNode(nodes.isDataNode())
-                                .setMaster(nodes.isMaster())
-                                .setFileSystem(fileSystemInfo)
-                                .setPublishAddresses(publishAddresses);
+                            return new TransientServiceDef(nodes.getNodeId())
+                                    .setAvailableProcessors(runtime.availableProcessors())
+                                    .setFreeMemory(runtime.freeMemory())
+                                    .setMaxMemory(runtime.maxMemory())
+                                    .setTotalMemory(runtime.totalMemory())
+                                    .setDataNode(nodes.isDataNode())
+                                    .setMaster(nodes.isMaster())
+                                    .setFileSystem(fileSystemInfo)
+                                    .setPublishAddresses(publishAddresses);
 
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                })).flatMap(transientServiceDef -> {
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                }).flatMap(transientServiceDef -> {
                     VolumeManager volumeManager = vertxContext.verticle().nodes().volumeManager();
                     if (volumeManager != null) {
                         return from(volumeManager.volumes())

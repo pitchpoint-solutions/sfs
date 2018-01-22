@@ -26,8 +26,6 @@ import rx.Scheduler;
 import rx.Subscription;
 import rx.functions.Action0;
 import rx.plugins.RxJavaHooks;
-import rx.plugins.RxJavaPlugins;
-import rx.plugins.RxJavaSchedulersHook;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -50,17 +48,6 @@ public class ContextScheduler extends Scheduler {
     public ContextScheduler(Context context, boolean blocking, boolean ordered) {
         this.vertx = context.owner();
         this.context = context;
-        this.blocking = blocking;
-        this.ordered = ordered;
-    }
-
-    public ContextScheduler(Vertx vertx, boolean blocking) {
-        this(vertx, blocking, true);
-    }
-
-    public ContextScheduler(Vertx vertx, boolean blocking, boolean ordered) {
-        this.vertx = vertx;
-        this.context = null;
         this.blocking = blocking;
         this.ordered = ordered;
     }
@@ -119,7 +106,7 @@ public class ContextScheduler extends Scheduler {
             private boolean cancelled;
 
             public TimedAction(Action0 action, long delayMillis, long periodMillis) {
-                this.context = ContextScheduler.this.context != null ? ContextScheduler.this.context : vertx.getOrCreateContext();
+                this.context = ContextScheduler.this.context;
                 this.cancelled = false;
                 this.action = action;
                 this.periodMillis = periodMillis;

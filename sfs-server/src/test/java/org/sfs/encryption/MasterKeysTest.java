@@ -17,10 +17,8 @@
 package org.sfs.encryption;
 
 import com.google.common.base.Optional;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.elasticsearch.masterkey.GetNewestMasterKey;
 import org.sfs.elasticsearch.masterkey.LoadMasterKey;
 import org.sfs.elasticsearch.masterkey.UpdateMasterKey;
@@ -50,220 +48,221 @@ public class MasterKeysTest extends BaseTestVerticle {
 
     @Test
     public void testGetExistingGetsNew(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
-                .flatMap(masterKey -> {
-                    String id = masterKey.getKeyId();
-                    return masterKeys.getExistingKey(vertxContext, id)
-                            .map(Optional::get)
-                            .map(masterKey1 -> {
-                                assertEquals(context, id, masterKey1.getKeyId());
-                                return (Void) null;
-                            });
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext()))
+                    .flatMap(masterKey -> {
+                        String id = masterKey.getKeyId();
+                        return masterKeys.getExistingKey(vertxContext(), id)
+                                .map(Optional::get)
+                                .map(masterKey1 -> {
+                                    assertEquals(context, id, masterKey1.getKeyId());
+                                    return (Void) null;
+                                });
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testEncryptDecrypt(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        byte[] expectedDecrypted = "HELLO".getBytes(UTF_8);
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.encrypt(vertxContext, expectedDecrypted))
-                .flatMap(encrypted ->
-                        masterKeys.decrypt(vertxContext, encrypted))
-                .map(Optional::get)
-                .map(decrypted -> {
-                    assertArrayEquals(context, expectedDecrypted, decrypted);
-                    return (Void) null;
-                })
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            byte[] expectedDecrypted = "HELLO".getBytes(UTF_8);
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.encrypt(vertxContext(), expectedDecrypted))
+                    .flatMap(encrypted ->
+                            masterKeys.decrypt(vertxContext(), encrypted))
+                    .map(Optional::get)
+                    .map(decrypted -> {
+                        assertArrayEquals(context, expectedDecrypted, decrypted);
+                        return (Void) null;
+                    });
+        });
+
     }
 
     @Test
     public void testKeyRotate(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
-                .map(MasterKey::getKeyId)
-                .flatMap(new LoadMasterKey(vertxContext))
-                .map(Optional::get)
-                .map(pmk -> {
-                    assertEquals(context, masterKeys.firstKey(), pmk.getId());
-                    Calendar now = getInstance();
-                    long thePast = DAYS.toMillis(365);
-                    now.setTimeInMillis(thePast);
-                    pmk.setCreateTs(now);
-                    return pmk;
-                })
-                .flatMap(pmk -> masterKeys.rotateIfRequired(vertxContext, pmk, false))
-                .map(pmk -> {
-                    assertEquals(context, masterKeys.nextKey(masterKeys.firstKey()), pmk.getId());
-                    Calendar now = getInstance();
-                    long thePast = DAYS.toMillis(365);
-                    now.setTimeInMillis(thePast);
-                    pmk.setCreateTs(now);
-                    return pmk;
-                })
-                .flatMap(pmk -> masterKeys.rotateIfRequired(vertxContext, pmk, false))
-                .map(pmk -> {
-                    assertEquals(context, masterKeys.nextKey(masterKeys.nextKey(masterKeys.firstKey())), pmk.getId());
-                    Calendar now = getInstance();
-                    long thePast = DAYS.toMillis(365);
-                    now.setTimeInMillis(thePast);
-                    pmk.setCreateTs(now);
-                    return pmk;
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext()))
+                    .map(MasterKey::getKeyId)
+                    .flatMap(new LoadMasterKey(vertxContext()))
+                    .map(Optional::get)
+                    .map(pmk -> {
+                        assertEquals(context, masterKeys.firstKey(), pmk.getId());
+                        Calendar now = getInstance();
+                        long thePast = DAYS.toMillis(365);
+                        now.setTimeInMillis(thePast);
+                        pmk.setCreateTs(now);
+                        return pmk;
+                    })
+                    .flatMap(pmk -> masterKeys.rotateIfRequired(vertxContext(), pmk, false))
+                    .map(pmk -> {
+                        assertEquals(context, masterKeys.nextKey(masterKeys.firstKey()), pmk.getId());
+                        Calendar now = getInstance();
+                        long thePast = DAYS.toMillis(365);
+                        now.setTimeInMillis(thePast);
+                        pmk.setCreateTs(now);
+                        return pmk;
+                    })
+                    .flatMap(pmk -> masterKeys.rotateIfRequired(vertxContext(), pmk, false))
+                    .map(pmk -> {
+                        assertEquals(context, masterKeys.nextKey(masterKeys.nextKey(masterKeys.firstKey())), pmk.getId());
+                        Calendar now = getInstance();
+                        long thePast = DAYS.toMillis(365);
+                        now.setTimeInMillis(thePast);
+                        pmk.setCreateTs(now);
+                        return pmk;
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testKeyReEncrypt(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        AtomicReference<byte[]> notExpectedArray = new AtomicReference<>();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
-                .map(MasterKey::getKeyId)
-                .flatMap(new LoadMasterKey(vertxContext))
-                .map(Optional::get)
-                .map(pmk -> {
-                    assertEquals(context, masterKeys.firstKey(), pmk.getId());
-                    Calendar now = getInstance();
-                    long thePast = DAYS.toMillis(365);
-                    now.setTimeInMillis(thePast);
-                    pmk.setReEncrypteTs(now);
-                    notExpectedArray.set(pmk.getEncryptedKey().get());
-                    return pmk;
-                })
-                .flatMap(new UpdateMasterKey(vertxContext))
-                .map(Optional::get)
-                .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> masterKeys.maintain(vertxContext))
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetNewestMasterKey(vertxContext, SALTED_AES256_V01))
-                .map(Optional::get)
-                .map(pmk -> {
-                    assertEquals(context, masterKeys.firstKey(), pmk.getId());
-                    byte[] currentArray = pmk.getEncryptedKey().get();
-                    assertFalse(context, Arrays.equals(notExpectedArray.get(), currentArray));
-                    return pmk;
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            AtomicReference<byte[]> notExpectedArray = new AtomicReference<>();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext()))
+                    .map(MasterKey::getKeyId)
+                    .flatMap(new LoadMasterKey(vertxContext()))
+                    .map(Optional::get)
+                    .map(pmk -> {
+                        assertEquals(context, masterKeys.firstKey(), pmk.getId());
+                        Calendar now = getInstance();
+                        long thePast = DAYS.toMillis(365);
+                        now.setTimeInMillis(thePast);
+                        pmk.setReEncrypteTs(now);
+                        notExpectedArray.set(pmk.getEncryptedKey().get());
+                        return pmk;
+                    })
+                    .flatMap(new UpdateMasterKey(vertxContext()))
+                    .map(Optional::get)
+                    .map(new ToVoid<>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> masterKeys.maintain(vertxContext()))
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetNewestMasterKey(vertxContext(), SALTED_AES256_V01))
+                    .map(Optional::get)
+                    .map(pmk -> {
+                        assertEquals(context, masterKeys.firstKey(), pmk.getId());
+                        byte[] currentArray = pmk.getEncryptedKey().get();
+                        assertFalse(context, Arrays.equals(notExpectedArray.get(), currentArray));
+                        return pmk;
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testKeyNoReEncrypt(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        AtomicReference<byte[]> expectedArray = new AtomicReference<>();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
-                .map(MasterKey::getKeyId)
-                .flatMap(new LoadMasterKey(vertxContext))
-                .map(Optional::get)
-                .map(pmk -> {
-                    assertEquals(context, masterKeys.firstKey(), pmk.getId());
-                    Calendar now = getInstance();
-                    pmk.setReEncrypteTs(now);
-                    expectedArray.set(pmk.getEncryptedKey().get());
-                    return pmk;
-                })
-                .flatMap(new UpdateMasterKey(vertxContext))
-                .map(Optional::get)
-                .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> masterKeys.maintain(vertxContext))
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetNewestMasterKey(vertxContext, SALTED_AES256_V01))
-                .map(Optional::get)
-                .map(pmk -> {
-                    assertEquals(context, masterKeys.firstKey(), pmk.getId());
-                    byte[] currentArray = pmk.getEncryptedKey().get();
-                    assertArrayEquals(context, expectedArray.get(), currentArray);
-                    return pmk;
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            AtomicReference<byte[]> expectedArray = new AtomicReference<>();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext()))
+                    .map(MasterKey::getKeyId)
+                    .flatMap(new LoadMasterKey(vertxContext()))
+                    .map(Optional::get)
+                    .map(pmk -> {
+                        assertEquals(context, masterKeys.firstKey(), pmk.getId());
+                        Calendar now = getInstance();
+                        pmk.setReEncrypteTs(now);
+                        expectedArray.set(pmk.getEncryptedKey().get());
+                        return pmk;
+                    })
+                    .flatMap(new UpdateMasterKey(vertxContext()))
+                    .map(Optional::get)
+                    .map(new ToVoid<>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> masterKeys.maintain(vertxContext()))
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetNewestMasterKey(vertxContext(), SALTED_AES256_V01))
+                    .map(Optional::get)
+                    .map(pmk -> {
+                        assertEquals(context, masterKeys.firstKey(), pmk.getId());
+                        byte[] currentArray = pmk.getEncryptedKey().get();
+                        assertArrayEquals(context, expectedArray.get(), currentArray);
+                        return pmk;
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testExpireReEncryptTime(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
-                .map(pmk -> {
-                    Calendar now = getInstance();
-                    long thePast = DAYS.toMillis(365);
-                    now.setTimeInMillis(thePast);
-                    pmk.setReEncrypteTs(now);
-                    return pmk;
-                })
-                .map(masterKey -> {
-                    assertEquals(context, 1, masterKeys.cacheSize());
-                    return masterKey;
-                })
-                .map(pmk -> {
-                    masterKeys.expireCache();
-                    return pmk;
-                })
-                .map(masterKey -> {
-                    assertEquals(context, 0, masterKeys.cacheSize());
-                    return masterKey;
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext()))
+                    .map(pmk -> {
+                        Calendar now = getInstance();
+                        long thePast = DAYS.toMillis(365);
+                        now.setTimeInMillis(thePast);
+                        pmk.setReEncrypteTs(now);
+                        return pmk;
+                    })
+                    .map(masterKey -> {
+                        assertEquals(context, 1, masterKeys.cacheSize());
+                        return masterKey;
+                    })
+                    .map(pmk -> {
+                        masterKeys.expireCache();
+                        return pmk;
+                    })
+                    .map(masterKey -> {
+                        assertEquals(context, 0, masterKeys.cacheSize());
+                        return masterKey;
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testExpireRotationTime(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
-                .map(pmk -> {
-                    Calendar now = getInstance();
-                    long thePast = DAYS.toMillis(365);
-                    now.setTimeInMillis(thePast);
-                    pmk.setCreateTs(now);
-                    return pmk;
-                })
-                .map(masterKey -> {
-                    assertEquals(context, 1, masterKeys.cacheSize());
-                    return masterKey;
-                })
-                .map(pmk -> {
-                    masterKeys.expireCache();
-                    return pmk;
-                })
-                .map(masterKey -> {
-                    assertEquals(context, 0, masterKeys.cacheSize());
-                    return masterKey;
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext()))
+                    .map(pmk -> {
+                        Calendar now = getInstance();
+                        long thePast = DAYS.toMillis(365);
+                        now.setTimeInMillis(thePast);
+                        pmk.setCreateTs(now);
+                        return pmk;
+                    })
+                    .map(masterKey -> {
+                        assertEquals(context, 1, masterKeys.cacheSize());
+                        return masterKey;
+                    })
+                    .map(pmk -> {
+                        masterKeys.expireCache();
+                        return pmk;
+                    })
+                    .map(masterKey -> {
+                        assertEquals(context, 0, masterKeys.cacheSize());
+                        return masterKey;
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testCacheIsBeingUsed(TestContext context) {
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext))
-                .flatMap(masterKey -> {
-                    masterKeys.setFailIfNotCached(true);
-                    return masterKeys.getExistingKey(vertxContext, masterKey.getKeyId());
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.getPreferredKey(vertxContext()))
+                    .flatMap(masterKey -> {
+                        masterKeys.setFailIfNotCached(true);
+                        return masterKeys.getExistingKey(vertxContext(), masterKey.getKeyId());
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 }

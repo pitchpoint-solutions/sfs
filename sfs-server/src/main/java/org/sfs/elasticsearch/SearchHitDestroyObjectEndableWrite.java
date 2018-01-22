@@ -47,13 +47,9 @@ public class SearchHitDestroyObjectEndableWrite extends AbstractBulkUpdateEndabl
     private final CachedAccount cachedAccount;
     private final CachedContainer cachedContainer;
 
-    private final Scheduler scheduler;
-
-
     public SearchHitDestroyObjectEndableWrite(VertxContext<Server> vertxContext) {
         super(vertxContext);
         this.clusterInfo = vertxContext.verticle().getClusterInfo();
-        this.scheduler = RxHelper.scheduler(vertxContext.vertx());
         this.cachedAccount = new CachedAccount(vertxContext);
         this.cachedContainer = new CachedContainer(vertxContext);
     }
@@ -68,7 +64,7 @@ public class SearchHitDestroyObjectEndableWrite extends AbstractBulkUpdateEndabl
                 })
                 // attempt to delete versions that need deleting
                 .flatMap(this::pruneObject)
-                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on pruneObject " + data.encodePrettily())), scheduler)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException(String.format("Timeout on pruneObject %s %s", id, data.encodePrettily()))))
                 .map(persistentObject -> {
                     if (persistentObject.getVersions().isEmpty()) {
                         return absent();

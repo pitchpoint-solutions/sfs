@@ -17,6 +17,7 @@
 package org.sfs;
 
 
+import io.vertx.core.Handler;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.RxVertx;
@@ -63,4 +64,7 @@ public class VertxContext<A extends Server> {
         return ioPool;
     }
 
+    public void runOnContext(Handler<Void> action) {
+        vertx.runOnContext(action);
+    }
 }

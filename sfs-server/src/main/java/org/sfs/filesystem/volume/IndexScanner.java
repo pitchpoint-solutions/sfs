@@ -16,6 +16,7 @@
 
 package org.sfs.filesystem.volume;
 
+import io.vertx.core.Context;
 import io.vertx.core.logging.Logger;
 import org.sfs.SfsVertx;
 import org.sfs.filesystem.ChecksummedPositional;

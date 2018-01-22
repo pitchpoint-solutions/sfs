@@ -26,7 +26,6 @@ import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.util.ExceptionHelper;
 import rx.Observable;
-import rx.Scheduler;
 
 import java.util.Collections;
 import java.util.Iterator;
@@ -45,7 +44,6 @@ public abstract class AbstractJob implements Job {
     @Override
     public Observable<Void> waitStopped(VertxContext<Server> vertxContext, long timeout, TimeUnit timeUnit) {
         Vertx vertx = vertxContext.vertx();
-        Scheduler scheduler = RxHelper.scheduler(vertx.getOrCreateContext());
         ObservableFuture<Void> handler = RxHelper.observableFuture();
         ContextHandler<Void> waiter = new ContextHandler<>(vertx, handler::complete, handler::fail);
         waiters.add(waiter);
@@ -53,7 +51,7 @@ public abstract class AbstractJob implements Job {
                 .doOnNext(aVoid -> waiters.add(waiter))
                 .doOnNext(aVoid -> notifyComplete())
                 .flatMap(aVoid -> handler)
-                .timeout(timeout, timeUnit, scheduler)
+                .timeout(timeout, timeUnit)
                 .doOnError(throwable -> waiters.remove(waiter))
                 .onErrorResumeNext(throwable -> {
                     if (ExceptionHelper.containsException(TimeoutException.class, throwable)) {

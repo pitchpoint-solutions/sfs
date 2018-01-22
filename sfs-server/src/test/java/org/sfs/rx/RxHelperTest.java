@@ -24,6 +24,7 @@ import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.sfs.RunTestOnContextRx;
 import org.sfs.TestSubscriber;
 
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ import static rx.Observable.just;
 public class RxHelperTest {
 
     @Rule
-    public final RunTestOnContext rule = new RunTestOnContext();
+    public final RunTestOnContextRx rule = new RunTestOnContextRx();
 
 
     @Test

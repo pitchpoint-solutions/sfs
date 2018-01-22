@@ -20,7 +20,6 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
-import org.sfs.SfsVertx;
 import rx.Observable;
 import rx.Observer;
 import rx.Scheduler;
@@ -45,7 +44,6 @@ import java.util.concurrent.ExecutorService;
 
 import static java.util.Arrays.asList;
 import static rx.Observable.combineLatestDelayError;
-import static rx.Observable.defer;
 import static rx.functions.Functions.fromFunc;
 
 public class RxHelper {
@@ -192,26 +190,19 @@ public class RxHelper {
         return observable.toHandler();
     }
 
-    public static Scheduler scheduler(Vertx vertx) {
-        return new ContextScheduler(vertx, false);
-    }
-
 
     public static Scheduler scheduler(Context context) {
         return new ContextScheduler(context, false);
     }
 
 
-    public static Scheduler blockingScheduler(Vertx vertx) {
-        return new ContextScheduler(vertx, true);
-    }
-
-    public static Scheduler blockingScheduler(Vertx vertx, boolean ordered) {
-        return new ContextScheduler(vertx, true, ordered);
+    public static Scheduler blockingScheduler(Context context, boolean ordered) {
+        return new ContextScheduler(context, true, ordered);
     }
 
     public static RxJavaSchedulersHook schedulerHook(Context context) {
         return new RxJavaSchedulersHook() {
+
             @Override
             public Scheduler getComputationScheduler() {
                 return scheduler(context);
@@ -219,7 +210,7 @@ public class RxHelper {
 
             @Override
             public Scheduler getIOScheduler() {
-                return blockingScheduler(context.owner());
+                return blockingScheduler(context, true);
             }
 
             @Override
@@ -228,24 +219,4 @@ public class RxHelper {
             }
         };
     }
-
-    public static RxJavaSchedulersHook schedulerHook(Vertx vertx) {
-        return new RxJavaSchedulersHook() {
-            @Override
-            public Scheduler getComputationScheduler() {
-                return scheduler(vertx);
-            }
-
-            @Override
-            public Scheduler getIOScheduler() {
-                return blockingScheduler(vertx);
-            }
-
-            @Override
-            public Scheduler getNewThreadScheduler() {
-                return scheduler(vertx);
-            }
-        };
-    }
-
 }

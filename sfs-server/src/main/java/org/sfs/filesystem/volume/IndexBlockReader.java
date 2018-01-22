@@ -17,6 +17,7 @@
 package org.sfs.filesystem.volume;
 
 import com.google.common.collect.Lists;
+import io.vertx.core.Context;
 import org.sfs.SfsVertx;
 import org.sfs.filesystem.ChecksummedPositional;
 import rx.Observable;

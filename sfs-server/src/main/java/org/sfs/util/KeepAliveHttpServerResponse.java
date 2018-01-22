@@ -21,6 +21,7 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpFrame;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.logging.Logger;
@@ -112,10 +113,138 @@ public class KeepAliveHttpServerResponse implements HttpServerResponse {
             vertxContext.vertx().cancelTimer(p);
         }
         if (keepAliveRunning) {
-            vertxContext.vertx().runOnContext(event -> stopKeepAlive(handler));
+            vertxContext.runOnContext(event -> stopKeepAlive(handler));
         } else {
             handler.complete(null);
         }
+        return this;
+    }
+
+    @Override
+    public HttpServerResponse endHandler(Handler<Void> handler) {
+        delegate.endHandler(handler);
+        return this;
+    }
+
+    @Override
+    public HttpServerResponse sendFile(String filename) {
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.sendFile(filename);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
+
+        return this;
+    }
+
+    @Override
+    public HttpServerResponse sendFile(String filename, long offset) {
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.sendFile(filename, offset);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
+
+        return this;
+    }
+
+    @Override
+    public HttpServerResponse sendFile(String filename, Handler<AsyncResult<Void>> resultHandler) {
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.sendFile(filename, resultHandler);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
+        return this;
+    }
+
+    @Override
+    public HttpServerResponse sendFile(String filename, long offset, Handler<AsyncResult<Void>> resultHandler) {
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.sendFile(filename, offset, resultHandler);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
+        return this;
+    }
+
+    @Override
+    public void reset() {
+        delegate.reset();
+    }
+
+    @Override
+    public HttpServerResponse writeCustomFrame(HttpFrame frame) {
+        ObservableFuture<Void> h = RxHelper.observableFuture();
+        stopKeepAlive(h);
+        h.subscribe(new Subscriber<Void>() {
+            @Override
+            public void onCompleted() {
+                delegate.writeCustomFrame(frame);
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                handleThrowable(e);
+            }
+
+            @Override
+            public void onNext(Void aVoid) {
+
+            }
+        });
         return this;
     }
 

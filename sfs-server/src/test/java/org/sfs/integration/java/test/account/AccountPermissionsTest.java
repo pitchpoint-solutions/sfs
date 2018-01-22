@@ -17,10 +17,8 @@
 package org.sfs.integration.java.test.account;
 
 import io.vertx.core.http.HttpClientResponse;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.integration.java.func.AssertHttpClientResponseStatusCode;
 import org.sfs.integration.java.func.GetAccount;
@@ -45,53 +43,49 @@ public class AccountPermissionsTest extends BaseTestVerticle {
 
     @Test
     public void testNoPermissions(TestContext context) {
+        runOnServerContext(context, () -> {
+            final String accountName = "testaccount";
 
-        final String accountName = "testaccount";
-
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new Func1<Void, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(Void aVoid) {
-                        return testPermission(context, accountName, "", "");
-                    }
-                })
-                .subscribe(new TestSubscriber(context, async));
+            return just((Void) null)
+                    .flatMap(new Func1<Void, Observable<Void>>() {
+                        @Override
+                        public Observable<Void> call(Void aVoid) {
+                            return testPermission(context, accountName, "", "");
+                        }
+                    });
+        });
     }
 
     @Test
     public void testAllButAdminPermission(TestContext context) {
+        runOnServerContext(context, () -> {
+            final String accountName = "testaccount";
 
-        final String accountName = "testaccount";
 
-
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new Func1<Void, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(Void aVoid) {
-                        return testPermission(context, accountName, "user", "user");
-                    }
-                })
-                .subscribe(new TestSubscriber(context, async));
+            return just((Void) null)
+                    .flatMap(new Func1<Void, Observable<Void>>() {
+                        @Override
+                        public Observable<Void> call(Void aVoid) {
+                            return testPermission(context, accountName, "user", "user");
+                        }
+                    });
+        });
     }
 
     protected Observable<Void> testPermission(TestContext context, final String accountName, String username, String password) {
-
         Producer auth = httpBasic(username, password);
-
         return just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, auth))
+                .flatMap(new PostAccount(httpClient(), accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetAccount(httpClient, accountName, auth)
+                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                .flatMap(new GetAccount(httpClient(), accountName, auth)
                         .setMediaTypes(JSON_UTF_8))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, "".equals(username) ? HTTP_FORBIDDEN : HTTP_NOT_FOUND))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadAccount(httpClient, accountName, auth))
+                .flatMap(new HeadAccount(httpClient(), accountName, auth))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
                 .map(new ToVoid<HttpClientResponse>());

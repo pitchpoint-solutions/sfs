@@ -105,29 +105,31 @@ public class BlockFile {
 
     public Observable<Void> open(SfsVertx vertx, StandardOpenOption openOption, StandardOpenOption... openOptions) {
         executorService = vertx.getIoPool();
-        Context context = vertx.getOrCreateContext();
         return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STOPPED, STARTING)))
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
-                    try {
-                        createDirectories(file.getParent());
+                .flatMap(aVoid -> {
+                    Context context = vertx.getOrCreateContext();
+                    return RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
+                        try {
+                            createDirectories(file.getParent());
 
-                        Set<StandardOpenOption> options = new HashSet<>();
-                        options.add(openOption);
-                        addAll(options, openOptions);
+                            Set<StandardOpenOption> options = new HashSet<>();
+                            options.add(openOption);
+                            addAll(options, openOptions);
 
-                        channel =
-                                AsynchronousFileChannel.open(
-                                        file,
-                                        options,
-                                        executorService);
+                            channel =
+                                    AsynchronousFileChannel.open(
+                                            file,
+                                            options,
+                                            executorService);
 
-                        return (Void) null;
+                            return (Void) null;
 
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }))
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                })
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STARTING, STARTED)));
     }
 
@@ -170,45 +172,48 @@ public class BlockFile {
     }
 
     public Observable<Void> close(SfsVertx vertx) {
-        Context context = vertx.getOrCreateContext();
         return aVoid()
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STARTED, STOPPING)))
                 .doOnNext(aVoid -> readOnly.compareAndSet(false, true))
                 .flatMap(new WaitForActiveWriters(vertx, activeWriters))
                 .flatMap(new WaitForEmptyWriteQueue(vertx, writeQueueSupport))
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
-                    try {
-                        channel.close();
-                        return (Void) null;
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }))
+                .flatMap(aVoid -> {
+                    Context context = vertx.getOrCreateContext();
+                    return RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
+                        try {
+                            channel.close();
+                            return (Void) null;
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                })
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STOPPING, STOPPED)));
     }
 
     public Observable<Long> size(SfsVertx vertx) {
-        Context context = vertx.getOrCreateContext();
         return aVoid()
                 .doOnNext(aVoid -> checkOpen())
-                .flatMap(aVoid -> RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
-                    try {
-                        checkNotNull(channel, "Channel is null. Was everything initialized??");
-                        return channel.size();
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }));
+                .flatMap(aVoid -> {
+                    Context context = vertx.getOrCreateContext();
+                    return RxHelper.executeBlocking(context, vertx.getBackgroundPool(), () -> {
+                        try {
+                            checkNotNull(channel, "Channel is null. Was everything initialized??");
+                            return channel.size();
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                });
     }
 
     public Observable<Iterable<ChecksummedPositional<byte[]>>> getBlocks(SfsVertx vertx, final long position,
                                                                          int numberOfBlocks) {
-        Context context = vertx.getOrCreateContext();
         return defer(() -> {
             checkOpen();
             long bufferSize = blockSize * numberOfBlocks;
             checkState(bufferSize <= MAX_VALUE, "Overflow multiplying %s and %s", blockSize, numberOfBlocks);
-            AsyncFileReader src = createReadStream(context, position, (int) bufferSize, bufferSize);
+            AsyncFileReader src = createReadStream(vertx.getOrCreateContext(), position, (int) bufferSize, bufferSize);
             BufferWriteEndableWriteStream dst = new BufferWriteEndableWriteStream();
             return pump(src, dst)
                     .map(aVoid -> {
@@ -266,10 +271,10 @@ public class BlockFile {
     }
 
     public Observable<Boolean> replaceBlock(SfsVertx vertx, final long position, Buffer oldValue, Buffer newValue) {
-        Context context = vertx.getOrCreateContext();
         return defer(() -> {
             checkOpen();
             checkCanWrite();
+            Context context = vertx.getOrCreateContext();
             return getBlock0(context, position)
                     .flatMap(buffer -> {
                         Optional<Block.Frame<byte[]>> oExistingValue = decodeFrame(buffer, false);

@@ -27,6 +27,7 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.sfs.RunTestOnContextRx;
 import org.sfs.SfsVertx;
 import org.sfs.SfsVertxImpl;
 import org.sfs.TestSubscriber;
@@ -53,7 +54,7 @@ import static org.sfs.util.VertxAssert.assertEquals;
 public class FileBackedBufferTest {
 
     @Rule
-    public final RunTestOnContext rule = new RunTestOnContext();
+    public final RunTestOnContextRx rule = new RunTestOnContextRx();
 
     private ExecutorService backgroundPool;
     private ExecutorService ioPool;

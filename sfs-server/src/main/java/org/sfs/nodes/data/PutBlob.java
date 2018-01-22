@@ -18,8 +18,10 @@ package org.sfs.nodes.data;
 
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
+import com.google.common.io.BaseEncoding;
 import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
@@ -30,6 +32,7 @@ import org.sfs.auth.Authenticate;
 import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.filesystem.volume.Volume;
 import org.sfs.filesystem.volume.VolumeManager;
+import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.CountingReadStream;
 import org.sfs.io.DigestReadStream;
 import org.sfs.rx.HandleServerToBusy;
@@ -44,7 +47,6 @@ import org.sfs.validate.ValidateHeaderExists;
 import org.sfs.validate.ValidateNodeIsDataNode;
 import org.sfs.validate.ValidateParamComputedDigest;
 import org.sfs.validate.ValidateParamExists;
-import rx.Observable;
 
 import java.util.regex.Matcher;
 
@@ -146,6 +148,17 @@ public class PutBlob implements Handler<SfsRequest> {
                                             }
                                             return new Holder2<>(httpServerRequest1, of(digestBlob));
                                         });
+//                                        .flatMap(sfsRequestOptionalHolder2 ->
+//                                                volume.getDataStream(vertxContext.vertx(), writeStreamBlob.getPosition(), Optional.absent(), Optional.absent())
+//                                                        .flatMap(readStreamBlobOptional -> {
+//                                                            BufferWriteEndableWriteStream bufferWriteEndableWriteStream = new BufferWriteEndableWriteStream();
+//                                                            return readStreamBlobOptional.get().produce(bufferWriteEndableWriteStream)
+//                                                                    .map(aVoid -> {
+//                                                                        Buffer buffer = bufferWriteEndableWriteStream.toBuffer();
+//                                                                        LOGGER.debug("Seen Bytes Are: " + BaseEncoding.base64().encode(buffer.getBytes()));
+//                                                                        return sfsRequestOptionalHolder2;
+//                                                                    });
+//                                                        }));
                             });
 
                 })

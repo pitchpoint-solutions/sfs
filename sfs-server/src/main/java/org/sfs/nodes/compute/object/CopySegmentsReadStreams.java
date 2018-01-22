@@ -79,7 +79,7 @@ public class CopySegmentsReadStreams implements Func1<Iterable<TransientSegment>
                                         LOGGER.debug("begin copy of blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition());
                                     }
                                     return prepareWriteStream(new NoEndEndableWriteStream(writeStream), transientSegment)
-                                            .flatMap(writeStream -> holder.value1().produce(writeStream))
+                                            .flatMap(holder.value1()::produce)
                                             .doOnNext(aVoid -> {
                                                 if (LOGGER.isDebugEnabled()) {
                                                     LOGGER.debug("end copy of blob reference object=" + transientBlobReference.getSegment().getParent().getParent().getId() + ", version=" + transientBlobReference.getSegment().getParent().getId() + ", segment=" + transientBlobReference.getSegment().getId() + ", volume=" + transientBlobReference.getVolumeId() + ", position=" + transientBlobReference.getPosition());

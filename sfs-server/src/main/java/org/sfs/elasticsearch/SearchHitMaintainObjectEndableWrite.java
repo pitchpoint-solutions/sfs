@@ -66,7 +66,6 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
     private final CachedContainer cachedContainer;
 
     private final List<TransientServiceDef> dataNodes;
-    private final Scheduler scheduler;
     private final Set<String> forceRemoveVolumes;
 
 
@@ -77,7 +76,6 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                 from(clusterInfo.getDataNodes())
                         .transform(TransientServiceDef::copy)
                         .toList();
-        this.scheduler = RxHelper.scheduler(vertxContext.vertx());
         this.cachedAccount = new CachedAccount(vertxContext);
         this.cachedContainer = new CachedContainer(vertxContext);
         this.forceRemoveVolumes = forceRemoveVolumes;
@@ -92,21 +90,21 @@ public class SearchHitMaintainObjectEndableWrite extends AbstractBulkUpdateEndab
                 .map(this::forceRemoveVolumes)
                 // delete versions that are to old to attempt verification,ack and rebalance
                 .flatMap(this::deleteOldUnAckdVersions)
-                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on deleteOldUnAckdVersions " + data.encodePrettily())), scheduler)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException(String.format("Timeout on deleteOldUnAckdVersions %s %s", id, data.encodePrettily()))))
                 // attempt to delete versions that need deleting
                 .flatMap(this::pruneObject)
-                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on pruneObject " + data.encodePrettily())), scheduler)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException(String.format("Timeout on pruneObject %s %s", id, data.encodePrettily()))))
                 // verifyAck before rebalance
                 // so that in cases where the verify/ack
                 // failed to persist to the index
                 // we're able to recreate the state
                 // needed for rebalancing
                 .flatMap(this::verifyAck)
-                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on verifyAck " + data.encodePrettily())), scheduler)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException(String.format("Timeout on verifyAck %s %s", id, data.encodePrettily()))))
                 // rebalance the objects, including the ones that were just re-verified
                 // disable rebalance because more testing is needed
                 .flatMap(this::reBalance)
-                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException("Timeout on reBalance " + data.encodePrettily())), scheduler)
+                .timeout(3, TimeUnit.MINUTES, Observable.error(new RuntimeException(String.format("Timeout on reBalance %s %s", id, data.encodePrettily()))))
                 .map(persistentObject -> {
                     if (persistentObject.getVersions().isEmpty()) {
                         return absent();

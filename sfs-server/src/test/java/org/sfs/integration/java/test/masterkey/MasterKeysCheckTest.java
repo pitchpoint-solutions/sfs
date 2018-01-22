@@ -24,14 +24,12 @@ import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.elasticsearch.Elasticsearch;
 import org.sfs.elasticsearch.masterkey.UpdateMasterKey;
 import org.sfs.encryption.MasterKeys;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.integration.java.func.MasterKeysCheck;
 import org.sfs.integration.java.func.RefreshIndex;
-import org.sfs.integration.java.func.WaitForCluster;
 import org.sfs.rx.ToType;
 import org.sfs.rx.ToVoid;
 import org.sfs.vo.PersistentMasterKey;
@@ -56,219 +54,210 @@ public class MasterKeysCheckTest extends BaseTestVerticle {
 
     @Test
     public void testNoChanges(TestContext context) {
-        byte[] data = "abc123".getBytes(UTF_8);
-        AtomicReference<JsonObject> expectedJsonObject = new AtomicReference<>();
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> vertxContext.verticle().getNodeStats().forceUpdate(vertxContext))
-                .flatMap(aVoid -> vertxContext.verticle().getClusterInfo().forceRefresh(vertxContext))
-                .flatMap(new WaitForCluster(vertxContext))
-                .flatMap(aVoid -> masterKeys.encrypt(vertxContext, data))
-                .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-                    SearchRequestBuilder request = elasticsearch.get()
-                            .prepareSearch(elasticsearch.masterKeyTypeIndex())
-                            .setTypes(elasticsearch.defaultType())
-                            .setQuery(matchAllQuery())
-                            .setVersion(true);
-                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultSearchTimeout());
-                })
-                .map(Optional::get)
-                .map(searchResponse -> {
-                    SearchHits searchHits = searchResponse.getHits();
-                    SearchHit[] searchHitArray = searchHits.getHits();
-                    assertEquals(context, 1, searchHitArray.length);
-                    SearchHit searchHit = searchHitArray[0];
-                    PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
-                    expectedJsonObject.set(persistentMasterKey.toJsonObject());
-                    return (Void) null;
-                })
-                .flatMap(new MasterKeysCheck(httpClient, authAdmin))
-                .map(httpClientResponseAndBuffer -> {
-                    JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
-                    assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
-                    assertEquals(context, "Success", jsonObject.getString("message"));
-                    return jsonObject;
-                })
-                .map(new ToType<>((Void) null))
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-                    SearchRequestBuilder request = elasticsearch.get()
-                            .prepareSearch(elasticsearch.masterKeyTypeIndex())
-                            .setTypes(elasticsearch.defaultType())
-                            .setQuery(matchAllQuery())
-                            .setVersion(true);
-                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultSearchTimeout());
-                })
-                .map(Optional::get)
-                .map(searchResponse -> {
-                    SearchHits searchHits = searchResponse.getHits();
-                    SearchHit[] searchHitArray = searchHits.getHits();
-                    assertEquals(context, 1, searchHitArray.length);
-                    SearchHit searchHit = searchHitArray[0];
-                    PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
-                    assertEquals(context, expectedJsonObject.get(), persistentMasterKey.toJsonObject());
-                    return (Void) null;
-                })
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            byte[] data = "abc123".getBytes(UTF_8);
+            AtomicReference<JsonObject> expectedJsonObject = new AtomicReference<>();
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.encrypt(vertxContext(), data))
+                    .map(new ToVoid<>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> {
+                        Elasticsearch elasticsearch = vertxContext().verticle().elasticsearch();
+                        SearchRequestBuilder request = elasticsearch.get()
+                                .prepareSearch(elasticsearch.masterKeyTypeIndex())
+                                .setTypes(elasticsearch.defaultType())
+                                .setQuery(matchAllQuery())
+                                .setVersion(true);
+                        return elasticsearch.execute(vertxContext(), request, elasticsearch.getDefaultSearchTimeout());
+                    })
+                    .map(Optional::get)
+                    .map(searchResponse -> {
+                        SearchHits searchHits = searchResponse.getHits();
+                        SearchHit[] searchHitArray = searchHits.getHits();
+                        assertEquals(context, 1, searchHitArray.length);
+                        SearchHit searchHit = searchHitArray[0];
+                        PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
+                        expectedJsonObject.set(persistentMasterKey.toJsonObject());
+                        return (Void) null;
+                    })
+                    .flatMap(new MasterKeysCheck(httpClient(), authAdmin))
+                    .map(httpClientResponseAndBuffer -> {
+                        JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
+                        assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
+                        assertEquals(context, "Success", jsonObject.getString("message"));
+                        return jsonObject;
+                    })
+                    .map(new ToType<>((Void) null))
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> {
+                        Elasticsearch elasticsearch = vertxContext().verticle().elasticsearch();
+                        SearchRequestBuilder request = elasticsearch.get()
+                                .prepareSearch(elasticsearch.masterKeyTypeIndex())
+                                .setTypes(elasticsearch.defaultType())
+                                .setQuery(matchAllQuery())
+                                .setVersion(true);
+                        return elasticsearch.execute(vertxContext(), request, elasticsearch.getDefaultSearchTimeout());
+                    })
+                    .map(Optional::get)
+                    .map(searchResponse -> {
+                        SearchHits searchHits = searchResponse.getHits();
+                        SearchHit[] searchHitArray = searchHits.getHits();
+                        assertEquals(context, 1, searchHitArray.length);
+                        SearchHit searchHit = searchHitArray[0];
+                        PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
+                        assertEquals(context, expectedJsonObject.get(), persistentMasterKey.toJsonObject());
+                        return (Void) null;
+                    });
+        });
     }
 
     @Test
     public void testHasPrimaryNoBackupNoHash(TestContext context) {
-        byte[] data = "abc123".getBytes(UTF_8);
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> vertxContext.verticle().getNodeStats().forceUpdate(vertxContext))
-                .flatMap(aVoid -> vertxContext.verticle().getClusterInfo().forceRefresh(vertxContext))
-                .flatMap(new WaitForCluster(vertxContext))
-                .flatMap(aVoid -> masterKeys.encrypt(vertxContext, data))
-                .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-                    SearchRequestBuilder request = elasticsearch.get()
-                            .prepareSearch(elasticsearch.masterKeyTypeIndex())
-                            .setTypes(elasticsearch.defaultType())
-                            .setQuery(matchAllQuery())
-                            .setVersion(true);
-                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultSearchTimeout());
-                })
-                .map(Optional::get)
-                .map(searchResponse -> {
-                    SearchHits searchHits = searchResponse.getHits();
-                    SearchHit[] searchHitArray = searchHits.getHits();
-                    assertEquals(context, 1, searchHitArray.length);
-                    SearchHit searchHit = searchHitArray[0];
-                    PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
-                    return persistentMasterKey.setBackup0KeyId(null)
-                            .setBackup0EncryptedKey(null)
-                            .setSecretSha512(null)
-                            .setSecretSalt(null);
-                })
-                .flatMap(new UpdateMasterKey(vertxContext))
-                .map(Optional::get)
-                .map(persistentMasterKey -> {
-                    assertFalse(context, persistentMasterKey.getBackup0KeyId().isPresent());
-                    assertFalse(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
-                    assertFalse(context, persistentMasterKey.getSecretSalt().isPresent());
-                    assertFalse(context, persistentMasterKey.getSecretSha512().isPresent());
-                    return (Void) null;
-                })
-                .map(new ToType<>((Void) null))
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new MasterKeysCheck(httpClient, authAdmin))
-                .map(httpClientResponseAndBuffer -> {
-                    JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
-                    assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
-                    assertEquals(context, "Success", jsonObject.getString("message"));
-                    return jsonObject;
-                })
-                .map(new ToType<>((Void) null))
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-                    SearchRequestBuilder request = elasticsearch.get()
-                            .prepareSearch(elasticsearch.masterKeyTypeIndex())
-                            .setTypes(elasticsearch.defaultType())
-                            .setQuery(matchAllQuery())
-                            .setVersion(true);
-                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultSearchTimeout());
-                })
-                .map(Optional::get)
-                .map(searchResponse -> {
-                    SearchHits searchHits = searchResponse.getHits();
-                    SearchHit[] searchHitArray = searchHits.getHits();
-                    assertEquals(context, 1, searchHitArray.length);
-                    SearchHit searchHit = searchHitArray[0];
-                    PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
-                    assertTrue(context, persistentMasterKey.getBackup0KeyId().isPresent());
-                    assertTrue(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
-                    assertTrue(context, persistentMasterKey.getSecretSalt().isPresent());
-                    assertTrue(context, persistentMasterKey.getSecretSha512().isPresent());
-                    return (Void) null;
-                })
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            byte[] data = "abc123".getBytes(UTF_8);
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.encrypt(vertxContext(), data))
+                    .map(new ToVoid<>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> {
+                        Elasticsearch elasticsearch = vertxContext().verticle().elasticsearch();
+                        SearchRequestBuilder request = elasticsearch.get()
+                                .prepareSearch(elasticsearch.masterKeyTypeIndex())
+                                .setTypes(elasticsearch.defaultType())
+                                .setQuery(matchAllQuery())
+                                .setVersion(true);
+                        return elasticsearch.execute(vertxContext(), request, elasticsearch.getDefaultSearchTimeout());
+                    })
+                    .map(Optional::get)
+                    .map(searchResponse -> {
+                        SearchHits searchHits = searchResponse.getHits();
+                        SearchHit[] searchHitArray = searchHits.getHits();
+                        assertEquals(context, 1, searchHitArray.length);
+                        SearchHit searchHit = searchHitArray[0];
+                        PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
+                        return persistentMasterKey.setBackup0KeyId(null)
+                                .setBackup0EncryptedKey(null)
+                                .setSecretSha512(null)
+                                .setSecretSalt(null);
+                    })
+                    .flatMap(new UpdateMasterKey(vertxContext()))
+                    .map(Optional::get)
+                    .map(persistentMasterKey -> {
+                        assertFalse(context, persistentMasterKey.getBackup0KeyId().isPresent());
+                        assertFalse(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
+                        assertFalse(context, persistentMasterKey.getSecretSalt().isPresent());
+                        assertFalse(context, persistentMasterKey.getSecretSha512().isPresent());
+                        return (Void) null;
+                    })
+                    .map(new ToType<>((Void) null))
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new MasterKeysCheck(httpClient(), authAdmin))
+                    .map(httpClientResponseAndBuffer -> {
+                        JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
+                        assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
+                        assertEquals(context, "Success", jsonObject.getString("message"));
+                        return jsonObject;
+                    })
+                    .map(new ToType<>((Void) null))
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> {
+                        Elasticsearch elasticsearch = vertxContext().verticle().elasticsearch();
+                        SearchRequestBuilder request = elasticsearch.get()
+                                .prepareSearch(elasticsearch.masterKeyTypeIndex())
+                                .setTypes(elasticsearch.defaultType())
+                                .setQuery(matchAllQuery())
+                                .setVersion(true);
+                        return elasticsearch.execute(vertxContext(), request, elasticsearch.getDefaultSearchTimeout());
+                    })
+                    .map(Optional::get)
+                    .map(searchResponse -> {
+                        SearchHits searchHits = searchResponse.getHits();
+                        SearchHit[] searchHitArray = searchHits.getHits();
+                        assertEquals(context, 1, searchHitArray.length);
+                        SearchHit searchHit = searchHitArray[0];
+                        PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
+                        assertTrue(context, persistentMasterKey.getBackup0KeyId().isPresent());
+                        assertTrue(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
+                        assertTrue(context, persistentMasterKey.getSecretSalt().isPresent());
+                        assertTrue(context, persistentMasterKey.getSecretSha512().isPresent());
+                        return (Void) null;
+                    });
+        });
     }
 
     @Test
     public void testHasPrimaryNoBackupHasHash(TestContext context) {
-        byte[] data = "abc123".getBytes(UTF_8);
-        MasterKeys masterKeys = vertxContext.verticle().masterKeys();
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(aVoid -> vertxContext.verticle().getNodeStats().forceUpdate(vertxContext))
-                .flatMap(aVoid -> vertxContext.verticle().getClusterInfo().forceRefresh(vertxContext))
-                .flatMap(new WaitForCluster(vertxContext))
-                .flatMap(aVoid -> masterKeys.encrypt(vertxContext, data))
-                .map(new ToVoid<>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-                    SearchRequestBuilder request = elasticsearch.get()
-                            .prepareSearch(elasticsearch.masterKeyTypeIndex())
-                            .setTypes(elasticsearch.defaultType())
-                            .setQuery(matchAllQuery())
-                            .setVersion(true);
-                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultSearchTimeout());
-                })
-                .map(Optional::get)
-                .map(searchResponse -> {
-                    SearchHits searchHits = searchResponse.getHits();
-                    SearchHit[] searchHitArray = searchHits.getHits();
-                    assertEquals(context, 1, searchHitArray.length);
-                    SearchHit searchHit = searchHitArray[0];
-                    PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
-                    return persistentMasterKey.setBackup0KeyId(null)
-                            .setBackup0EncryptedKey(null);
-                })
-                .flatMap(new UpdateMasterKey(vertxContext))
-                .map(Optional::get)
-                .map(persistentMasterKey -> {
-                    assertFalse(context, persistentMasterKey.getBackup0KeyId().isPresent());
-                    assertFalse(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
-                    assertTrue(context, persistentMasterKey.getSecretSalt().isPresent());
-                    assertTrue(context, persistentMasterKey.getSecretSha512().isPresent());
-                    return (Void) null;
-                })
-                .map(new ToType<>((Void) null))
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new MasterKeysCheck(httpClient, authAdmin))
-                .map(httpClientResponseAndBuffer -> {
-                    JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
-                    assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
-                    assertEquals(context, "Success", jsonObject.getString("message"));
-                    return jsonObject;
-                })
-                .map(new ToType<>((Void) null))
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(aVoid -> {
-                    Elasticsearch elasticsearch = vertxContext.verticle().elasticsearch();
-                    SearchRequestBuilder request = elasticsearch.get()
-                            .prepareSearch(elasticsearch.masterKeyTypeIndex())
-                            .setTypes(elasticsearch.defaultType())
-                            .setQuery(matchAllQuery())
-                            .setVersion(true);
-                    return elasticsearch.execute(vertxContext, request, elasticsearch.getDefaultSearchTimeout());
-                })
-                .map(Optional::get)
-                .map(searchResponse -> {
-                    SearchHits searchHits = searchResponse.getHits();
-                    SearchHit[] searchHitArray = searchHits.getHits();
-                    assertEquals(context, 1, searchHitArray.length);
-                    SearchHit searchHit = searchHitArray[0];
-                    PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
-                    assertTrue(context, persistentMasterKey.getBackup0KeyId().isPresent());
-                    assertTrue(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
-                    assertTrue(context, persistentMasterKey.getSecretSalt().isPresent());
-                    assertTrue(context, persistentMasterKey.getSecretSha512().isPresent());
-                    return (Void) null;
-                })
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            byte[] data = "abc123".getBytes(UTF_8);
+            MasterKeys masterKeys = vertxContext().verticle().masterKeys();
+            return just((Void) null)
+                    .flatMap(aVoid -> masterKeys.encrypt(vertxContext(), data))
+                    .map(new ToVoid<>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> {
+                        Elasticsearch elasticsearch = vertxContext().verticle().elasticsearch();
+                        SearchRequestBuilder request = elasticsearch.get()
+                                .prepareSearch(elasticsearch.masterKeyTypeIndex())
+                                .setTypes(elasticsearch.defaultType())
+                                .setQuery(matchAllQuery())
+                                .setVersion(true);
+                        return elasticsearch.execute(vertxContext(), request, elasticsearch.getDefaultSearchTimeout());
+                    })
+                    .map(Optional::get)
+                    .map(searchResponse -> {
+                        SearchHits searchHits = searchResponse.getHits();
+                        SearchHit[] searchHitArray = searchHits.getHits();
+                        assertEquals(context, 1, searchHitArray.length);
+                        SearchHit searchHit = searchHitArray[0];
+                        PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
+                        return persistentMasterKey.setBackup0KeyId(null)
+                                .setBackup0EncryptedKey(null);
+                    })
+                    .flatMap(new UpdateMasterKey(vertxContext()))
+                    .map(Optional::get)
+                    .map(persistentMasterKey -> {
+                        assertFalse(context, persistentMasterKey.getBackup0KeyId().isPresent());
+                        assertFalse(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
+                        assertTrue(context, persistentMasterKey.getSecretSalt().isPresent());
+                        assertTrue(context, persistentMasterKey.getSecretSha512().isPresent());
+                        return (Void) null;
+                    })
+                    .map(new ToType<>((Void) null))
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new MasterKeysCheck(httpClient(), authAdmin))
+                    .map(httpClientResponseAndBuffer -> {
+                        JsonObject jsonObject = new JsonObject(httpClientResponseAndBuffer.getBuffer().toString(StandardCharsets.UTF_8));
+                        assertEquals(context, HTTP_OK, jsonObject.getInteger("code").intValue());
+                        assertEquals(context, "Success", jsonObject.getString("message"));
+                        return jsonObject;
+                    })
+                    .map(new ToType<>((Void) null))
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(aVoid -> {
+                        Elasticsearch elasticsearch = vertxContext().verticle().elasticsearch();
+                        SearchRequestBuilder request = elasticsearch.get()
+                                .prepareSearch(elasticsearch.masterKeyTypeIndex())
+                                .setTypes(elasticsearch.defaultType())
+                                .setQuery(matchAllQuery())
+                                .setVersion(true);
+                        return elasticsearch.execute(vertxContext(), request, elasticsearch.getDefaultSearchTimeout());
+                    })
+                    .map(Optional::get)
+                    .map(searchResponse -> {
+                        SearchHits searchHits = searchResponse.getHits();
+                        SearchHit[] searchHitArray = searchHits.getHits();
+                        assertEquals(context, 1, searchHitArray.length);
+                        SearchHit searchHit = searchHitArray[0];
+                        PersistentMasterKey persistentMasterKey = fromSearchHit(searchHit);
+                        assertTrue(context, persistentMasterKey.getBackup0KeyId().isPresent());
+                        assertTrue(context, persistentMasterKey.getBackup0EncryptedKey().isPresent());
+                        assertTrue(context, persistentMasterKey.getSecretSalt().isPresent());
+                        assertTrue(context, persistentMasterKey.getSecretSha512().isPresent());
+                        return (Void) null;
+                    });
+        });
     }
 
 }

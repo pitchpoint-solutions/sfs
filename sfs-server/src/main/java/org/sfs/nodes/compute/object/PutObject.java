@@ -28,7 +28,6 @@ import org.sfs.elasticsearch.container.LoadAccountAndContainer;
 import org.sfs.elasticsearch.object.LoadObject;
 import org.sfs.elasticsearch.object.PersistObject;
 import org.sfs.elasticsearch.object.UpdateObject;
-import org.sfs.encryption.AlgorithmDef;
 import org.sfs.io.CountingReadStream;
 import org.sfs.io.FileBackedBuffer;
 import org.sfs.io.LimitedReadStream;
@@ -68,7 +67,6 @@ import static java.lang.String.valueOf;
 import static java.net.HttpURLConnection.HTTP_CREATED;
 import static java.util.Calendar.getInstance;
 import static java.util.Collections.emptyList;
-import static org.sfs.encryption.AlgorithmDef.getPreferred;
 import static org.sfs.io.AsyncIO.pump;
 import static org.sfs.rx.Defer.aVoid;
 import static org.sfs.rx.Defer.just;
@@ -86,7 +84,6 @@ import static rx.Observable.using;
 public class PutObject implements Handler<SfsRequest> {
 
     private static final Logger LOGGER = getLogger(PutObject.class);
-    private static final AlgorithmDef ALGORITHM_DEF = getPreferred();
 
     @Override
     public void handle(final SfsRequest httpServerRequest) {

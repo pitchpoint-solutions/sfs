@@ -17,10 +17,8 @@
 package org.sfs.integration.java.test.identity;
 
 import io.vertx.core.buffer.Buffer;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.integration.java.func.AssertHttpClientResponseStatusCode;
 import org.sfs.integration.java.func.KeystoneAuth;
@@ -38,27 +36,27 @@ public class KeystoneAuthTest extends BaseTestVerticle {
 
     @Test
     public void testValidCreds(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new KeystoneAuth(httpClient, "user", "user"))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
-                .flatMap(new HttpClientResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new ToVoid<Buffer>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new KeystoneAuth(httpClient(), "user", "user"))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
+                    .flatMap(new HttpClientResponseBodyBuffer())
+                    .map(new HttpBodyLogger())
+                    .map(new ToVoid<Buffer>());
+        });
     }
 
     @Test
     public void testInvalid(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new KeystoneAuth(httpClient, "user", "badpassword"))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_UNAUTHORIZED))
-                .flatMap(new HttpClientResponseBodyBuffer())
-                .map(new HttpBodyLogger())
-                .map(new ToVoid<Buffer>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new KeystoneAuth(httpClient(), "user", "badpassword"))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_UNAUTHORIZED))
+                    .flatMap(new HttpClientResponseBodyBuffer())
+                    .map(new HttpBodyLogger())
+                    .map(new ToVoid<Buffer>());
+        });
     }
 }

@@ -39,6 +39,7 @@ import org.sfs.util.KeepAliveHttpServerResponse;
 import rx.Observable;
 
 import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSession;
 import javax.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.Map;
@@ -109,6 +110,11 @@ public class SfsRequest implements HttpServerRequest {
             context = new HashMap<>();
         }
         return context;
+    }
+
+    @Override
+    public SSLSession sslSession() {
+        return httpServerRequest.sslSession();
     }
 
     @Override
@@ -598,6 +604,23 @@ public class SfsRequest implements HttpServerRequest {
         public HttpServerResponse writeCustomFrame(int type, int flags, Buffer payload) {
             httpServerRequest.wroteData = true;
             response.writeCustomFrame(type, flags, payload);
+            return this;
+        }
+
+        @Override
+        public HttpServerResponse endHandler(Handler<Void> handler) {
+            response.endHandler(handler);
+            return this;
+        }
+
+        @Override
+        public void reset() {
+            response.reset();
+        }
+
+        @Override
+        public HttpServerResponse writeCustomFrame(HttpFrame frame) {
+            response.writeCustomFrame(frame);
             return this;
         }
     }

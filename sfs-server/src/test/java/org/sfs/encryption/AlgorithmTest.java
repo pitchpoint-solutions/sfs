@@ -20,7 +20,6 @@ import com.google.common.io.ByteStreams;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
 import org.sfs.integration.java.BaseTestVerticle;
@@ -35,15 +34,14 @@ import org.sfs.io.NullEndableWriteStream;
 import org.sfs.rx.Holder1;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
+import org.sfs.rx.ToVoid;
 import org.sfs.util.Buffers;
 import org.sfs.util.MessageDigestFactory;
 import org.sfs.util.PrngRandom;
 import org.sfs.util.VertxAssert;
 import rx.Observable;
-import rx.Subscriber;
 import rx.functions.Func1;
 
-import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,66 +52,52 @@ public class AlgorithmTest extends BaseTestVerticle {
 
     @Test
     public void testBuffered(TestContext context) {
+        runOnServerContext(context, () -> {
+            final byte[] salt = new byte[64];
+            final byte[] secret = new byte[64];
 
-        final byte[] salt = new byte[64];
-        final byte[] secret = new byte[64];
+            final byte[] data = new byte[1024];
 
-        final byte[] data = new byte[1024];
+            PrngRandom random = PrngRandom.getCurrentInstance();
+            random.nextBytesBlocking(salt);
+            random.nextBytesBlocking(secret);
+            random.nextBytesBlocking(data);
 
-        PrngRandom random = PrngRandom.getCurrentInstance();
-        random.nextBytesBlocking(salt);
-        random.nextBytesBlocking(secret);
-        random.nextBytesBlocking(data);
+            final CipherWriteStreamValidation cipherWriteStreamValidation = new CipherWriteStreamValidation(secret, salt);
+            final byte[] expectedCipherBytes = cipherWriteStreamValidation.encrypt(data);
+            final byte[] actualClearBytes = cipherWriteStreamValidation.decrypt(expectedCipherBytes);
 
-        final CipherWriteStreamValidation cipherWriteStreamValidation = new CipherWriteStreamValidation(secret, salt);
-        final byte[] expectedCipherBytes = cipherWriteStreamValidation.encrypt(data);
-        final byte[] actualClearBytes = cipherWriteStreamValidation.decrypt(expectedCipherBytes);
+            VertxAssert.assertArrayEquals(context, data, actualClearBytes);
 
-        VertxAssert.assertArrayEquals(context, data, actualClearBytes);
+            final Holder1<Integer> count = new Holder1<>();
+            count.value = 0;
 
-        final Holder1<Integer> count = new Holder1<>();
-        count.value = 0;
-
-        Async async = context.async();
-        Observable.from(AlgorithmDef.values())
-                .map(new Func1<AlgorithmDef, Algorithm>() {
-                    @Override
-                    public Algorithm call(AlgorithmDef algorithmDef) {
-                        count.value++;
-                        return algorithmDef.create(secret, salt);
-                    }
-                })
-                .map(new Func1<Algorithm, byte[]>() {
-                    @Override
-                    public byte[] call(final Algorithm algorithm) {
-                        byte[] encrypted = algorithm.encrypt(data);
-                        VertxAssert.assertArrayEquals(context, expectedCipherBytes, encrypted);
-                        return algorithm.decrypt(encrypted);
-                    }
-                })
-                .subscribe(new Subscriber<byte[]>() {
-                    @Override
-                    public void onCompleted() {
-                        async.complete();
-                    }
-
-                    @Override
-                    public void onError(Throwable e) {
-                        e.printStackTrace();
-                        context.fail(e);
-                    }
-
-                    @Override
-                    public void onNext(byte[] bytes) {
+            return Observable.from(AlgorithmDef.values())
+                    .map(new Func1<AlgorithmDef, Algorithm>() {
+                        @Override
+                        public Algorithm call(AlgorithmDef algorithmDef) {
+                            count.value++;
+                            return algorithmDef.create(secret, salt);
+                        }
+                    })
+                    .map(new Func1<Algorithm, byte[]>() {
+                        @Override
+                        public byte[] call(final Algorithm algorithm) {
+                            byte[] encrypted = algorithm.encrypt(data);
+                            VertxAssert.assertArrayEquals(context, expectedCipherBytes, encrypted);
+                            return algorithm.decrypt(encrypted);
+                        }
+                    })
+                    .doOnNext(bytes -> {
                         VertxAssert.assertArrayEquals(context, data, bytes);
                         VertxAssert.assertEquals(context, AlgorithmDef.values().length, count.value.intValue());
-                    }
-                });
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testWriteStream(TestContext context) {
-
         final int bufferSize = 10;
 
         final byte[] salt = new byte[64];
@@ -135,269 +119,243 @@ public class AlgorithmTest extends BaseTestVerticle {
         final Holder1<Integer> count = new Holder1<>();
         count.value = 0;
 
-        Async async = context.async();
-        Observable.from(AlgorithmDef.values())
-                .map(new Func1<AlgorithmDef, Algorithm>() {
-                    @Override
-                    public Algorithm call(AlgorithmDef algorithmDef) {
-                        count.value++;
-                        return algorithmDef.create(secret, salt);
-                    }
-                })
-                .flatMap(new Func1<Algorithm, Observable<byte[]>>() {
-                    @Override
-                    public Observable<byte[]> call(final Algorithm algorithm) {
-                        final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
-                        final BufferEndableWriteStream encryptedWriteStream = algorithm.encrypt(bufferWriteStream);
-                        ObservableFuture<Void> handler = RxHelper.observableFuture();
-                        encryptedWriteStream.endHandler(handler::complete);
-                        for (Buffer partition : Buffers.partition(Buffer.buffer(data), bufferSize)) {
-                            encryptedWriteStream.write(partition);
-                        }
-                        encryptedWriteStream.end();
 
-                        return handler
-                                .map(new Func1<Void, byte[]>() {
-                                    @Override
-                                    public byte[] call(Void aVoid) {
-                                        return bufferWriteStream.toBuffer().getBytes();
-                                    }
-                                }).map(new Func1<byte[], byte[]>() {
-                                    @Override
-                                    public byte[] call(byte[] encrypted) {
-                                        VertxAssert.assertArrayEquals(context, expectedCipherBytes, encrypted);
-                                        return encrypted;
-                                    }
-                                })
-                                .flatMap(new Func1<byte[], Observable<byte[]>>() {
-                                    @Override
-                                    public Observable<byte[]> call(byte[] encrypted) {
-                                        final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
-                                        final BufferEndableWriteStream decryptedWriteStream = algorithm.decrypt(bufferWriteStream);
-                                        ObservableFuture<Void> handler = RxHelper.observableFuture();
-                                        decryptedWriteStream.endHandler(handler::complete);
-                                        for (Buffer partition : Buffers.partition(Buffer.buffer(encrypted), bufferSize)) {
-                                            decryptedWriteStream.write(partition);
-                                        }
-                                        decryptedWriteStream.end();
-                                        return handler
-                                                .map(new Func1<Void, byte[]>() {
-                                                    @Override
-                                                    public byte[] call(Void aVoid) {
-                                                        return bufferWriteStream.toBuffer().getBytes();
-                                                    }
-                                                })
-                                                .map(new Func1<byte[], byte[]>() {
-                                                    @Override
-                                                    public byte[] call(byte[] decrypted) {
-                                                        VertxAssert.assertArrayEquals(context, data, decrypted);
-                                                        return decrypted;
-                                                    }
-                                                });
-                                    }
-                                });
-                    }
-                })
-                .subscribe(new Subscriber<byte[]>() {
-                    @Override
-                    public void onCompleted() {
-                        async.complete();
-                    }
+        runOnServerContext(context,
+                () -> Observable.from(AlgorithmDef.values())
+                        .map(new Func1<AlgorithmDef, Algorithm>() {
+                            @Override
+                            public Algorithm call(AlgorithmDef algorithmDef) {
+                                count.value++;
+                                return algorithmDef.create(secret, salt);
+                            }
+                        })
+                        .flatMap(new Func1<Algorithm, Observable<byte[]>>() {
+                            @Override
+                            public Observable<byte[]> call(final Algorithm algorithm) {
+                                final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
+                                final BufferEndableWriteStream encryptedWriteStream = algorithm.encrypt(bufferWriteStream);
+                                ObservableFuture<Void> handler = RxHelper.observableFuture();
+                                encryptedWriteStream.endHandler(handler::complete);
+                                for (Buffer partition : Buffers.partition(Buffer.buffer(data), bufferSize)) {
+                                    encryptedWriteStream.write(partition);
+                                }
+                                encryptedWriteStream.end();
 
-                    @Override
-                    public void onError(Throwable e) {
-                        e.printStackTrace();
-                        context.fail(e);
-                    }
+                                return handler
+                                        .map(new Func1<Void, byte[]>() {
+                                            @Override
+                                            public byte[] call(Void aVoid) {
+                                                return bufferWriteStream.toBuffer().getBytes();
+                                            }
+                                        }).map(new Func1<byte[], byte[]>() {
+                                            @Override
+                                            public byte[] call(byte[] encrypted) {
+                                                VertxAssert.assertArrayEquals(context, expectedCipherBytes, encrypted);
+                                                return encrypted;
+                                            }
+                                        })
+                                        .flatMap(new Func1<byte[], Observable<byte[]>>() {
+                                            @Override
+                                            public Observable<byte[]> call(byte[] encrypted) {
+                                                final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
+                                                final BufferEndableWriteStream decryptedWriteStream = algorithm.decrypt(bufferWriteStream);
+                                                ObservableFuture<Void> handler = RxHelper.observableFuture();
+                                                decryptedWriteStream.endHandler(handler::complete);
+                                                for (Buffer partition : Buffers.partition(Buffer.buffer(encrypted), bufferSize)) {
+                                                    decryptedWriteStream.write(partition);
+                                                }
+                                                decryptedWriteStream.end();
+                                                return handler
+                                                        .map(new Func1<Void, byte[]>() {
+                                                            @Override
+                                                            public byte[] call(Void aVoid) {
+                                                                return bufferWriteStream.toBuffer().getBytes();
+                                                            }
+                                                        })
+                                                        .map(new Func1<byte[], byte[]>() {
+                                                            @Override
+                                                            public byte[] call(byte[] decrypted) {
+                                                                VertxAssert.assertArrayEquals(context, data, decrypted);
+                                                                return decrypted;
+                                                            }
+                                                        });
+                                            }
+                                        });
+                            }
+                        })
+                        .doOnNext(bytes -> {
+                            VertxAssert.assertEquals(context, AlgorithmDef.values().length, count.value.intValue());
+                        })
+                        .map(new ToVoid<>()));
 
-                    @Override
-                    public void onNext(byte[] bytes) {
-                        VertxAssert.assertEquals(context, AlgorithmDef.values().length, count.value.intValue());
-                    }
-                });
     }
 
     @Test
-    public void testFileStream(TestContext context) throws IOException {
-        final byte[] salt = new byte[64];
-        final byte[] secret = new byte[64];
-        final byte[] dataBuffer = new byte[64 * 1024 * 1024];
+    public void testFileStream(TestContext context) {
+        runOnServerContext(context, () -> {
+            final byte[] salt = new byte[64];
+            final byte[] secret = new byte[64];
+            final byte[] dataBuffer = new byte[64 * 1024 * 1024];
 
-        PrngRandom random = PrngRandom.getCurrentInstance();
-        random.nextBytesBlocking(salt);
-        random.nextBytesBlocking(secret);
-        random.nextBytesBlocking(dataBuffer);
+            PrngRandom random = PrngRandom.getCurrentInstance();
+            random.nextBytesBlocking(salt);
+            random.nextBytesBlocking(secret);
+            random.nextBytesBlocking(dataBuffer);
 
-        CipherWriteStreamValidation cipherWriteStreamValidation = new CipherWriteStreamValidation(secret, salt);
+            CipherWriteStreamValidation cipherWriteStreamValidation = new CipherWriteStreamValidation(secret, salt);
 
 
-        final Path encryptedTmpFile = Files.createTempFile(tmpDir, "", "");
+            final Path encryptedTmpFile = Files.createTempFile(tmpDir(), "", "");
 
-        final byte[] expectedClearDigest;
-        final byte[] expectedEncryptedDigest;
+            final byte[] expectedClearDigest;
+            final byte[] expectedEncryptedDigest;
 
-        DigestOutputStream encryptedDigestOutputStream = null;
-        DigestOutputStream clearDigestOutputStream = null;
-        try {
-            encryptedDigestOutputStream = new DigestOutputStream(Files.newOutputStream(encryptedTmpFile), MessageDigestFactory.SHA512.instance());
-            clearDigestOutputStream = new DigestOutputStream(cipherWriteStreamValidation.encrypt(encryptedDigestOutputStream), MessageDigestFactory.SHA512.instance());
-            clearDigestOutputStream.write(dataBuffer);
-        } finally {
-            if (clearDigestOutputStream != null) {
-                clearDigestOutputStream.close();
+            DigestOutputStream encryptedDigestOutputStream = null;
+            DigestOutputStream clearDigestOutputStream = null;
+            try {
+                encryptedDigestOutputStream = new DigestOutputStream(Files.newOutputStream(encryptedTmpFile), MessageDigestFactory.SHA512.instance());
+                clearDigestOutputStream = new DigestOutputStream(cipherWriteStreamValidation.encrypt(encryptedDigestOutputStream), MessageDigestFactory.SHA512.instance());
+                clearDigestOutputStream.write(dataBuffer);
+            } finally {
+                if (clearDigestOutputStream != null) {
+                    clearDigestOutputStream.close();
+                }
             }
-        }
 
-        expectedClearDigest = clearDigestOutputStream.getMessageDigest().digest();
-        expectedEncryptedDigest = encryptedDigestOutputStream.getMessageDigest().digest();
+            expectedClearDigest = clearDigestOutputStream.getMessageDigest().digest();
+            expectedEncryptedDigest = encryptedDigestOutputStream.getMessageDigest().digest();
 
-        final byte[] actualClearDigest;
-        byte[] actualEncryptedDigest;
+            final byte[] actualClearDigest;
+            byte[] actualEncryptedDigest;
 
-        DigestInputStream encryptedDigestInputStream = null;
-        DigestInputStream clearDigestInputStream = null;
+            DigestInputStream encryptedDigestInputStream = null;
+            DigestInputStream clearDigestInputStream = null;
 
-        try {
-            encryptedDigestInputStream = new DigestInputStream(Files.newInputStream(encryptedTmpFile), MessageDigestFactory.SHA512.instance());
-            clearDigestInputStream = new DigestInputStream(cipherWriteStreamValidation.decrypt(encryptedDigestInputStream), MessageDigestFactory.SHA512.instance());
-            OutputStream blackHole = ByteStreams.nullOutputStream();
-            ByteStreams.copy(clearDigestInputStream, blackHole);
-        } finally {
-            if (clearDigestInputStream != null) {
-                clearDigestInputStream.close();
+            try {
+                encryptedDigestInputStream = new DigestInputStream(Files.newInputStream(encryptedTmpFile), MessageDigestFactory.SHA512.instance());
+                clearDigestInputStream = new DigestInputStream(cipherWriteStreamValidation.decrypt(encryptedDigestInputStream), MessageDigestFactory.SHA512.instance());
+                OutputStream blackHole = ByteStreams.nullOutputStream();
+                ByteStreams.copy(clearDigestInputStream, blackHole);
+            } finally {
+                if (clearDigestInputStream != null) {
+                    clearDigestInputStream.close();
+                }
             }
-        }
 
-        actualClearDigest = clearDigestInputStream.getMessageDigest().digest();
-        actualEncryptedDigest = encryptedDigestInputStream.getMessageDigest().digest();
+            actualClearDigest = clearDigestInputStream.getMessageDigest().digest();
+            actualEncryptedDigest = encryptedDigestInputStream.getMessageDigest().digest();
 
-        VertxAssert.assertArrayEquals(context, expectedClearDigest, actualClearDigest);
-        VertxAssert.assertArrayEquals(context, expectedEncryptedDigest, actualEncryptedDigest);
+            VertxAssert.assertArrayEquals(context, expectedClearDigest, actualClearDigest);
+            VertxAssert.assertArrayEquals(context, expectedEncryptedDigest, actualEncryptedDigest);
 
 
-        final Path encryptedTmpFileVertx = Files.createTempFile(tmpDir, "", "");
+            final Path encryptedTmpFileVertx = Files.createTempFile(tmpDir(), "", "");
 
-        Async async = context.async();
 
-        ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
+            ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
 
-        OpenOptions openOptions = new OpenOptions();
-        openOptions.setCreate(true)
-                .setRead(true)
-                .setWrite(true);
+            OpenOptions openOptions = new OpenOptions();
+            openOptions.setCreate(true)
+                    .setRead(true)
+                    .setWrite(true);
 
-        vertx.fileSystem()
-                .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
+            vertx().fileSystem()
+                    .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
-        rh
-                .flatMap(new Func1<AsyncFile, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(AsyncFile asyncFile) {
-                        BufferEndableWriteStream endable = new AsyncFileEndableWriteStream(asyncFile);
-                        final DigestEndableWriteStream encryptedDigestWriteStream = new DigestEndableWriteStream(endable, MessageDigestFactory.SHA512);
-                        Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
-                        CipherEndableWriteStream cipherWriteStream = algorithm.encrypt(encryptedDigestWriteStream);
-                        final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(cipherWriteStream, MessageDigestFactory.SHA512);
-                        ObservableFuture<Void> handler = RxHelper.observableFuture();
-                        clearDigestWriteStream.endHandler(handler::complete);
-                        for (Buffer buffer : Buffers.partition(Buffer.buffer(dataBuffer), 8192)) {
-                            clearDigestWriteStream.write(buffer);
+            return rh
+                    .flatMap(new Func1<AsyncFile, Observable<Void>>() {
+                        @Override
+                        public Observable<Void> call(AsyncFile asyncFile) {
+                            BufferEndableWriteStream endable = new AsyncFileEndableWriteStream(asyncFile);
+                            final DigestEndableWriteStream encryptedDigestWriteStream = new DigestEndableWriteStream(endable, MessageDigestFactory.SHA512);
+                            Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
+                            CipherEndableWriteStream cipherWriteStream = algorithm.encrypt(encryptedDigestWriteStream);
+                            final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(cipherWriteStream, MessageDigestFactory.SHA512);
+                            ObservableFuture<Void> handler = RxHelper.observableFuture();
+                            clearDigestWriteStream.endHandler(handler::complete);
+                            for (Buffer buffer : Buffers.partition(Buffer.buffer(dataBuffer), 8192)) {
+                                clearDigestWriteStream.write(buffer);
+                            }
+                            clearDigestWriteStream.end();
+                            return handler
+                                    .map(new Func1<Void, Void>() {
+                                        @Override
+                                        public Void call(Void aVoid) {
+                                            VertxAssert.assertArrayEquals(context, expectedEncryptedDigest, encryptedDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
+                                            VertxAssert.assertArrayEquals(context, expectedClearDigest, clearDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
+                                            return null;
+                                        }
+                                    });
                         }
-                        clearDigestWriteStream.end();
-                        return handler
-                                .map(new Func1<Void, Void>() {
-                                    @Override
-                                    public Void call(Void aVoid) {
-                                        VertxAssert.assertArrayEquals(context, expectedEncryptedDigest, encryptedDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
-                                        VertxAssert.assertArrayEquals(context, expectedClearDigest, clearDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
-                                        return null;
-                                    }
-                                });
-                    }
-                })
-                .flatMap(new Func1<Void, Observable<AsyncFile>>() {
-                    @Override
-                    public Observable<AsyncFile> call(Void aVoid) {
-                        ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
+                    })
+                    .flatMap(new Func1<Void, Observable<AsyncFile>>() {
+                        @Override
+                        public Observable<AsyncFile> call(Void aVoid) {
+                            ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
 
-                        OpenOptions openOptions = new OpenOptions();
-                        openOptions.setCreate(true)
-                                .setRead(true)
-                                .setWrite(true);
+                            OpenOptions openOptions = new OpenOptions();
+                            openOptions.setCreate(true)
+                                    .setRead(true)
+                                    .setWrite(true);
 
-                        vertx.fileSystem()
-                                .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
+                            vertx().fileSystem()
+                                    .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
-                        return rh;
-                    }
-                })
-                .flatMap(new Func1<AsyncFile, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(AsyncFile asyncFile) {
-                        final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), MessageDigestFactory.SHA512);
-                        Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
-                        CipherEndableWriteStream cipherWriteStream = algorithm.decrypt(clearDigestWriteStream);
-                        final DigestEndableWriteStream encryptedDigestWriteStream = new DigestEndableWriteStream(cipherWriteStream, MessageDigestFactory.SHA512);
-                        return AsyncIO.pump(asyncFile, encryptedDigestWriteStream)
-                                .map(new Func1<Void, Void>() {
-                                    @Override
-                                    public Void call(Void aVoid) {
-                                        VertxAssert.assertArrayEquals(context, expectedEncryptedDigest, encryptedDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
-                                        VertxAssert.assertArrayEquals(context, expectedClearDigest, clearDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
-                                        return null;
-                                    }
-                                });
-                    }
-                })
-                .flatMap(new Func1<Void, Observable<AsyncFile>>() {
-                    @Override
-                    public Observable<AsyncFile> call(Void aVoid) {
-                        ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
+                            return rh;
+                        }
+                    })
+                    .flatMap(new Func1<AsyncFile, Observable<Void>>() {
+                        @Override
+                        public Observable<Void> call(AsyncFile asyncFile) {
+                            final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), MessageDigestFactory.SHA512);
+                            Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
+                            CipherEndableWriteStream cipherWriteStream = algorithm.decrypt(clearDigestWriteStream);
+                            final DigestEndableWriteStream encryptedDigestWriteStream = new DigestEndableWriteStream(cipherWriteStream, MessageDigestFactory.SHA512);
+                            return AsyncIO.pump(asyncFile, encryptedDigestWriteStream)
+                                    .map(new Func1<Void, Void>() {
+                                        @Override
+                                        public Void call(Void aVoid) {
+                                            VertxAssert.assertArrayEquals(context, expectedEncryptedDigest, encryptedDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
+                                            VertxAssert.assertArrayEquals(context, expectedClearDigest, clearDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
+                                            return null;
+                                        }
+                                    });
+                        }
+                    })
+                    .flatMap(new Func1<Void, Observable<AsyncFile>>() {
+                        @Override
+                        public Observable<AsyncFile> call(Void aVoid) {
+                            ObservableFuture<AsyncFile> rh = RxHelper.observableFuture();
 
-                        OpenOptions openOptions = new OpenOptions();
-                        openOptions.setCreate(true)
-                                .setRead(true)
-                                .setWrite(true);
+                            OpenOptions openOptions = new OpenOptions();
+                            openOptions.setCreate(true)
+                                    .setRead(true)
+                                    .setWrite(true);
 
-                        vertx.fileSystem()
-                                .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
+                            vertx().fileSystem()
+                                    .open(encryptedTmpFileVertx.toString(), openOptions, rh.toHandler());
 
-                        return rh;
-                    }
-                })
-                .flatMap(new Func1<AsyncFile, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(AsyncFile asyncFile) {
-                        final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), MessageDigestFactory.SHA512);
-                        Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
-                        CipherReadStream readStream = algorithm.decrypt(asyncFile);
-                        return AsyncIO.pump(readStream, clearDigestWriteStream)
-                                .map(new Func1<Void, Void>() {
-                                    @Override
-                                    public Void call(Void aVoid) {
-                                        VertxAssert.assertArrayEquals(context, expectedClearDigest, clearDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
-                                        return null;
-                                    }
-                                });
-                    }
-                })
-                .subscribe(new Subscriber<Void>() {
-                    @Override
-                    public void onCompleted() {
-                        async.complete();
-                    }
+                            return rh;
+                        }
+                    })
+                    .flatMap(new Func1<AsyncFile, Observable<Void>>() {
+                        @Override
+                        public Observable<Void> call(AsyncFile asyncFile) {
+                            final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), MessageDigestFactory.SHA512);
+                            Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
+                            CipherReadStream readStream = algorithm.decrypt(asyncFile);
+                            return AsyncIO.pump(readStream, clearDigestWriteStream)
+                                    .map(new Func1<Void, Void>() {
+                                        @Override
+                                        public Void call(Void aVoid) {
+                                            VertxAssert.assertArrayEquals(context, expectedClearDigest, clearDigestWriteStream.getDigest(MessageDigestFactory.SHA512).get());
+                                            return null;
+                                        }
+                                    });
+                        }
+                    });
 
-                    @Override
-                    public void onError(Throwable e) {
-                        e.printStackTrace();
-                        context.fail(e);
-                    }
-
-                    @Override
-                    public void onNext(Void aVoid) {
-
-                    }
-                });
+        });
 
 
     }

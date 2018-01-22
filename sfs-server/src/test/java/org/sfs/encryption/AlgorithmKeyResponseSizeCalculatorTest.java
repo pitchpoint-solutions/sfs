@@ -18,10 +18,11 @@ package org.sfs.encryption;
 
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
+import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.sfs.TestSubscriber;
-import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.util.PrngRandom;
 import rx.Observable;
 import rx.functions.Func1;
@@ -32,7 +33,8 @@ import static org.sfs.util.VertxAssert.assertEquals;
 import static rx.Observable.from;
 import static rx.Observable.range;
 
-public class AlgorithmKeyResponseSizeCalculatorTest extends BaseTestVerticle {
+@RunWith(VertxUnitRunner.class)
+public class AlgorithmKeyResponseSizeCalculatorTest {
 
     @Test
     public void testMaxEncryptInputSize(TestContext context) {

@@ -51,173 +51,173 @@ public class ContainerMetadataTest extends BaseTestVerticle {
 
     @Test
     public void testPutNoMetata(TestContext context) {
-        final String accountName = "testaccount";
-        final String containerName = "testcontainer";
-        ListMultimap<String, String> headers = create();
+        runOnServerContext(context, () -> {
+            final String accountName = "testaccount";
+            final String containerName = "testcontainer";
+            ListMultimap<String, String> headers = create();
 
 
-        Producer auth = httpBasic("admin", "admin");
+            Producer auth = httpBasic("admin", "admin");
 
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, auth))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, auth, headers))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new Func1<HttpClientResponse, HttpClientResponse>() {
-                    @Override
-                    public HttpClientResponse call(HttpClientResponse httpClientResponse) {
-                        MultiMap headers = httpClientResponse.headers();
-                        for (String headerName : headers.names()) {
-                            headerName = toLowerCase(headerName);
-                            assertFalse(context, headerName.startsWith(X_ADD_CONTAINER_META_PREFIX));
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, auth))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, auth, headers))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new HeadContainer(httpClient(), accountName, containerName, auth))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new Func1<HttpClientResponse, HttpClientResponse>() {
+                        @Override
+                        public HttpClientResponse call(HttpClientResponse httpClientResponse) {
+                            MultiMap headers = httpClientResponse.headers();
+                            for (String headerName : headers.names()) {
+                                headerName = toLowerCase(headerName);
+                                assertFalse(context, headerName.startsWith(X_ADD_CONTAINER_META_PREFIX));
+                            }
+                            return httpClientResponse;
                         }
-                        return httpClientResponse;
-                    }
-                })
-                .count()
-                .map(new Func1<Integer, Void>() {
-                    @Override
-                    public Void call(Integer integer) {
-                        return null;
-                    }
-                })
-                .subscribe(new TestSubscriber(context, async));
+                    })
+                    .count()
+                    .map(new Func1<Integer, Void>() {
+                        @Override
+                        public Void call(Integer integer) {
+                            return null;
+                        }
+                    });
+        });
     }
 
     @Test
     public void testPutOneMetadata(TestContext context) {
-        final String accountName = "testaccount";
-        final String containerName = "testcontainer";
+        runOnServerContext(context, () -> {
+            final String accountName = "testaccount";
+            final String containerName = "testcontainer";
 
-        final String selectedHeaderName = format("%s%s", X_ADD_CONTAINER_META_PREFIX, "TEST_DATA");
+            final String selectedHeaderName = format("%s%s", X_ADD_CONTAINER_META_PREFIX, "TEST_DATA");
 
-        final ListMultimap<String, String> headers = create();
-        headers.put(selectedHeaderName, "TEST_VALUE");
+            final ListMultimap<String, String> headers = create();
+            headers.put(selectedHeaderName, "TEST_VALUE");
 
-        Producer auth = httpBasic("admin", "admin");
+            Producer auth = httpBasic("admin", "admin");
 
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, auth))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, auth, headers))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new Func1<HttpClientResponse, HttpClientResponse>() {
-                    @Override
-                    public HttpClientResponse call(HttpClientResponse httpClientResponse) {
-                        MultiMap headers = httpClientResponse.headers();
-                        int count = 0;
-                        for (String headerName : headers.names()) {
-                            headerName = toLowerCase(headerName);
-                            String prefix = toLowerCase(X_ADD_CONTAINER_META_PREFIX);
-                            if (headerName.startsWith(prefix)) {
-                                count++;
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, auth))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, auth, headers))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new HeadContainer(httpClient(), accountName, containerName, auth))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new Func1<HttpClientResponse, HttpClientResponse>() {
+                        @Override
+                        public HttpClientResponse call(HttpClientResponse httpClientResponse) {
+                            MultiMap headers = httpClientResponse.headers();
+                            int count = 0;
+                            for (String headerName : headers.names()) {
+                                headerName = toLowerCase(headerName);
+                                String prefix = toLowerCase(X_ADD_CONTAINER_META_PREFIX);
+                                if (headerName.startsWith(prefix)) {
+                                    count++;
+                                }
                             }
+                            assertEquals(context, 1, count);
+                            assertEquals(context, "TEST_VALUE", headers.get(selectedHeaderName));
+                            return httpClientResponse;
                         }
-                        assertEquals(context, 1, count);
-                        assertEquals(context, "TEST_VALUE", headers.get(selectedHeaderName));
-                        return httpClientResponse;
-                    }
-                })
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+                    })
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testPutTwoMetadataRemoveOneMetadata(TestContext context) {
-        final String accountName = "testaccount";
-        final String containerName = "testcontainer";
+        runOnServerContext(context, () -> {
+            final String accountName = "testaccount";
+            final String containerName = "testcontainer";
 
-        final String selectedHeaderName0 = format("%s%s", X_ADD_CONTAINER_META_PREFIX, "TEST_DATA0");
-        final String selectedHeaderName1 = format("%s%s", X_ADD_CONTAINER_META_PREFIX, "TEST_DATA1");
+            final String selectedHeaderName0 = format("%s%s", X_ADD_CONTAINER_META_PREFIX, "TEST_DATA0");
+            final String selectedHeaderName1 = format("%s%s", X_ADD_CONTAINER_META_PREFIX, "TEST_DATA1");
 
-        final ListMultimap<String, String> headers = create();
-        headers.put(selectedHeaderName0, "TEST_VALUE0");
-        headers.put(selectedHeaderName1, "TEST_VALUE1");
+            final ListMultimap<String, String> headers = create();
+            headers.put(selectedHeaderName0, "TEST_VALUE0");
+            headers.put(selectedHeaderName1, "TEST_VALUE1");
 
-        final Producer auth = httpBasic("admin", "admin");
+            final Producer auth = httpBasic("admin", "admin");
 
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, auth))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, auth, headers))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new Func1<HttpClientResponse, HttpClientResponse>() {
-                    @Override
-                    public HttpClientResponse call(HttpClientResponse httpClientResponse) {
-                        MultiMap headers = httpClientResponse.headers();
-                        int count = 0;
-                        for (String headerName : headers.names()) {
-                            headerName = toLowerCase(headerName);
-                            String prefix = toLowerCase(X_ADD_CONTAINER_META_PREFIX);
-                            if (headerName.startsWith(prefix)) {
-                                count++;
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, auth))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, auth, headers))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new HeadContainer(httpClient(), accountName, containerName, auth))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new Func1<HttpClientResponse, HttpClientResponse>() {
+                        @Override
+                        public HttpClientResponse call(HttpClientResponse httpClientResponse) {
+                            MultiMap headers = httpClientResponse.headers();
+                            int count = 0;
+                            for (String headerName : headers.names()) {
+                                headerName = toLowerCase(headerName);
+                                String prefix = toLowerCase(X_ADD_CONTAINER_META_PREFIX);
+                                if (headerName.startsWith(prefix)) {
+                                    count++;
+                                }
                             }
+                            assertEquals(context, 2, count);
+                            assertEquals(context, "TEST_VALUE0", headers.get(selectedHeaderName0));
+                            assertEquals(context, "TEST_VALUE1", headers.get(selectedHeaderName1));
+                            return httpClientResponse;
                         }
-                        assertEquals(context, 2, count);
-                        assertEquals(context, "TEST_VALUE0", headers.get(selectedHeaderName0));
-                        assertEquals(context, "TEST_VALUE1", headers.get(selectedHeaderName1));
-                        return httpClientResponse;
-                    }
-                })
-                .flatMap(new Func1<HttpClientResponse, Observable<HttpClientResponse>>() {
-                    @Override
-                    public Observable<HttpClientResponse> call(HttpClientResponse httpClientResponse) {
-                        final String name = format("%s%s", X_REMOVE_CONTAINER_META_PREFIX, "TEST_DATA1");
-                        final ListMultimap<String, String> map = create();
-                        map.put(name, "TEST_VALUE0");
-                        return just((Void) null)
-                                .flatMap(new PostContainer(httpClient, accountName, containerName, auth, map));
-                    }
-                })
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(httpClient, accountName, containerName, auth))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new Func1<HttpClientResponse, HttpClientResponse>() {
-                    @Override
-                    public HttpClientResponse call(HttpClientResponse httpClientResponse) {
-                        MultiMap headers = httpClientResponse.headers();
-                        int count = 0;
-                        for (String headerName : headers.names()) {
-                            headerName = toLowerCase(headerName);
-                            String prefix = toLowerCase(X_ADD_CONTAINER_META_PREFIX);
-                            if (headerName.startsWith(prefix)) {
-                                count++;
+                    })
+                    .flatMap(new Func1<HttpClientResponse, Observable<HttpClientResponse>>() {
+                        @Override
+                        public Observable<HttpClientResponse> call(HttpClientResponse httpClientResponse) {
+                            final String name = format("%s%s", X_REMOVE_CONTAINER_META_PREFIX, "TEST_DATA1");
+                            final ListMultimap<String, String> map = create();
+                            map.put(name, "TEST_VALUE0");
+                            return just((Void) null)
+                                    .flatMap(new PostContainer(httpClient(), accountName, containerName, auth, map));
+                        }
+                    })
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new HeadContainer(httpClient(), accountName, containerName, auth))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new Func1<HttpClientResponse, HttpClientResponse>() {
+                        @Override
+                        public HttpClientResponse call(HttpClientResponse httpClientResponse) {
+                            MultiMap headers = httpClientResponse.headers();
+                            int count = 0;
+                            for (String headerName : headers.names()) {
+                                headerName = toLowerCase(headerName);
+                                String prefix = toLowerCase(X_ADD_CONTAINER_META_PREFIX);
+                                if (headerName.startsWith(prefix)) {
+                                    count++;
+                                }
                             }
+                            assertEquals(context, 1, count);
+                            assertEquals(context, "TEST_VALUE0", headers.get(selectedHeaderName0));
+                            return httpClientResponse;
                         }
-                        assertEquals(context, 1, count);
-                        assertEquals(context, "TEST_VALUE0", headers.get(selectedHeaderName0));
-                        return httpClientResponse;
-                    }
-                })
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+                    })
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
 }

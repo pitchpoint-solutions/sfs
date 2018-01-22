@@ -33,7 +33,6 @@ import org.sfs.rx.Sleep;
 import org.sfs.util.HttpClientRequestAndResponse;
 import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
-import rx.Scheduler;
 import rx.exceptions.CompositeException;
 import rx.functions.Func1;
 
@@ -251,7 +250,6 @@ public class Nodes {
     }
 
     public Observable<HttpClientRequestAndResponse> connectFirstAvailable(Vertx vertx, Collection<HostAndPort> hostAndPorts, Func1<HostAndPort, Observable<HttpClientRequestAndResponse>> supplier) {
-        Scheduler scheduler = RxHelper.scheduler(vertx.getOrCreateContext());
         return Observable.defer(() -> {
             Preconditions.checkArgument(!hostAndPorts.isEmpty(), "hostAndPorts cannot be empty");
             AtomicReference<HttpClientRequestAndResponse> ref = new AtomicReference<>();
@@ -266,35 +264,35 @@ public class Nodes {
                                         errors.clear();
                                         LOGGER.debug("Retry delay 100ms");
                                         return Defer.aVoid()
-                                                .delay(100, TimeUnit.MILLISECONDS, scheduler)
+                                                .delay(100, TimeUnit.MILLISECONDS)
                                                 .flatMap(aVoid -> supplier.call(hostAndPort));
                                     })
                                     .onErrorResumeNext(throwable -> {
                                         errors.clear();
                                         LOGGER.debug("Retry delay 100ms");
                                         return Defer.aVoid()
-                                                .delay(100, TimeUnit.MILLISECONDS, scheduler)
+                                                .delay(100, TimeUnit.MILLISECONDS)
                                                 .flatMap(aVoid -> supplier.call(hostAndPort));
                                     })
                                     .onErrorResumeNext(throwable -> {
                                         errors.clear();
                                         LOGGER.debug("Retry delay 200ms");
                                         return Defer.aVoid()
-                                                .delay(200, TimeUnit.MILLISECONDS, scheduler)
+                                                .delay(200, TimeUnit.MILLISECONDS)
                                                 .flatMap(aVoid -> supplier.call(hostAndPort));
                                     })
                                     .onErrorResumeNext(throwable -> {
                                         errors.clear();
                                         LOGGER.debug("Retry delay 300ms");
                                         return Defer.aVoid()
-                                                .delay(300, TimeUnit.MILLISECONDS, scheduler)
+                                                .delay(300, TimeUnit.MILLISECONDS)
                                                 .flatMap(aVoid -> supplier.call(hostAndPort));
                                     })
                                     .onErrorResumeNext(throwable -> {
                                         errors.clear();
                                         LOGGER.debug("Retry delay 500ms");
                                         return Defer.aVoid()
-                                                .delay(500, TimeUnit.MILLISECONDS, scheduler)
+                                                .delay(500, TimeUnit.MILLISECONDS)
                                                 .flatMap(aVoid -> supplier.call(hostAndPort));
                                     })
                                     .doOnNext(httpClientRequestAndResponseAction1 -> Preconditions.checkState(ref.compareAndSet(null, httpClientRequestAndResponseAction1), "Already set"))

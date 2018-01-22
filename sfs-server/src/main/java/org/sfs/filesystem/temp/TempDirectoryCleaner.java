@@ -51,7 +51,6 @@ public class TempDirectoryCleaner {
         this.ttl = ttl;
         this.vertxContext = vertxContext;
         this.ioPool = vertxContext.getIoPool();
-        Context context = vertxContext.vertx().getOrCreateContext();
         return defer(() -> {
             ObservableFuture<Void> handler = RxHelper.observableFuture();
             vertxContext.vertx()
@@ -59,7 +58,7 @@ public class TempDirectoryCleaner {
                     .mkdirs(vertxContext.verticle().sfsFileSystem().tmpDirectory().toString(), null, handler.toHandler());
             long id = vertxContext.vertx()
                     .setPeriodic(SECONDS.toMillis(1),
-                            event -> RxHelper.executeBlocking(context, ioPool, () -> {
+                            event -> RxHelper.executeBlocking(vertxContext.vertx().getOrCreateContext(), ioPool, () -> {
                                 deleteExpired();
                                 return (Void) null;
                             })

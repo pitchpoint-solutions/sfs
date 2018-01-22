@@ -21,6 +21,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.io.BaseEncoding;
 import com.google.common.net.HostAndPort;
+import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
@@ -79,6 +80,8 @@ import org.sfs.nodes.compute.object.PostObject;
 import org.sfs.nodes.compute.object.PutObject;
 import org.sfs.nodes.compute.object.VerifyRepairObjectExecute;
 import org.sfs.nodes.compute.object.VerifyRepairObjectStop;
+import org.sfs.nodes.compute.test.ResetForTest;
+import org.sfs.nodes.compute.test.UpdateClusterStats;
 import org.sfs.nodes.data.AckBlob;
 import org.sfs.nodes.data.CanReadVolume;
 import org.sfs.nodes.data.CanWriteVolume;
@@ -93,19 +96,14 @@ import org.sfs.rx.Defer;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.Terminus;
-import org.sfs.rx.ToVoid;
 import org.sfs.thread.NamedCapacityFixedThreadPool;
 import org.sfs.util.ConfigHelper;
 import org.sfs.util.FileSystemLock;
 import rx.Observable;
-import rx.plugins.RxJavaHooks;
-import rx.plugins.RxJavaSchedulersHook;
 
 import java.net.HttpURLConnection;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -136,7 +134,6 @@ public class SfsSingletonServer extends Server implements Shareable {
     private Set<HostAndPort> parsedListenAddresses = new LinkedHashSet<>();
     private Set<HostAndPort> parsedPublishAddresses = new LinkedHashSet<>();
     private Set<HostAndPort> clusterHosts = new LinkedHashSet<>();
-    private List<HttpServer> httpServers = new ArrayList<>();
     private int httpServerMaxHeaderSize;
     private int httpServerIdleConnectionTimeout;
     private int remoteNodeIdleConnectionTimeout;
@@ -155,11 +152,9 @@ public class SfsSingletonServer extends Server implements Shareable {
     @Override
     public void start(final Future<Void> startedResult) {
         Preconditions.checkState(STARTED.compareAndSet(false, true), "Only one instance is allowed.");
-        final Server _this = this;
+        final SfsSingletonServer _this = this;
 
         LOGGER.info("Starting verticle " + _this);
-
-        initRxSchedulers(vertx);
 
         JsonObject config = config();
 
@@ -280,8 +275,6 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .flatMap(aVoid -> masterKeys.start(vertxContext))
                 .flatMap(aVoid -> containerKeys.start(vertxContext))
                 .flatMap(aVoid -> jobs.open(vertxContext, config))
-                .flatMap(aVoid -> initHttpListeners(vertxContext, true))
-                .doOnNext(httpServers1 -> httpServers.addAll(httpServers))
                 .subscribe(
                         o -> {
                             // do nothing
@@ -289,31 +282,22 @@ public class SfsSingletonServer extends Server implements Shareable {
                             LOGGER.error("Failed to start verticle " + _this, throwable);
                             startException = throwable;
                             started = true;
+                            SfsServer.setDelegate(vertx, _this);
                             startedResult.fail(throwable);
                         }, () -> {
                             LOGGER.info("Started verticle " + _this);
                             started = true;
+                            SfsServer.setDelegate(vertx, _this);
                             startedResult.complete();
                         });
     }
 
     @Override
     public void stop(final Future<Void> stoppedResult) {
-        final Server _this = this;
+        final SfsSingletonServer _this = this;
         LOGGER.info("Stopping verticle " + _this);
 
         Defer.aVoid()
-                .flatMap(aVoid ->
-                        RxHelper.iterate(vertx, httpServers, httpServer -> {
-                            ObservableFuture<Void> handler = RxHelper.observableFuture();
-                            httpServer.close(handler.toHandler());
-                            return handler
-                                    .onErrorResumeNext(throwable -> {
-                                        LOGGER.error("Unhandled Exception", throwable);
-                                        return Defer.aVoid();
-                                    })
-                                    .map(aVoid1 -> Boolean.TRUE);
-                        }).map(new ToVoid<>()))
                 .flatMap(aVoid -> {
                     if (jobs != null) {
                         return jobs
@@ -469,11 +453,13 @@ public class SfsSingletonServer extends Server implements Shareable {
                         throwable -> {
                             STARTED.set(false);
                             LOGGER.info("Failed to stop verticle " + _this, throwable);
+                            SfsServer.removeDelegate(vertx, _this);
                             stoppedResult.fail(throwable);
                         },
                         () -> {
                             STARTED.set(false);
                             LOGGER.info("Stopped verticle " + _this);
+                            SfsServer.removeDelegate(vertx, _this);
                             stoppedResult.complete();
                         });
 
@@ -577,40 +563,15 @@ public class SfsSingletonServer extends Server implements Shareable {
         return remoteNodeSecret;
     }
 
-    public Observable<List<HttpServer>> initHttpListeners(VertxContext<Server> vertxContext, boolean createHttpServer) {
-        // for each listen address attempt to listen on the supplied port range
-        // and if successful add to the listener list which will be used
-        // to initialize the rest of the application
-        Set<HostAndPort> listeningHostAddresses = new HashSet<>();
-        List<HttpServer> httpServers = new ArrayList<>();
-        return RxHelper.iterate(vertx, parsedListenAddresses, hostAndPort -> {
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Parsed listen ports " + parsedListenAddresses);
-            }
-            if (!listeningHostAddresses.contains(hostAndPort)) {
-                if (createHttpServer) {
-                    LOGGER.info("Creating http listener on " + hostAndPort);
-                    return createHttpServer(vertxContext, hostAndPort, createRouter(vertxContext))
-                            .onErrorResumeNext(throwable -> {
-                                LOGGER.warn("Failed to start listener " + hostAndPort.toString(), throwable);
-                                return Defer.just(null);
-                            })
-                            .map(httpServer -> {
-                                if (httpServer != null) {
-                                    listeningHostAddresses.add(hostAndPort);
-                                    httpServers.add(httpServer);
-                                }
-                                return Boolean.TRUE;
-                            });
-                } else {
-                    LOGGER.debug("Skip creating http listener");
-                    listeningHostAddresses.add(hostAndPort);
-                    return Observable.just(true);
-                }
-            }
-            return Defer.just(true);
-        })
-                .map(_continue -> httpServers);
+    @Override
+    public Context getContext() {
+        return context;
+    }
+
+    public Observable<List<HttpServer>> initHttpListeners(VertxContext<Server> vertxContext) {
+        return Observable.from(parsedListenAddresses)
+                .flatMap(hostAndPort -> createHttpServer(vertxContext, hostAndPort, createRouter(vertxContext)))
+                .toList();
     }
 
     protected Observable<HttpServer> createHttpServer(VertxContext<Server> vertxContext, HostAndPort hostAndPort, Router router) {
@@ -641,7 +602,11 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .setIdleTimeout(remoteNodeIdleConnectionTimeout)
                 .setSsl(https);
 
-        return v.createHttpClient(httpClientOptions);
+        HttpClient client = v.createHttpClient(httpClientOptions);
+
+        LOGGER.debug("Current Thread 1 is {}, http client is {}", Thread.currentThread(), client);
+
+        return client;
     }
 
     protected Router createRouter(VertxContext<Server> vertxContext) {
@@ -733,6 +698,8 @@ public class SfsSingletonServer extends Server implements Shareable {
         router.get("/_internal_node_data/blob/checksum").handler(new SfsRequestHandler(vertxContext, new ChecksumBlob()));
 
         if (testMode) {
+            router.post("/admin/001/resetfortest").handler(new SfsRequestHandler(vertxContext, new ResetForTest()));
+            router.post("/admin/001/updateclusterstats").handler(new SfsRequestHandler(vertxContext, new UpdateClusterStats()));
             router.post("/admin/001/refresh_index").handler(new SfsRequestHandler(vertxContext, new RefreshIndex()));
             router.get("/admin/001/is_online").handler(new SfsRequestHandler(vertxContext,
                     sfsRequest ->
@@ -774,11 +741,5 @@ public class SfsSingletonServer extends Server implements Shareable {
         }
     }
 
-    public void initRxSchedulers(Vertx vertx) {
-        RxJavaSchedulersHook hook = RxHelper.schedulerHook(vertx);
-        RxJavaHooks.setOnIOScheduler(f -> hook.getIOScheduler());
-        RxJavaHooks.setOnNewThreadScheduler(f -> hook.getNewThreadScheduler());
-        RxJavaHooks.setOnComputationScheduler(f -> hook.getComputationScheduler());
-    }
 }
 

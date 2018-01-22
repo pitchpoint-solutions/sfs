@@ -17,6 +17,7 @@
 package org.sfs.elasticsearch;
 
 import com.google.common.base.Optional;
+import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
@@ -178,7 +179,7 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
             if (endHandler != null) {
                 Handler<Void> handler = endHandler;
                 endHandler = null;
-                vertxContext.vertx().runOnContext(event -> handler.handle(null));
+                vertxContext.runOnContext(event -> handler.handle(null));
             }
         }
     }
@@ -187,7 +188,7 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
         if (drainHandler != null && !writeQueueFull()) {
             Handler<Void> handler = drainHandler;
             drainHandler = null;
-            vertxContext.vertx().runOnContext(event -> handler.handle(null));
+            vertxContext.runOnContext(event -> handler.handle(null));
         }
     }
 

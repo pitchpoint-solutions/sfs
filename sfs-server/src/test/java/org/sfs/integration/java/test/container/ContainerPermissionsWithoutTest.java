@@ -17,10 +17,8 @@
 package org.sfs.integration.java.test.container;
 
 import io.vertx.core.http.HttpClientResponse;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.integration.java.func.AssertHttpClientResponseStatusCode;
 import org.sfs.integration.java.func.GetContainer;
@@ -51,163 +49,163 @@ public class ContainerPermissionsWithoutTest extends BaseTestVerticle {
 
     @Test
     public void testPutContainerNoPermissions(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authWithoutPerms))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authWithoutPerms))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testListContainerNoPermissions(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetContainer(httpClient, accountName, containerName, authWithoutPerms))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetContainer(httpClient(), accountName, containerName, authWithoutPerms))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testHeadContainerNoPermissions(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(httpClient, accountName, containerName, authWithoutPerms))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new HeadContainer(httpClient(), accountName, containerName, authWithoutPerms))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testPutContainerAsNonAdmin(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authWithoutPerms))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authWithoutPerms))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testListContainerAsNonAdmin(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetContainer(httpClient, accountName, containerName, authWithoutPerms))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetContainer(httpClient(), accountName, containerName, authWithoutPerms))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testHeadContainerAsNonAdmin(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(httpClient, accountName, containerName, authWithoutPerms))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new HeadContainer(httpClient(), accountName, containerName, authWithoutPerms))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_FORBIDDEN))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testPutContainerAsAdmin(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testListContainerAsAdmin(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new RefreshIndex(httpClient, authAdmin))
-                .flatMap(new GetContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                    .flatMap(new GetContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 
     @Test
     public void testHeadContainerAsAdmin(TestContext context) {
-        Async async = context.async();
-        just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
-                .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new HeadContainer(httpClient, accountName, containerName, authAdmin))
-                .map(new HttpClientResponseHeaderLogger())
-                .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
-                .map(new ToVoid<HttpClientResponse>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            return just((Void) null)
+                    .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new PutContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new HeadContainer(httpClient(), accountName, containerName, authAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
+                    .map(new ToVoid<HttpClientResponse>());
+        });
     }
 }

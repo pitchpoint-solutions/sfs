@@ -19,11 +19,11 @@ package org.sfs.integration.java.test.blob;
 import com.google.common.base.Optional;
 import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
-import io.vertx.ext.unit.Async;
+import io.vertx.core.logging.Logger;
+import io.vertx.core.logging.LoggerFactory;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
 import org.sfs.Server;
-import org.sfs.TestSubscriber;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.HeaderBlob;
 import org.sfs.filesystem.volume.ReadStreamBlob;
@@ -67,297 +67,296 @@ import static rx.Observable.just;
 
 public class RemoteBlobActionsTest extends BaseTestVerticle {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(RemoteBlobActionsTest.class);
 
     @Test
-    public void testLargeFile(TestContext context) throws IOException {
+    public void testLargeFile(TestContext context) {
+        runOnServerContext(context, () -> {
+            final byte[] data = new byte[256];
+            getCurrentInstance().nextBytesBlocking(data);
+            int dataSize = 256 * 1024 * 1024;
 
-        final byte[] data = new byte[256];
-        getCurrentInstance().nextBytesBlocking(data);
-        int dataSize = 256 * 1024 * 1024;
+            final Path tempFile = createTempFile(tmpDir(), "", "");
 
-        final Path tempFile = createTempFile(tmpDir, "", "");
-
-        int bytesWritten = 0;
-        try (OutputStream out = newOutputStream(tempFile)) {
-            while (bytesWritten < dataSize) {
-                out.write(data);
-                bytesWritten += data.length;
+            int bytesWritten = 0;
+            try (OutputStream out = newOutputStream(tempFile)) {
+                while (bytesWritten < dataSize) {
+                    out.write(data);
+                    bytesWritten += data.length;
+                }
             }
-        }
 
-        Async async = context.async();
-        aVoid()
-                .map(aVoid -> {
-                    Nodes nodes = vertxContext().verticle().nodes();
-                    RemoteNode remoteNode =
-                            new RemoteNode(
-                                    vertxContext(),
-                                    nodes.getResponseTimeout(),
-                                    Collections.singletonList(nodes.getHostAndPort()));
-                    return remoteNode;
-                })
-                .flatMap(new Func1<RemoteNode, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(final RemoteNode remoteNode) {
-                        out.println("ZZZZ1");
-                        return just((Void) null)
-                                .flatMap(new PutData(vertxContext, context, remoteNode, tempFile))
-                                .map(headerBlob -> {
-                                    out.println("Done writing");
-                                    return headerBlob;
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob blob) {
-                                        out.println("ZZZZ2");
-                                        return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
-                                                .map(Optional::get);
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
-                                        out.println("ZZZZ3");
-                                        return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), absent(), absent())
-                                                .map(Optional::get)
-                                                .flatMap(new Func1<ReadStreamBlob, Observable<HeaderBlob>>() {
-                                                    @Override
-                                                    public Observable<HeaderBlob> call(final ReadStreamBlob readStreamBlob) {
-                                                        final DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512);
-                                                        out.println("ZZZZ4");
-                                                        return readStreamBlob.produce(digestWriteStream)
-                                                                .map(aVoid -> {
-                                                                    byte[] sha512;
-                                                                    try {
-                                                                        sha512 = hash(tempFile.toFile(), sha512()).asBytes();
-                                                                    } catch (IOException e) {
-                                                                        throw new RuntimeException(e);
-                                                                    }
-                                                                    assertArrayEquals(context, sha512, digestWriteStream.getDigest(SHA512).get());
-                                                                    return readStreamBlob;
-                                                                });
-                                                    }
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
-                                        out.println("ZZZZ5");
-                                        return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), of(2L), of(1L))
-                                                .map(Optional::get)
-                                                .flatMap(new Func1<ReadStreamBlob, Observable<HeaderBlob>>() {
-                                                    @Override
-                                                    public Observable<HeaderBlob> call(final ReadStreamBlob readStreamBlob) {
-                                                        final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
-                                                        return readStreamBlob.produce(bufferWriteStream)
-                                                                .map(aVoid -> {
-                                                                    byte[] buffer = bufferWriteStream.toBuffer().getBytes();
-                                                                    assertEquals(context, 1, buffer.length);
-                                                                    assertEquals(context, data[2], buffer[0]);
-                                                                    return readStreamBlob;
-                                                                });
-                                                    }
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ6");
-                                        return remoteNode.checksum(blob.getVolume(), blob.getPosition(), absent(), absent())
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob blob) {
-                                        out.println("ZZZZ7");
-                                        return remoteNode.delete(blob.getVolume(), blob.getPosition())
-                                                .map(Optional::get);
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ8");
-                                        return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, !headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ9");
-                                        return remoteNode.delete(blob.getVolume(), blob.getPosition())
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ20");
-                                        return remoteNode.createReadStream(blob.getVolume(), blob.getPosition(), absent(), absent())
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, !headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .map(new ToVoid<>());
-                    }
-                })
-                .subscribe(new TestSubscriber(context, async));
+            return aVoid()
+                    .map(aVoid -> {
+                        Nodes nodes = vertxContext().verticle().nodes();
+                        RemoteNode remoteNode =
+                                new RemoteNode(
+                                        vertxContext(),
+                                        nodes.getResponseTimeout(),
+                                        Collections.singletonList(nodes.getHostAndPort()));
+                        return remoteNode;
+                    })
+                    .flatMap(new Func1<RemoteNode, Observable<Void>>() {
+                        @Override
+                        public Observable<Void> call(final RemoteNode remoteNode) {
+                            out.println("ZZZZ1");
+                            return just((Void) null)
+                                    .flatMap(new PutData(vertxContext(), context, remoteNode, tempFile))
+                                    .map(headerBlob -> {
+                                        out.println("Done writing");
+                                        return headerBlob;
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob blob) {
+                                            out.println("ZZZZ2");
+                                            return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
+                                                    .map(Optional::get);
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
+                                            out.println("ZZZZ3");
+                                            return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), absent(), absent())
+                                                    .map(Optional::get)
+                                                    .flatMap(new Func1<ReadStreamBlob, Observable<HeaderBlob>>() {
+                                                        @Override
+                                                        public Observable<HeaderBlob> call(final ReadStreamBlob readStreamBlob) {
+                                                            final DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512);
+                                                            out.println("ZZZZ4");
+                                                            return readStreamBlob.produce(digestWriteStream)
+                                                                    .map(aVoid -> {
+                                                                        byte[] sha512;
+                                                                        try {
+                                                                            sha512 = hash(tempFile.toFile(), sha512()).asBytes();
+                                                                        } catch (IOException e) {
+                                                                            throw new RuntimeException(e);
+                                                                        }
+                                                                        assertArrayEquals(context, sha512, digestWriteStream.getDigest(SHA512).get());
+                                                                        return readStreamBlob;
+                                                                    });
+                                                        }
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
+                                            out.println("ZZZZ5");
+                                            return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), of(2L), of(1L))
+                                                    .map(Optional::get)
+                                                    .flatMap(new Func1<ReadStreamBlob, Observable<HeaderBlob>>() {
+                                                        @Override
+                                                        public Observable<HeaderBlob> call(final ReadStreamBlob readStreamBlob) {
+                                                            final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
+                                                            return readStreamBlob.produce(bufferWriteStream)
+                                                                    .map(aVoid -> {
+                                                                        byte[] buffer = bufferWriteStream.toBuffer().getBytes();
+                                                                        assertEquals(context, 1, buffer.length);
+                                                                        assertEquals(context, data[2], buffer[0]);
+                                                                        return readStreamBlob;
+                                                                    });
+                                                        }
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ6");
+                                            return remoteNode.checksum(blob.getVolume(), blob.getPosition(), absent(), absent())
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob blob) {
+                                            out.println("ZZZZ7");
+                                            return remoteNode.delete(blob.getVolume(), blob.getPosition())
+                                                    .map(Optional::get);
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ8");
+                                            return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, !headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ9");
+                                            return remoteNode.delete(blob.getVolume(), blob.getPosition())
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ20");
+                                            return remoteNode.createReadStream(blob.getVolume(), blob.getPosition(), absent(), absent())
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, !headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .map(new ToVoid<>());
+                        }
+                    });
+        });
     }
 
     @Test
-    public void test(TestContext context) throws IOException {
+    public void test(TestContext context) {
+        runOnServerContext(context, () -> {
+            final byte[] data = new byte[256];
+            getCurrentInstance().nextBytesBlocking(data);
 
-        final byte[] data = new byte[256];
-        getCurrentInstance().nextBytesBlocking(data);
-
-        final Path tempFile1 = createTempFile(tmpDir, "", "");
-        write(tempFile1, data);
+            final Path tempFile1 = createTempFile(tmpDir(), "", "");
+            write(tempFile1, data);
 
 
-        Async async = context.async();
-        aVoid()
-                .map(aVoid -> {
-                    Nodes nodes = vertxContext().verticle().nodes();
-                    RemoteNode remoteNode =
-                            new RemoteNode(
-                                    vertxContext(),
-                                    nodes.getResponseTimeout(),
-                                    Collections.singletonList(nodes.getHostAndPort()));
-                    return remoteNode;
-                })
-                .flatMap(new Func1<RemoteNode, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(final RemoteNode remoteNode) {
-                        out.println("A0");
-                        return just((Void) null)
-                                .flatMap(new PutData(vertxContext, context, remoteNode, tempFile1))
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob blob) {
-                                        out.println("A1");
-                                        return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
-                                                .map(Optional::get);
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
-                                        out.println("A2");
-                                        return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), absent(), absent())
-                                                .map(Optional::get)
-                                                .flatMap(readStreamBlob -> {
-                                                    out.println("A3");
-                                                    final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
-                                                    return readStreamBlob.produce(bufferWriteStream)
-                                                            .map(aVoid -> {
-                                                                assertArrayEquals(context, data, bufferWriteStream.toBuffer().getBytes());
-                                                                return readStreamBlob;
-                                                            });
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
-                                        out.println("A4");
-                                        return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), of(2L), of(1L))
-                                                .map(Optional::get)
-                                                .flatMap(new Func1<ReadStreamBlob, Observable<HeaderBlob>>() {
-                                                    @Override
-                                                    public Observable<HeaderBlob> call(final ReadStreamBlob readStreamBlob) {
-                                                        out.println("A5");
+            return aVoid()
+                    .map(aVoid -> {
+                        Nodes nodes = vertxContext().verticle().nodes();
+                        RemoteNode remoteNode =
+                                new RemoteNode(
+                                        vertxContext(),
+                                        nodes.getResponseTimeout(),
+                                        Collections.singletonList(nodes.getHostAndPort()));
+                        return remoteNode;
+                    })
+                    .flatMap(new Func1<RemoteNode, Observable<Void>>() {
+                        @Override
+                        public Observable<Void> call(final RemoteNode remoteNode) {
+                            out.println("A0");
+                            return just((Void) null)
+                                    .flatMap(new PutData(vertxContext(), context, remoteNode, tempFile1))
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob blob) {
+                                            out.println("A1");
+                                            return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
+                                                    .map(Optional::get);
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
+                                            out.println("A2");
+                                            return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), absent(), absent())
+                                                    .map(Optional::get)
+                                                    .flatMap(readStreamBlob -> {
+                                                        out.println("A3");
                                                         final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
                                                         return readStreamBlob.produce(bufferWriteStream)
                                                                 .map(aVoid -> {
-                                                                    byte[] buffer = bufferWriteStream.toBuffer().getBytes();
-                                                                    assertEquals(context, 1, buffer.length);
-                                                                    assertEquals(context, data[2], buffer[0]);
+                                                                    assertArrayEquals(context, data, bufferWriteStream.toBuffer().getBytes());
                                                                     return readStreamBlob;
                                                                 });
-                                                    }
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ5");
-                                        return remoteNode.checksum(blob.getVolume(), blob.getPosition(), absent(), absent(), SHA512)
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(HeaderBlob blob) {
-                                        out.println("ZZZZ4");
-                                        return remoteNode.delete(blob.getVolume(), blob.getPosition())
-                                                .map(Optional::get);
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ3");
-                                        return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, !headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ2");
-                                        return remoteNode.delete(blob.getVolume(), blob.getPosition())
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
-                                    @Override
-                                    public Observable<HeaderBlob> call(final HeaderBlob blob) {
-                                        out.println("ZZZZ1");
-                                        return remoteNode.createReadStream(blob.getVolume(), blob.getPosition(), absent(), absent())
-                                                .map(headerBlobOptional -> {
-                                                    assertTrue(context, !headerBlobOptional.isPresent());
-                                                    return blob;
-                                                });
-                                    }
-                                })
-                                .map(new ToVoid<>());
-                    }
-                })
-                .count()
-                .map(new ToVoid<>())
-                .map(new Func1<Void, Void>() {
-                    @Override
-                    public Void call(Void aVoid) {
-                        out.println("Done!");
-                        return null;
-                    }
-                })
-                .subscribe(new TestSubscriber(context, async));
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob headerBlob) {
+                                            out.println("A4");
+                                            return remoteNode.createReadStream(headerBlob.getVolume(), headerBlob.getPosition(), of(2L), of(1L))
+                                                    .map(Optional::get)
+                                                    .flatMap(new Func1<ReadStreamBlob, Observable<HeaderBlob>>() {
+                                                        @Override
+                                                        public Observable<HeaderBlob> call(final ReadStreamBlob readStreamBlob) {
+                                                            out.println("A5");
+                                                            final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
+                                                            return readStreamBlob.produce(bufferWriteStream)
+                                                                    .map(aVoid -> {
+                                                                        byte[] buffer = bufferWriteStream.toBuffer().getBytes();
+                                                                        assertEquals(context, 1, buffer.length);
+                                                                        assertEquals(context, data[2], buffer[0]);
+                                                                        return readStreamBlob;
+                                                                    });
+                                                        }
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ5");
+                                            return remoteNode.checksum(blob.getVolume(), blob.getPosition(), absent(), absent(), SHA512)
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(HeaderBlob blob) {
+                                            out.println("ZZZZ4");
+                                            return remoteNode.delete(blob.getVolume(), blob.getPosition())
+                                                    .map(Optional::get);
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ3");
+                                            return remoteNode.acknowledge(blob.getVolume(), blob.getPosition())
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, !headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ2");
+                                            return remoteNode.delete(blob.getVolume(), blob.getPosition())
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .flatMap(new Func1<HeaderBlob, Observable<HeaderBlob>>() {
+                                        @Override
+                                        public Observable<HeaderBlob> call(final HeaderBlob blob) {
+                                            out.println("ZZZZ1");
+                                            return remoteNode.createReadStream(blob.getVolume(), blob.getPosition(), absent(), absent())
+                                                    .map(headerBlobOptional -> {
+                                                        assertTrue(context, !headerBlobOptional.isPresent());
+                                                        return blob;
+                                                    });
+                                        }
+                                    })
+                                    .map(new ToVoid<>());
+                        }
+                    })
+                    .count()
+                    .map(new ToVoid<>())
+                    .map(new Func1<Void, Void>() {
+                        @Override
+                        public Void call(Void aVoid) {
+                            out.println("Done!");
+                            return null;
+                        }
+                    });
+        });
 
     }
 

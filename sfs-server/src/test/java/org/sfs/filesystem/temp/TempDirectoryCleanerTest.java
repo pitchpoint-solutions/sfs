@@ -36,42 +36,42 @@ public class TempDirectoryCleanerTest extends BaseTestVerticle {
 
     @Test
     public void testDelete(TestContext context) throws IOException {
+        runOnServerContext(context, () -> {
+            Path tempDir = vertxContext().verticle().sfsFileSystem().tmpDirectory();
 
-        Path tempDir = vertxContext.verticle().sfsFileSystem().tmpDirectory();
+            TempDirectoryCleaner tempDirectoryCleaner = vertxContext().verticle().tempFileFactory();
 
-        TempDirectoryCleaner tempDirectoryCleaner = vertxContext.verticle().tempFileFactory();
+            List<Path> tempFiles = new ArrayList<>();
 
-        List<Path> tempFiles = new ArrayList<>();
+            tempFiles.add(createTempFile(tempDir, "1", ""));
+            tempFiles.add(createTempFile(tempDir, "2", ""));
+            tempFiles.add(createTempFile(tempDir, "3", ""));
+            tempFiles.add(createTempFile(tempDir, "4", ""));
 
-        tempFiles.add(createTempFile(tempDir, "1", ""));
-        tempFiles.add(createTempFile(tempDir, "2", ""));
-        tempFiles.add(createTempFile(tempDir, "3", ""));
-        tempFiles.add(createTempFile(tempDir, "4", ""));
-
-        tempDirectoryCleaner.start(vertxContext, 0);
+            tempDirectoryCleaner.start(vertxContext(), 0);
 
 
-        tempDirectoryCleaner.deleteExpired();
+            tempDirectoryCleaner.deleteExpired();
 
-        for (Path tempFile : tempFiles) {
-            assertFalse(context, exists(tempFile));
-        }
+            for (Path tempFile : tempFiles) {
+                assertFalse(context, exists(tempFile));
+            }
 
-        tempFiles.clear();
+            tempFiles.clear();
 
-        tempFiles.add(createTempFile(tempDir, "1", ""));
-        tempFiles.add(createTempFile(tempDir, "2", ""));
-        tempFiles.add(createTempFile(tempDir, "3", ""));
-        tempFiles.add(createTempFile(tempDir, "4", ""));
+            tempFiles.add(createTempFile(tempDir, "1", ""));
+            tempFiles.add(createTempFile(tempDir, "2", ""));
+            tempFiles.add(createTempFile(tempDir, "3", ""));
+            tempFiles.add(createTempFile(tempDir, "4", ""));
 
-        tempDirectoryCleaner.stop();
-        tempDirectoryCleaner.start(vertxContext, DAYS.toMillis(1));
+            tempDirectoryCleaner.stop();
+            tempDirectoryCleaner.start(vertxContext(), DAYS.toMillis(1));
 
-        tempDirectoryCleaner.deleteExpired();
+            tempDirectoryCleaner.deleteExpired();
 
-        for (Path tempFile : tempFiles) {
-            assertTrue(context, exists(tempFile));
-        }
-
+            for (Path tempFile : tempFiles) {
+                assertTrue(context, exists(tempFile));
+            }
+        });
     }
 }

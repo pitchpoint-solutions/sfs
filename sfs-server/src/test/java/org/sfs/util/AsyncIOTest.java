@@ -18,10 +18,8 @@ package org.sfs.util;
 
 import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.io.AsyncIO;
 import org.sfs.io.BufferWriteEndableWriteStream;
@@ -35,20 +33,20 @@ public class AsyncIOTest extends BaseTestVerticle {
 
     @Test
     public void copyZeroLength(TestContext context) throws IOException {
-        Path tmpFile = Files.createTempFile(tmpDir, "", "");
+        runOnServerContext(context, () -> {
+            Path tmpFile = Files.createTempFile(tmpDir(), "", "");
 
-        AsyncFile asyncFile = vertx.fileSystem().openBlocking(tmpFile.toString(), new OpenOptions());
-        final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
+            AsyncFile asyncFile = vertx().fileSystem().openBlocking(tmpFile.toString(), new OpenOptions());
+            final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
 
-        Async async = context.async();
-        AsyncIO.pump(asyncFile, bufferWriteStream)
-                .map(new Func1<Void, Void>() {
-                    @Override
-                    public Void call(Void aVoid) {
-                        VertxAssert.assertEquals(context, 0, bufferWriteStream.toBuffer().length());
-                        return null;
-                    }
-                })
-                .subscribe(new TestSubscriber(context, async));
+            return AsyncIO.pump(asyncFile, bufferWriteStream)
+                    .map(new Func1<Void, Void>() {
+                        @Override
+                        public Void call(Void aVoid) {
+                            VertxAssert.assertEquals(context, 0, bufferWriteStream.toBuffer().length());
+                            return null;
+                        }
+                    });
+        });
     }
 }

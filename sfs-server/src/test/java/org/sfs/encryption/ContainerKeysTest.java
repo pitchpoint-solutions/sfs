@@ -18,10 +18,8 @@ package org.sfs.encryption;
 
 import com.google.common.base.Optional;
 import io.vertx.core.http.HttpClientResponse;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.elasticsearch.account.LoadAccount;
 import org.sfs.elasticsearch.container.LoadContainer;
 import org.sfs.elasticsearch.containerkey.GetNewestContainerKey;
@@ -69,15 +67,15 @@ public class ContainerKeysTest extends BaseTestVerticle {
     protected Observable<Void> prepareContainer(TestContext context) {
 
         return just((Void) null)
-                .flatMap(new PostAccount(httpClient, accountName, authAdmin))
+                .flatMap(new PostAccount(httpClient(), accountName, authAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PutContainer(httpClient, accountName, containerName, authNonAdmin))
+                .flatMap(new PutContainer(httpClient(), accountName, containerName, authNonAdmin))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
                 .map(new ToVoid<HttpClientResponse>())
-                .flatMap(new PostContainer(httpClient, accountName, containerName, authNonAdmin)
+                .flatMap(new PostContainer(httpClient(), accountName, containerName, authNonAdmin)
                         .setHeader(X_ADD_CONTAINER_META_PREFIX + X_MAX_OBJECT_REVISIONS, valueOf(3)))
                 .map(new HttpClientResponseHeaderLogger())
                 .map(new AssertHttpClientResponseStatusCode(context, HTTP_NO_CONTENT))
@@ -86,222 +84,221 @@ public class ContainerKeysTest extends BaseTestVerticle {
 
     @Test
     public void testKeyNoRotate(TestContext context) {
-        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
+        runOnServerContext(context, () -> {
+            ContainerKeys containerKeys = vertxContext().verticle().containerKeys();
 
-        Async async = context.async();
-        prepareContainer(context)
-                .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(vertxContext))
-                .map(Optional::get)
-                .flatMap(persistentAccount ->
-                        just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
-                                .map(Optional::get))
-                .flatMap(persistentContainer -> {
-                    AtomicReference<byte[]> existingArray = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
-                            .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(vertxContext))
-                            .map(Optional::get)
-                            .map(persistentContainerKey -> {
-                                existingArray.set(persistentContainerKey.getEncryptedKey().get());
-                                return persistentContainerKey;
-                            })
-                            .flatMap(pck -> containerKeys.rotateIfRequired(vertxContext, pck))
-                            .map(persistentContainerKey -> {
-                                assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
-                                assertArrayEquals(context, existingArray.get(), persistentContainerKey.getEncryptedKey().get());
-                                return persistentContainer;
-                            });
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+            return prepareContainer(context)
+                    .map(aVoid -> fromPaths(accountName).accountPath().get())
+                    .flatMap(new LoadAccount(vertxContext()))
+                    .map(Optional::get)
+                    .flatMap(persistentAccount ->
+                            just(fromPaths(accountName, containerName).containerPath().get())
+                                    .flatMap(new LoadContainer(vertxContext(), persistentAccount))
+                                    .map(Optional::get))
+                    .flatMap(persistentContainer -> {
+                        AtomicReference<byte[]> existingArray = new AtomicReference<>();
+                        return containerKeys.preferredAlgorithm(vertxContext(), persistentContainer)
+                                .map(new ToVoid<>())
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .map(aVoid -> persistentContainer)
+                                .flatMap(new GetNewestContainerKey(vertxContext()))
+                                .map(Optional::get)
+                                .map(persistentContainerKey -> {
+                                    existingArray.set(persistentContainerKey.getEncryptedKey().get());
+                                    return persistentContainerKey;
+                                })
+                                .flatMap(pck -> containerKeys.rotateIfRequired(vertxContext(), pck))
+                                .map(persistentContainerKey -> {
+                                    assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
+                                    assertArrayEquals(context, existingArray.get(), persistentContainerKey.getEncryptedKey().get());
+                                    return persistentContainer;
+                                });
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testKeyRotate(TestContext context) {
-        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
+        runOnServerContext(context, () -> {
+            ContainerKeys containerKeys = vertxContext().verticle().containerKeys();
 
-        Async async = context.async();
-        prepareContainer(context)
-                .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(vertxContext))
-                .map(Optional::get)
-                .flatMap(persistentAccount ->
-                        just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
-                                .map(Optional::get))
-                .flatMap(persistentContainer -> {
-                    AtomicReference<byte[]> existingArray = new AtomicReference<>();
-                    AtomicReference<String> existingId = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
-                            .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(vertxContext))
-                            .map(Optional::get)
-                            .map(persistentContainerKey -> {
-                                assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
-                                existingArray.set(persistentContainerKey.getEncryptedKey().get());
-                                existingId.set(persistentContainerKey.getId());
-                                return persistentContainerKey;
-                            })
-                            .map(persistentContainerKey -> {
-                                Calendar now = getInstance();
-                                long thePast = DAYS.toMillis(365);
-                                now.setTimeInMillis(thePast);
-                                persistentContainerKey.setCreateTs(now);
-                                return persistentContainerKey;
-                            })
-                            .flatMap(new UpdateContainerKey(vertxContext))
-                            .map(Holder2::value1)
-                            .map(Optional::get)
-                            .flatMap(pck -> containerKeys.rotateIfRequired(vertxContext, pck))
-                            .map(persistentContainerKey -> {
-                                assertEquals(context, "/testaccount/testcontainer/0000000000000000001", persistentContainerKey.getId());
-                                assertFalse(context, Arrays.equals(existingArray.get(), persistentContainerKey.getEncryptedKey().get()));
-                                assertFalse(context, existingId.get().equals(persistentContainerKey.getId()));
-                                return persistentContainer;
-                            });
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+            return prepareContainer(context)
+                    .map(aVoid -> fromPaths(accountName).accountPath().get())
+                    .flatMap(new LoadAccount(vertxContext()))
+                    .map(Optional::get)
+                    .flatMap(persistentAccount ->
+                            just(fromPaths(accountName, containerName).containerPath().get())
+                                    .flatMap(new LoadContainer(vertxContext(), persistentAccount))
+                                    .map(Optional::get))
+                    .flatMap(persistentContainer -> {
+                        AtomicReference<byte[]> existingArray = new AtomicReference<>();
+                        AtomicReference<String> existingId = new AtomicReference<>();
+                        return containerKeys.preferredAlgorithm(vertxContext(), persistentContainer)
+                                .map(new ToVoid<>())
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .map(aVoid -> persistentContainer)
+                                .flatMap(new GetNewestContainerKey(vertxContext()))
+                                .map(Optional::get)
+                                .map(persistentContainerKey -> {
+                                    assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
+                                    existingArray.set(persistentContainerKey.getEncryptedKey().get());
+                                    existingId.set(persistentContainerKey.getId());
+                                    return persistentContainerKey;
+                                })
+                                .map(persistentContainerKey -> {
+                                    Calendar now = getInstance();
+                                    long thePast = DAYS.toMillis(365);
+                                    now.setTimeInMillis(thePast);
+                                    persistentContainerKey.setCreateTs(now);
+                                    return persistentContainerKey;
+                                })
+                                .flatMap(new UpdateContainerKey(vertxContext()))
+                                .map(Holder2::value1)
+                                .map(Optional::get)
+                                .flatMap(pck -> containerKeys.rotateIfRequired(vertxContext(), pck))
+                                .map(persistentContainerKey -> {
+                                    assertEquals(context, "/testaccount/testcontainer/0000000000000000001", persistentContainerKey.getId());
+                                    assertFalse(context, Arrays.equals(existingArray.get(), persistentContainerKey.getEncryptedKey().get()));
+                                    assertFalse(context, existingId.get().equals(persistentContainerKey.getId()));
+                                    return persistentContainer;
+                                });
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testReEncrypt(TestContext context) {
-        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
+        runOnServerContext(context, () -> {
+            ContainerKeys containerKeys = vertxContext().verticle().containerKeys();
 
-        Async async = context.async();
-        prepareContainer(context)
-                .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(vertxContext))
-                .map(Optional::get)
-                .flatMap(persistentAccount ->
-                        just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
-                                .map(Optional::get))
-                .flatMap(persistentContainer -> {
-                    AtomicReference<byte[]> existingArray = new AtomicReference<>();
-                    AtomicReference<String> existingId = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
-                            .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(vertxContext))
-                            .map(Optional::get)
-                            .map(persistentContainerKey -> {
-                                assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
-                                existingArray.set(persistentContainerKey.getEncryptedKey().get());
-                                existingId.set(persistentContainerKey.getId());
-                                return persistentContainerKey;
-                            })
-                            .map(persistentContainerKey -> {
-                                Calendar now = getInstance();
-                                long thePast = DAYS.toMillis(365);
-                                now.setTimeInMillis(thePast);
-                                persistentContainerKey.setReEncryptTs(now);
-                                return persistentContainerKey;
-                            })
-                            .flatMap(new UpdateContainerKey(vertxContext))
-                            .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .flatMap(aVoid -> containerKeys.maintain(vertxContext))
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(vertxContext))
-                            .map(Optional::get)
-                            .map(persistentContainerKey -> {
-                                assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
-                                assertFalse(context, Arrays.equals(existingArray.get(), persistentContainerKey.getEncryptedKey().get()));
-                                return persistentContainer;
-                            });
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+            return prepareContainer(context)
+                    .map(aVoid -> fromPaths(accountName).accountPath().get())
+                    .flatMap(new LoadAccount(vertxContext()))
+                    .map(Optional::get)
+                    .flatMap(persistentAccount ->
+                            just(fromPaths(accountName, containerName).containerPath().get())
+                                    .flatMap(new LoadContainer(vertxContext(), persistentAccount))
+                                    .map(Optional::get))
+                    .flatMap(persistentContainer -> {
+                        AtomicReference<byte[]> existingArray = new AtomicReference<>();
+                        AtomicReference<String> existingId = new AtomicReference<>();
+                        return containerKeys.preferredAlgorithm(vertxContext(), persistentContainer)
+                                .map(new ToVoid<>())
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .map(aVoid -> persistentContainer)
+                                .flatMap(new GetNewestContainerKey(vertxContext()))
+                                .map(Optional::get)
+                                .map(persistentContainerKey -> {
+                                    assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
+                                    existingArray.set(persistentContainerKey.getEncryptedKey().get());
+                                    existingId.set(persistentContainerKey.getId());
+                                    return persistentContainerKey;
+                                })
+                                .map(persistentContainerKey -> {
+                                    Calendar now = getInstance();
+                                    long thePast = DAYS.toMillis(365);
+                                    now.setTimeInMillis(thePast);
+                                    persistentContainerKey.setReEncryptTs(now);
+                                    return persistentContainerKey;
+                                })
+                                .flatMap(new UpdateContainerKey(vertxContext()))
+                                .map(new ToVoid<>())
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .flatMap(aVoid -> containerKeys.maintain(vertxContext()))
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .map(aVoid -> persistentContainer)
+                                .flatMap(new GetNewestContainerKey(vertxContext()))
+                                .map(Optional::get)
+                                .map(persistentContainerKey -> {
+                                    assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
+                                    assertFalse(context, Arrays.equals(existingArray.get(), persistentContainerKey.getEncryptedKey().get()));
+                                    return persistentContainer;
+                                });
+                    })
+                    .map(new ToVoid<>());
+        });
+
     }
 
     @Test
     public void testNoReEncrypt(TestContext context) {
-        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
-
-        Async async = context.async();
-        prepareContainer(context)
-                .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(vertxContext))
-                .map(Optional::get)
-                .flatMap(persistentAccount ->
-                        just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
-                                .map(Optional::get))
-                .flatMap(persistentContainer -> {
-                    AtomicReference<byte[]> existingArray = new AtomicReference<>();
-                    AtomicReference<String> existingId = new AtomicReference<>();
-                    return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
-                            .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(vertxContext))
-                            .map(Optional::get)
-                            .map(persistentContainerKey -> {
-                                assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
-                                existingArray.set(persistentContainerKey.getEncryptedKey().get());
-                                existingId.set(persistentContainerKey.getId());
-                                return persistentContainerKey;
-                            })
-                            .flatMap(new UpdateContainerKey(vertxContext))
-                            .map(new ToVoid<>())
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .flatMap(aVoid -> containerKeys.maintain(vertxContext))
-                            .flatMap(new RefreshIndex(httpClient, authAdmin))
-                            .map(aVoid -> persistentContainer)
-                            .flatMap(new GetNewestContainerKey(vertxContext))
-                            .map(Optional::get)
-                            .map(persistentContainerKey -> {
-                                assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
-                                assertArrayEquals(context, existingArray.get(), persistentContainerKey.getEncryptedKey().get());
-                                return persistentContainer;
-                            });
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+        runOnServerContext(context, () -> {
+            ContainerKeys containerKeys = vertxContext().verticle().containerKeys();
+            return prepareContainer(context)
+                    .map(aVoid -> fromPaths(accountName).accountPath().get())
+                    .flatMap(new LoadAccount(vertxContext()))
+                    .map(Optional::get)
+                    .flatMap(persistentAccount ->
+                            just(fromPaths(accountName, containerName).containerPath().get())
+                                    .flatMap(new LoadContainer(vertxContext(), persistentAccount))
+                                    .map(Optional::get))
+                    .flatMap(persistentContainer -> {
+                        AtomicReference<byte[]> existingArray = new AtomicReference<>();
+                        AtomicReference<String> existingId = new AtomicReference<>();
+                        return containerKeys.preferredAlgorithm(vertxContext(), persistentContainer)
+                                .map(new ToVoid<>())
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .map(aVoid -> persistentContainer)
+                                .flatMap(new GetNewestContainerKey(vertxContext()))
+                                .map(Optional::get)
+                                .map(persistentContainerKey -> {
+                                    assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
+                                    existingArray.set(persistentContainerKey.getEncryptedKey().get());
+                                    existingId.set(persistentContainerKey.getId());
+                                    return persistentContainerKey;
+                                })
+                                .flatMap(new UpdateContainerKey(vertxContext()))
+                                .map(new ToVoid<>())
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .flatMap(aVoid -> containerKeys.maintain(vertxContext()))
+                                .flatMap(new RefreshIndex(httpClient(), authAdmin))
+                                .map(aVoid -> persistentContainer)
+                                .flatMap(new GetNewestContainerKey(vertxContext()))
+                                .map(Optional::get)
+                                .map(persistentContainerKey -> {
+                                    assertEquals(context, "/testaccount/testcontainer/0000000000000000000", persistentContainerKey.getId());
+                                    assertArrayEquals(context, existingArray.get(), persistentContainerKey.getEncryptedKey().get());
+                                    return persistentContainer;
+                                });
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
     @Test
     public void testEncryptDecrypt(TestContext context) {
+        runOnServerContext(context, () -> {
+            byte[] data = "this is a test 111".getBytes(UTF_8);
 
-        byte[] data = "this is a test 111".getBytes(UTF_8);
+            ContainerKeys containerKeys = vertxContext().verticle().containerKeys();
 
-        ContainerKeys containerKeys = vertxContext.verticle().containerKeys();
-
-        Async async = context.async();
-        prepareContainer(context)
-                .map(aVoid -> fromPaths(accountName).accountPath().get())
-                .flatMap(new LoadAccount(vertxContext))
-                .map(Optional::get)
-                .flatMap(persistentAccount ->
-                        just(fromPaths(accountName, containerName).containerPath().get())
-                                .flatMap(new LoadContainer(vertxContext, persistentAccount))
-                                .map(Optional::get))
-                .flatMap(persistentContainer ->
-                        containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
-                                .flatMap(keyResponse -> {
-                                    Algorithm algorithm = keyResponse.getData();
-                                    byte[] encryptedData = algorithm.encrypt(data);
-                                    return containerKeys.algorithm(vertxContext, persistentContainer, keyResponse.getKeyId(), keyResponse.getSalt())
-                                            .map(keyResponse1 -> {
-                                                Algorithm algorithm1 = keyResponse1.getData();
-                                                return algorithm1.decrypt(encryptedData);
-                                            });
-                                }))
-                .map(decryptedBytes -> {
-                    assertArrayEquals(context, data, decryptedBytes);
-                    return decryptedBytes;
-                })
-                .map(new ToVoid<>())
-                .subscribe(new TestSubscriber(context, async));
+            return prepareContainer(context)
+                    .map(aVoid -> fromPaths(accountName).accountPath().get())
+                    .flatMap(new LoadAccount(vertxContext()))
+                    .map(Optional::get)
+                    .flatMap(persistentAccount ->
+                            just(fromPaths(accountName, containerName).containerPath().get())
+                                    .flatMap(new LoadContainer(vertxContext(), persistentAccount))
+                                    .map(Optional::get))
+                    .flatMap(persistentContainer ->
+                            containerKeys.preferredAlgorithm(vertxContext(), persistentContainer)
+                                    .flatMap(keyResponse -> {
+                                        Algorithm algorithm = keyResponse.getData();
+                                        byte[] encryptedData = algorithm.encrypt(data);
+                                        return containerKeys.algorithm(vertxContext(), persistentContainer, keyResponse.getKeyId(), keyResponse.getSalt())
+                                                .map(keyResponse1 -> {
+                                                    Algorithm algorithm1 = keyResponse1.getData();
+                                                    return algorithm1.decrypt(encryptedData);
+                                                });
+                                    }))
+                    .map(decryptedBytes -> {
+                        assertArrayEquals(context, data, decryptedBytes);
+                        return decryptedBytes;
+                    })
+                    .map(new ToVoid<>());
+        });
     }
 
 }
