@@ -18,11 +18,14 @@ package org.sfs;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.google.common.base.Preconditions;
+import com.google.common.net.HostAndPort;
 import io.vertx.core.Context;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
+import io.vertx.core.http.HttpClientRequest;
+import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import io.vertx.core.shareddata.Lock;
@@ -38,15 +41,20 @@ import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.NodeStats;
 import org.sfs.nodes.Nodes;
 import org.sfs.rx.Defer;
+import org.sfs.rx.HttpClientResponseBodyBuffer;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.ToVoid;
+import rx.Observable;
 import rx.Subscriber;
+import rx.functions.Func0;
 import rx.plugins.RxJavaHooks;
 import rx.plugins.RxJavaSchedulersHook;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static java.lang.String.format;
 
 public class SfsServer extends Server {
 
@@ -96,6 +104,25 @@ public class SfsServer extends Server {
                     httpClient = delegate.createHttpClient(vertx, false);
                     vertxContext = new VertxContext<>(_this);
                     return delegate.initHttpListeners(vertxContext).map(new ToVoid<>());
+                })
+                .flatMap(aVoid -> {
+                    // make httpclient bind to correct context
+                    HostAndPort firstPublishedAddress = delegate.nodes().getHostAndPort();
+                    String url =
+                            format("http://%s/admin/001/healthcheck", firstPublishedAddress);
+                    Func0<Observable<Void>> func0 = () -> {
+                        LOGGER.debug("Trying to connect to health check {}", url);
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
+                        HttpClientRequest httpClientRequest = httpClient.getAbs(url, httpClientResponse -> {
+                            httpClientResponse.pause();
+                            handler.complete(httpClientResponse);
+                        }).exceptionHandler(handler::fail)
+                                .setTimeout(5000);
+                        httpClientRequest.end();
+                        return handler.flatMap(new HttpClientResponseBodyBuffer())
+                                .map(new ToVoid<>());
+                    };
+                    return RxHelper.onErrorResumeNext(20, func0);
                 })
                 .count()
                 .map(new ToVoid<>())

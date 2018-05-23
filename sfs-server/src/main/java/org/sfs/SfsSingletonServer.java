@@ -27,6 +27,8 @@ import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientOptions;
+import io.vertx.core.http.HttpClientRequest;
+import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.json.JsonObject;
@@ -93,13 +95,16 @@ import org.sfs.nodes.master.MasterNodeExecuteJob;
 import org.sfs.nodes.master.MasterNodeStopJob;
 import org.sfs.nodes.master.MasterNodeWaitForJob;
 import org.sfs.rx.Defer;
+import org.sfs.rx.HttpClientResponseBodyBuffer;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.rx.Terminus;
+import org.sfs.rx.ToVoid;
 import org.sfs.thread.NamedCapacityFixedThreadPool;
 import org.sfs.util.ConfigHelper;
 import org.sfs.util.FileSystemLock;
 import rx.Observable;
+import rx.functions.Func0;
 
 import java.net.HttpURLConnection;
 import java.nio.file.Path;
@@ -110,6 +115,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static java.lang.String.format;
 
 public class SfsSingletonServer extends Server implements Shareable {
 
@@ -275,6 +282,26 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .flatMap(aVoid -> masterKeys.start(vertxContext))
                 .flatMap(aVoid -> containerKeys.start(vertxContext))
                 .flatMap(aVoid -> jobs.open(vertxContext, config))
+                .flatMap(aVoid -> initHttpListeners(vertxContext))
+                .flatMap(aVoid -> {
+                    // make httpclient bind to correct context
+                    HostAndPort firstPublishedAddress = nodes.getHostAndPort();
+                    String url =
+                            format("http://%s/admin/001/healthcheck", firstPublishedAddress);
+                    Func0<Observable<Void>> func0 = () -> {
+                        LOGGER.debug("Trying to connect to health check {}", url);
+                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
+                        HttpClientRequest httpClientRequest = httpClient.getAbs(url, httpClientResponse -> {
+                            httpClientResponse.pause();
+                            handler.complete(httpClientResponse);
+                        }).exceptionHandler(handler::fail)
+                                .setTimeout(5000);
+                        httpClientRequest.end();
+                        return handler.flatMap(new HttpClientResponseBodyBuffer())
+                                .map(new ToVoid<>());
+                    };
+                    return RxHelper.onErrorResumeNext(20, func0);
+                })
                 .subscribe(
                         o -> {
                             // do nothing
@@ -603,8 +630,6 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .setSsl(https);
 
         HttpClient client = v.createHttpClient(httpClientOptions);
-
-        LOGGER.debug("Current Thread 1 is {}, http client is {}", Thread.currentThread(), client);
 
         return client;
     }

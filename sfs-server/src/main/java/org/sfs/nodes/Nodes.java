@@ -43,7 +43,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -259,42 +258,7 @@ public class Nodes {
                     hostAndPorts,
                     hostAndPort ->
                             Defer.aVoid()
-                                    .flatMap(aVoid -> supplier.call(hostAndPort))
-                                    .onErrorResumeNext(throwable -> {
-                                        errors.clear();
-                                        LOGGER.debug("Retry delay 100ms");
-                                        return Defer.aVoid()
-                                                .delay(100, TimeUnit.MILLISECONDS)
-                                                .flatMap(aVoid -> supplier.call(hostAndPort));
-                                    })
-                                    .onErrorResumeNext(throwable -> {
-                                        errors.clear();
-                                        LOGGER.debug("Retry delay 100ms");
-                                        return Defer.aVoid()
-                                                .delay(100, TimeUnit.MILLISECONDS)
-                                                .flatMap(aVoid -> supplier.call(hostAndPort));
-                                    })
-                                    .onErrorResumeNext(throwable -> {
-                                        errors.clear();
-                                        LOGGER.debug("Retry delay 200ms");
-                                        return Defer.aVoid()
-                                                .delay(200, TimeUnit.MILLISECONDS)
-                                                .flatMap(aVoid -> supplier.call(hostAndPort));
-                                    })
-                                    .onErrorResumeNext(throwable -> {
-                                        errors.clear();
-                                        LOGGER.debug("Retry delay 300ms");
-                                        return Defer.aVoid()
-                                                .delay(300, TimeUnit.MILLISECONDS)
-                                                .flatMap(aVoid -> supplier.call(hostAndPort));
-                                    })
-                                    .onErrorResumeNext(throwable -> {
-                                        errors.clear();
-                                        LOGGER.debug("Retry delay 500ms");
-                                        return Defer.aVoid()
-                                                .delay(500, TimeUnit.MILLISECONDS)
-                                                .flatMap(aVoid -> supplier.call(hostAndPort));
-                                    })
+                                    .flatMap(aVoid -> RxHelper.onErrorResumeNext(50, () -> supplier.call(hostAndPort)))
                                     .doOnNext(httpClientRequestAndResponseAction1 -> Preconditions.checkState(ref.compareAndSet(null, httpClientRequestAndResponseAction1), "Already set"))
                                     .map(httpClientRequestAndResponse -> false)
                                     .onErrorResumeNext(throwable -> {
@@ -302,13 +266,17 @@ public class Nodes {
                                         errors.add(throwable);
                                         return Defer.just(true);
                                     }))
-                    .map(_continue -> {
+                    .flatMap(_continue -> {
                         HttpClientRequestAndResponse httpClientRequestAndResponse = ref.get();
                         if (httpClientRequestAndResponse == null) {
                             Preconditions.checkState(!errors.isEmpty(), "Errors cannot be empty");
-                            throw new CompositeException(errors);
+                            if (errors.size() == 1) {
+                                return Observable.error(errors.get(0));
+                            } else {
+                                return Observable.error(new CompositeException(errors));
+                            }
                         } else {
-                            return httpClientRequestAndResponse;
+                            return Observable.just(httpClientRequestAndResponse);
                         }
                     });
         });

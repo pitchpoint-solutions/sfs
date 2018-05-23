@@ -41,12 +41,23 @@ import rx.plugins.RxJavaSchedulersHook;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static java.util.Arrays.asList;
 import static rx.Observable.combineLatestDelayError;
 import static rx.functions.Functions.fromFunc;
 
 public class RxHelper {
+
+    public static <T> Observable<T> onErrorResumeNext(int count, Func0<Observable<T>> func0) {
+        Observable<T> base = func0.call();
+        for (int i = 1; i <= count; i++) {
+            base = base.onErrorResumeNext(throwable -> Defer.aVoid()
+                    .delay(100, TimeUnit.MILLISECONDS)
+                    .flatMap(aVoid -> func0.call()));
+        }
+        return base;
+    }
 
     @SuppressWarnings("unchecked")
     public static final <T1, T2, R> Observable<R> combineSinglesDelayError(Observable<? extends T1> o1, Observable<? extends T2> o2, Func2<? super T1, ? super T2, ? extends R> combineFunction) {

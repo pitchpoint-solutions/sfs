@@ -20,7 +20,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.net.HostAndPort;
 import io.vertx.core.Context;
 import io.vertx.core.DeploymentOptions;
-import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 import io.vertx.core.buffer.Buffer;
@@ -33,6 +32,7 @@ import io.vertx.core.logging.LoggerFactory;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 import org.sfs.integration.java.func.ResetForTest;
+import org.sfs.integration.java.func.WaitForHealthCheck;
 import org.sfs.integration.java.help.AuthorizationFactory;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
@@ -47,7 +47,6 @@ import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -172,6 +171,8 @@ public class RunBootedTestOnContextRx extends RunTestOnContextRx {
                             vertxContext = sfsServer.vertxContext();
                             checkState(vertxContext != null, "VertxContext was null on Verticle %s", sfsServer);
                         })
+                        .flatMap(aVoid -> Observable.just((Void) null)
+                                .flatMap(new WaitForHealthCheck(getHttpClient(), vertx)))
                         .flatMap(aVoid1 -> Observable.just((Void) null)
                                 .flatMap(new ResetForTest(getHttpClient(), authAdmin)))
                         .map(new HttpClientResponseHeaderLogger())

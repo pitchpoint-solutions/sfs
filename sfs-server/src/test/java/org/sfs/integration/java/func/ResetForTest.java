@@ -44,7 +44,6 @@ public class ResetForTest implements Func1<Void, Observable<HttpClientResponse>>
     public Observable<HttpClientResponse> call(Void aVoid) {
         return auth.toHttpAuthorization()
                 .flatMap(s -> {
-                    LOGGER.debug("Current Thread is {}", Thread.currentThread());
                     StringBuilder urlBuilder = new StringBuilder();
                     urlBuilder = urlBuilder.append("/admin/001/resetfortest");
                     ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();

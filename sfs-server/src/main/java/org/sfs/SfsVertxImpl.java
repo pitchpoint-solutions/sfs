@@ -64,6 +64,11 @@ public class SfsVertxImpl implements SfsVertx {
     }
 
     @Override
+    public DnsClient createDnsClient() {
+        return vertx.createDnsClient();
+    }
+
+    @Override
     public DnsClient createDnsClient(DnsClientOptions dnsClientOptions) {
         return vertx.createDnsClient(dnsClientOptions);
     }
