@@ -21,10 +21,8 @@ import com.google.common.collect.Iterables;
 import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
 import io.vertx.core.logging.Logger;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.filesystem.volume.VolumeManager;
 import org.sfs.integration.java.BaseTestVerticle;
@@ -32,6 +30,7 @@ import org.sfs.integration.java.func.RefreshIndex;
 import org.sfs.integration.java.func.UpdateClusterStats;
 import org.sfs.integration.java.help.AuthorizationFactory;
 import org.sfs.io.DigestEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.Nodes;
@@ -122,7 +121,7 @@ public class ReplicatedWriteTest extends BaseTestVerticle {
                     })
                     .flatMap(volumeReplicaGroup ->
                             just((Void) null)
-                                    .flatMap(aVoid -> volumeReplicaGroup.consume(size, newArrayList(MD5, SHA512), asyncFile))
+                                    .flatMap(aVoid -> volumeReplicaGroup.consume(size, newArrayList(MD5, SHA512), EndableReadStream.from(asyncFile)))
                                     .subscribeOn(scheduler)
                                     .doOnNext(digestBlobs -> {
                                         assertEquals(context, 2, digestBlobs.size());

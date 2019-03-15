@@ -23,7 +23,7 @@ import io.vertx.core.streams.ReadStream;
 
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 
-public class PipedReadStream implements ReadStream<Buffer> {
+public class PipedReadStream implements EndableReadStream<Buffer> {
 
     private static final Logger LOGGER = getLogger(PipedReadStream.class);
     private Handler<Void> endHandler;
@@ -32,6 +32,7 @@ public class PipedReadStream implements ReadStream<Buffer> {
     private Handler<Throwable> exceptionHandler;
     private PipedEndableWriteStream writeStream;
     private boolean draining = false;
+    private boolean ended = false;
 
     protected void connect(PipedEndableWriteStream writeStream) {
         this.writeStream = writeStream;
@@ -66,7 +67,9 @@ public class PipedReadStream implements ReadStream<Buffer> {
     @Override
     public PipedReadStream handler(Handler<Buffer> handler) {
         this.dataHandler = handler;
-        drainWriteStream();
+        if (!paused && handler != null) {
+            drainWriteStream();
+        }
         return this;
     }
 
@@ -78,8 +81,15 @@ public class PipedReadStream implements ReadStream<Buffer> {
 
     @Override
     public PipedReadStream resume() {
-        paused = false;
-        drainWriteStream();
+        if (paused && dataHandler != null) {
+            paused = false;
+            drainWriteStream();
+        }
+        return this;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
         return this;
     }
 
@@ -111,12 +121,20 @@ public class PipedReadStream implements ReadStream<Buffer> {
         return this;
     }
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
     protected void handleEnd() {
-        if (writeStream.ended() && writeStream.writeQueueEmpty()) {
-            Handler<Void> handler = endHandler;
-            if (handler != null) {
-                endHandler = null;
-                handler.handle(null);
+        if (writeStream.ended()) {
+            if (writeStream.writeQueueEmpty()) {
+                ended = true;
+                Handler<Void> handler = endHandler;
+                if (handler != null) {
+                    endHandler = null;
+                    handler.handle(null);
+                }
             }
         }
     }

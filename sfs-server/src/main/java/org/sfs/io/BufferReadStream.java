@@ -20,12 +20,12 @@ import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.streams.ReadStream;
 
-public class BufferReadStream implements ReadStream<Buffer> {
+public class BufferReadStream implements EndableReadStream<Buffer> {
 
     private final Buffer buffer;
-    private boolean consumed = false;
+    private boolean ended = false;
     private Handler<Buffer> dataHandler;
-    private boolean paused = false;
+    private boolean paused = true;
     private Handler<Void> endHandler;
 
     public BufferReadStream(Buffer buffer) {
@@ -42,23 +42,31 @@ public class BufferReadStream implements ReadStream<Buffer> {
     @Override
     public BufferReadStream handler(Handler<Buffer> handler) {
         this.dataHandler = handler;
-        handleData();
-        handleEnd();
+        if (!paused && dataHandler != null) {
+            handleData();
+            handleEnd();
+        }
         return this;
     }
 
     @Override
     public BufferReadStream pause() {
         paused = true;
-        dataHandler = null;
         return this;
     }
 
     @Override
     public BufferReadStream resume() {
-        paused = false;
-        handleData();
-        handleEnd();
+        if (paused && dataHandler != null) {
+            paused = false;
+            handleData();
+            handleEnd();
+        }
+        return this;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
         return this;
     }
 
@@ -67,17 +75,20 @@ public class BufferReadStream implements ReadStream<Buffer> {
         return this;
     }
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
     private void handleData() {
-        if (!paused && !consumed && dataHandler != null) {
-            Handler<Buffer> handler = dataHandler;
-            dataHandler = null;
-            consumed = true;
-            handler.handle(buffer);
-        }
+        Handler<Buffer> handler = dataHandler;
+        dataHandler = null;
+        ended = true;
+        handler.handle(buffer);
     }
 
     private void handleEnd() {
-        if (consumed && endHandler != null) {
+        if (ended && endHandler != null) {
             Handler<Void> handler = endHandler;
             endHandler = null;
             handler.handle(null);

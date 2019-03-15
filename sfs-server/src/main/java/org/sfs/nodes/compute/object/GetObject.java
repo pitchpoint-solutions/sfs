@@ -59,8 +59,6 @@ public class GetObject implements Handler<SfsRequest> {
 
     @Override
     public void handle(final SfsRequest httpServerRequest) {
-        httpServerRequest.pause();
-
         MultiMap queryParams = httpServerRequest.params();
         final String versionAsString = queryParams.get(VERSION);
 

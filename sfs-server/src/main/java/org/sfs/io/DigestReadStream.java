@@ -29,9 +29,9 @@ import java.security.MessageDigest;
 import java.util.EnumMap;
 import java.util.Map;
 
-public class DigestReadStream implements ReadStream<Buffer> {
+public class DigestReadStream implements EndableReadStream<Buffer> {
 
-    private final ReadStream<Buffer> delegate;
+    private final EndableReadStream<Buffer> delegate;
     private final Map<MessageDigestFactory, byte[]> cache = new EnumMap<>(MessageDigestFactory.class);
     private final Map<MessageDigestFactory, MessageDigest> digests = new EnumMap<>(MessageDigestFactory.class);
     // keep an array referencing MessageDigests so it's fast to iterate when hashing Buffers
@@ -50,7 +50,7 @@ public class DigestReadStream implements ReadStream<Buffer> {
         }
     };
 
-    public DigestReadStream(ReadStream<Buffer> delegate, MessageDigestFactory messageDigest, MessageDigestFactory... mdfs) {
+    public DigestReadStream(EndableReadStream<Buffer> delegate, MessageDigestFactory messageDigest, MessageDigestFactory... mdfs) {
         this.delegate = delegate;
         this.messageDigests = new MessageDigest[1 + mdfs.length];
         MessageDigest md = messageDigest.instance();
@@ -64,7 +64,7 @@ public class DigestReadStream implements ReadStream<Buffer> {
         }
     }
 
-    public DigestReadStream(ReadStream<Buffer> delegate, MessageDigestFactory[] mdfs) {
+    public DigestReadStream(EndableReadStream<Buffer> delegate, MessageDigestFactory[] mdfs) {
         this.delegate = delegate;
         this.messageDigests = new MessageDigest[mdfs.length];
         for (int i = 0; i < mdfs.length; i++) {
@@ -73,6 +73,11 @@ public class DigestReadStream implements ReadStream<Buffer> {
             this.messageDigests[i] = md;
             digests.put(mdf, md);
         }
+    }
+
+    @Override
+    public boolean isEnded() {
+        return delegate.isEnded();
     }
 
     public Optional<byte[]> getDigest(MessageDigestFactory key) {
@@ -115,6 +120,11 @@ public class DigestReadStream implements ReadStream<Buffer> {
     @Override
     public DigestReadStream resume() {
         delegate.resume();
+        return this;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
         return this;
     }
 

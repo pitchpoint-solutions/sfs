@@ -47,6 +47,11 @@ public class DigestEndableWriteStream implements BufferEndableWriteStream {
         }
     }
 
+    @Override
+    public boolean isEnded() {
+        return delegate.isEnded();
+    }
+
     public Optional<byte[]> getDigest(MessageDigestFactory key) {
         byte[] hash = cache.get(key);
         if (hash == null) {

@@ -29,6 +29,7 @@ import org.sfs.elasticsearch.object.LoadObject;
 import org.sfs.elasticsearch.object.PersistObject;
 import org.sfs.elasticsearch.object.UpdateObject;
 import org.sfs.io.CountingReadStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.FileBackedBuffer;
 import org.sfs.io.LimitedReadStream;
 import org.sfs.nodes.all.segment.AcknowledgeSegment;
@@ -136,7 +137,7 @@ public class PutObject implements Handler<SfsRequest> {
                                 Path tempDirectory = httpServerRequest.vertxContext().verticle().sfsFileSystem().tmpDirectory();
                                 FileBackedBuffer fileBackedBuffer = new FileBackedBuffer(vertxContext.vertx(), 8192, true, tempDirectory);
                                 tempFileRef.set(fileBackedBuffer);
-                                LimitedReadStream readStream = new LimitedReadStream(httpServerRequest, MAX_SEGMENT_SIZE);
+                                LimitedReadStream readStream = new LimitedReadStream(EndableReadStream.from(httpServerRequest), MAX_SEGMENT_SIZE);
                                 CountingReadStream countingWriteStream = new CountingReadStream(readStream);
                                 return pump(countingWriteStream, fileBackedBuffer)
                                         .map(aVoid -> {
@@ -163,7 +164,7 @@ public class PutObject implements Handler<SfsRequest> {
                                                         .flatMap(new WriteNewSegment(httpServerRequest.vertxContext(), fileBackedBuffer.readStream()));
                                             } else {
                                                 return Observable.just(transientVersion)
-                                                        .flatMap(new WriteNewSegment(httpServerRequest.vertxContext(), httpServerRequest));
+                                                        .flatMap(new WriteNewSegment(httpServerRequest.vertxContext(), EndableReadStream.from(httpServerRequest)));
                                             }
                                         })
                                         .map(transientSegment -> {

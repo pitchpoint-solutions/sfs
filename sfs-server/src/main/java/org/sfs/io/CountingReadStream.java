@@ -23,10 +23,10 @@ import io.vertx.core.streams.ReadStream;
 
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 
-public class CountingReadStream implements ReadStream<Buffer> {
+public class CountingReadStream implements EndableReadStream<Buffer> {
 
     private static final Logger LOGGER = getLogger(CountingReadStream.class);
-    private final ReadStream<Buffer> delegate;
+    private final EndableReadStream<Buffer> delegate;
     private long count = 0;
     private Handler<Buffer> delegateDataHandler;
     private Handler<Buffer> dataHandler = new Handler<Buffer>() {
@@ -39,12 +39,17 @@ public class CountingReadStream implements ReadStream<Buffer> {
         }
     };
 
-    public CountingReadStream(ReadStream<Buffer> delegate) {
+    public CountingReadStream(EndableReadStream<Buffer> delegate) {
         this.delegate = delegate;
     }
 
     public long count() {
         return count;
+    }
+
+    @Override
+    public boolean isEnded() {
+        return delegate.isEnded();
     }
 
     @Override
@@ -74,6 +79,11 @@ public class CountingReadStream implements ReadStream<Buffer> {
     @Override
     public CountingReadStream resume() {
         delegate.resume();
+        return this;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
         return this;
     }
 

@@ -17,7 +17,6 @@
 package org.sfs.elasticsearch;
 
 import com.google.common.base.Optional;
-import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
@@ -61,6 +60,11 @@ public abstract class AbstractBulkUpdateEndableWriteStream implements EndableWri
     public AbstractBulkUpdateEndableWriteStream(VertxContext<Server> vertxContext) {
         this.vertxContext = vertxContext;
         this.elasticsearch = vertxContext.verticle().elasticsearch();
+    }
+
+    @Override
+    public boolean isEnded() {
+        return ended;
     }
 
     @Override

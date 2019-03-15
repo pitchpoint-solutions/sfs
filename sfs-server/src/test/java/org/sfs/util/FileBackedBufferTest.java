@@ -17,10 +17,8 @@
 package org.sfs.util;
 
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.streams.ReadStream;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
-import io.vertx.ext.unit.junit.RunTestOnContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.junit.After;
 import org.junit.Before;
@@ -33,6 +31,7 @@ import org.sfs.SfsVertxImpl;
 import org.sfs.TestSubscriber;
 import org.sfs.io.BufferReadStream;
 import org.sfs.io.BufferWriteEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.FileBackedBuffer;
 import org.sfs.thread.NamedCapacityFixedThreadPool;
 
@@ -43,6 +42,7 @@ import java.util.concurrent.ExecutorService;
 import static io.vertx.core.buffer.Buffer.buffer;
 import static java.lang.String.valueOf;
 import static java.lang.System.currentTimeMillis;
+import static java.lang.System.nanoTime;
 import static java.nio.file.Files.createTempDirectory;
 import static org.sfs.io.AsyncIO.pump;
 import static org.sfs.rx.Defer.aVoid;
@@ -95,10 +95,10 @@ public class FileBackedBufferTest {
         aVoid()
                 .flatMap(aVoid -> {
                     FileBackedBuffer fileBackedBuffer = new FileBackedBuffer(sfsVertx, 2, encrypt, tmpDir);
-                    ReadStream<Buffer> readStream = new BufferReadStream(testBuffer);
+                    BufferReadStream readStream = new BufferReadStream(testBuffer);
                     return pump(readStream, fileBackedBuffer)
                             .flatMap(aVoid1 -> {
-                                ReadStream<Buffer> fileBackedReadStream = fileBackedBuffer.readStream();
+                                EndableReadStream<Buffer> fileBackedReadStream = fileBackedBuffer.readStream();
                                 BufferWriteEndableWriteStream bufferedWriteStreamConsumer = new BufferWriteEndableWriteStream();
                                 return pump(fileBackedReadStream, bufferedWriteStreamConsumer)
                                         .doOnNext(aVoid2 -> {
@@ -127,7 +127,7 @@ public class FileBackedBufferTest {
     public void testLarge(TestContext context, boolean encrypt) throws IOException {
 
         SfsVertx sfsVertx = new SfsVertxImpl(rule.vertx(), backgroundPool, ioPool);
-        Path tmpDir = createTempDirectory(valueOf(currentTimeMillis()));
+        Path tmpDir = createTempDirectory(valueOf(currentTimeMillis()) + '-' + valueOf(nanoTime()));
 
         byte[] data = new byte[1024 * 1024 * 10];
         getCurrentInstance().nextBytesBlocking(data);
@@ -136,10 +136,10 @@ public class FileBackedBufferTest {
         aVoid()
                 .flatMap(aVoid -> {
                     FileBackedBuffer fileBackedBuffer = new FileBackedBuffer(sfsVertx, 1024, encrypt, tmpDir);
-                    ReadStream<Buffer> readStream = new BufferReadStream(testBuffer);
+                    BufferReadStream readStream = new BufferReadStream(testBuffer);
                     return pump(readStream, fileBackedBuffer)
                             .flatMap(aVoid1 -> {
-                                ReadStream<Buffer> fileBackedReadStream = fileBackedBuffer.readStream();
+                                EndableReadStream<Buffer> fileBackedReadStream = fileBackedBuffer.readStream();
                                 BufferWriteEndableWriteStream bufferedWriteStreamConsumer = new BufferWriteEndableWriteStream();
                                 return pump(fileBackedReadStream, bufferedWriteStreamConsumer)
                                         .doOnNext(aVoid2 -> {
@@ -174,10 +174,10 @@ public class FileBackedBufferTest {
         aVoid()
                 .flatMap(aVoid -> {
                     FileBackedBuffer fileBackedBuffer = new FileBackedBuffer(sfsVertx, 1024, encrypt, tmpDir);
-                    ReadStream<Buffer> readStream = new BufferReadStream(testBuffer);
+                    BufferReadStream readStream = new BufferReadStream(testBuffer);
                     return pump(readStream, fileBackedBuffer)
                             .flatMap(aVoid1 -> {
-                                ReadStream<Buffer> fileBackedReadStream = fileBackedBuffer.readStream();
+                                EndableReadStream<Buffer> fileBackedReadStream = fileBackedBuffer.readStream();
                                 BufferWriteEndableWriteStream bufferedWriteStreamConsumer = new BufferWriteEndableWriteStream();
                                 return pump(fileBackedReadStream, bufferedWriteStreamConsumer)
                                         .doOnNext(aVoid2 -> {

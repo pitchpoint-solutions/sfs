@@ -32,6 +32,11 @@ public class NoEndEndableWriteStream implements BufferEndableWriteStream {
     }
 
     @Override
+    public boolean isEnded() {
+        return delegate != null && delegate.isEnded();
+    }
+
+    @Override
     public NoEndEndableWriteStream write(Buffer data) {
         checkNotEnded();
         delegate.write(data);

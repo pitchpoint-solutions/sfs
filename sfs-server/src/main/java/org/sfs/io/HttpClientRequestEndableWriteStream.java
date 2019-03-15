@@ -36,6 +36,11 @@ public class HttpClientRequestEndableWriteStream implements BufferEndableWriteSt
     }
 
     @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
+    @Override
     public HttpClientRequestEndableWriteStream write(Buffer data) {
         checkNotEnded();
         httpClientRequest.write(data);

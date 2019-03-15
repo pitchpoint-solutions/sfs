@@ -23,6 +23,7 @@ import org.junit.Test;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.io.AsyncIO;
 import org.sfs.io.BufferWriteEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import rx.functions.Func1;
 
 import java.io.IOException;
@@ -39,7 +40,7 @@ public class AsyncIOTest extends BaseTestVerticle {
             AsyncFile asyncFile = vertx().fileSystem().openBlocking(tmpFile.toString(), new OpenOptions());
             final BufferWriteEndableWriteStream bufferWriteStream = new BufferWriteEndableWriteStream();
 
-            return AsyncIO.pump(asyncFile, bufferWriteStream)
+            return AsyncIO.pump(EndableReadStream.from(asyncFile), bufferWriteStream)
                     .map(new Func1<Void, Void>() {
                         @Override
                         public Void call(Void aVoid) {

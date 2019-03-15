@@ -19,7 +19,6 @@ package org.sfs.filesystem.containerdump;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
 import org.elasticsearch.search.SearchHit;
 import org.sfs.Server;
 import org.sfs.SfsVertx;
@@ -30,6 +29,7 @@ import org.sfs.encryption.AlgorithmDef;
 import org.sfs.filesystem.JournalFile;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.DeflateEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.EndableWriteStream;
 import org.sfs.io.FileBackedBuffer;
 import org.sfs.io.MultiEndableWriteStream;
@@ -106,6 +106,11 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
         this.persistentContainer = persistentContainer;
         this.containerId = persistentContainer.getId();
         this.tempFileDirectory = vertxContext.verticle().sfsFileSystem().tmpDirectory();
+    }
+
+    @Override
+    public boolean isEnded() {
+        return ended;
     }
 
     public DumpFileWriter enableDataEncryption(byte[] key) {
@@ -320,7 +325,7 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                                     headerBuilder.setCipherDataSalt(copyFrom(cipherDataSalt));
                                 }
                                 compressedDst = new DeflateEndableWriteStream(compressedDst);
-                                BufferEndableWriteStream writeStream = new MultiEndableWriteStream(compressedDst, uncompressedDst);
+                                BufferEndableWriteStream writeStream = new MultiEndableWriteStream(vertxContext.rxVertx(), compressedDst, uncompressedDst);
                                 return just(singletonList(transientVersion))
                                         .flatMap(new ReadSegments(vertxContext, writeStream, false))
                                         .map(new ToVoid<>())
@@ -334,11 +339,11 @@ public class DumpFileWriter implements EndableWriteStream<SearchHit> {
                                             if (compressedFileBackedBuffer.length() < uncompressedFileBackedBuffer.length()) {
                                                 headerBuilder.setDataCompressionType(DEFLATE);
                                                 byte[] marshaledMetadata = headerBuilder.build().toByteArray();
-                                                ReadStream<Buffer> readStream = compressedFileBackedBuffer.readStream();
+                                                EndableReadStream<Buffer> readStream = compressedFileBackedBuffer.readStream();
                                                 return dumpFile.append(vertx, buffer(marshaledMetadata), compressedFileBackedBuffer.length(), readStream);
                                             } else {
                                                 byte[] marshaledMetadata = headerBuilder.build().toByteArray();
-                                                ReadStream<Buffer> readStream = uncompressedFileBackedBuffer.readStream();
+                                                EndableReadStream<Buffer> readStream = uncompressedFileBackedBuffer.readStream();
                                                 return dumpFile.append(vertx, buffer(marshaledMetadata), uncompressedFileBackedBuffer.length(), readStream);
                                             }
                                         })

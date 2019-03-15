@@ -44,6 +44,11 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
         this.readStream.connect(this);
     }
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
     public PipedReadStream readStream() {
         return readStream;
     }
@@ -110,6 +115,7 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
         checkState(!ended, "Already Ended");
         ended = true;
         write0(buffer);
+        handleEnd();
     }
 
     @Override
@@ -117,6 +123,7 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
         checkState(!ended, "Already Ended");
         ended = true;
         readStream.drainWriteStream();
+        handleEnd();
     }
 
     protected Buffer poll() {
@@ -132,7 +139,7 @@ public class PipedEndableWriteStream implements BufferEndableWriteStream {
     protected void handleEnd() {
         if (ended) {
             Handler<Void> handler = endHandler;
-            if (handler != null) {
+            if (handler != null && writeQueueEmpty()) {
                 endHandler = null;
                 handler.handle(null);
             }

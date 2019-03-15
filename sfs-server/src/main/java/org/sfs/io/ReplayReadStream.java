@@ -23,7 +23,7 @@ import io.vertx.core.streams.ReadStream;
 
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 
-public class ReplayReadStream implements ReadStream<Buffer> {
+public class ReplayReadStream implements EndableReadStream<Buffer> {
 
     private static final Logger log = getLogger(ReplayReadStream.class);
     private Buffer buffer;
@@ -38,6 +38,11 @@ public class ReplayReadStream implements ReadStream<Buffer> {
     public ReplayReadStream(Buffer buffer, long replay) {
         this.buffer = buffer;
         this.replay = replay;
+    }
+
+    @Override
+    public boolean isEnded() {
+        return replayCount >= replay;
     }
 
     public int length() {
@@ -73,6 +78,11 @@ public class ReplayReadStream implements ReadStream<Buffer> {
                 handleData(buffer);
             }
         }
+        return this;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
         return this;
     }
 

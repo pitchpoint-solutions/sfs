@@ -42,6 +42,11 @@ public class InflaterEndableWriteStream implements BufferEndableWriteStream {
     }
 
     @Override
+    public boolean isEnded() {
+        return delegate != null && delegate.isEnded();
+    }
+
+    @Override
     public InflaterEndableWriteStream drainHandler(Handler<Void> handler) {
         checkNotEnded();
         delegate.drainHandler(handler);

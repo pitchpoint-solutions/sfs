@@ -24,4 +24,6 @@ public interface EndableWriteStream<T> extends WriteStream<T> {
 
     EndableWriteStream<T> endHandler(Handler<Void> endHandler);
 
+    boolean isEnded();
+
 }

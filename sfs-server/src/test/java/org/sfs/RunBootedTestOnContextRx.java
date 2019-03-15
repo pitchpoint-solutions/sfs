@@ -132,7 +132,7 @@ public class RunBootedTestOnContextRx extends RunTestOnContextRx {
                     throw new RuntimeException(e);
                 }
 
-                esHost = "127.0.0.1:9300";
+                esHost = "localhost:9300";
                 esClusterName = "elasticsearch";
                 esNodeName = format("test-server-node-%s", clusteruuid);
 
@@ -156,7 +156,7 @@ public class RunBootedTestOnContextRx extends RunTestOnContextRx {
 
                 if (!verticleConfig.containsKey("http.listen.addresses")) {
                     int freePort = findFreePort(6677, 7777);
-                    verticleConfig.put("http.listen.addresses", new JsonArray().add(HostAndPort.fromParts("127.0.0.1", freePort).toString()));
+                    verticleConfig.put("http.listen.addresses", new JsonArray().add(HostAndPort.fromParts("localhost", freePort).toString()));
                 }
 
                 hostAndPort = HostAndPort.fromString(verticleConfig.getJsonArray("http.listen.addresses").getString(0));

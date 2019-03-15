@@ -16,16 +16,16 @@
 
 package org.sfs.io;
 
-import io.vertx.core.Context;
+import com.google.common.io.BaseEncoding;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
 import io.vertx.core.streams.WriteStream;
 import org.sfs.SfsVertx;
 import org.sfs.encryption.Algorithm;
 import org.sfs.encryption.AlgorithmDef;
 import org.sfs.rx.RxHelper;
+import org.sfs.util.PrngRandom;
 import rx.Observable;
 
 import java.io.IOException;
@@ -40,8 +40,8 @@ import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.nio.channels.AsynchronousFileChannel.open;
-import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.deleteIfExists;
+import static java.nio.file.StandardOpenOption.CREATE_NEW;
 import static java.nio.file.StandardOpenOption.READ;
 import static java.nio.file.StandardOpenOption.WRITE;
 import static java.util.Arrays.fill;
@@ -84,6 +84,11 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
         this(sfsVertx, fileThreshold, true, tempFileDirectory);
     }
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
     public boolean isFileOpen() {
         return fileOpen;
     }
@@ -92,7 +97,7 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
         return size;
     }
 
-    public ReadStream<Buffer> readStream() {
+    public EndableReadStream<Buffer> readStream() {
         checkReadStreamNotOpen();
         openedReadStream = true;
         if (fileOpen) {
@@ -257,13 +262,17 @@ public class FileBackedBuffer implements BufferEndableWriteStream {
                     Set<StandardOpenOption> options = new HashSet<>();
                     options.add(READ);
                     options.add(WRITE);
-                    tempFile = createTempFile(tempFileDirectory, "FileBackedBufferWriteStreamConsumer", "");
+                    options.add(CREATE_NEW);
+                    byte[] random = new byte[8];
+                    PrngRandom.getCurrentInstance().nextBytesBlocking(random);
+                    tempFile = tempFileDirectory.resolve("FileBackedBufferWriteStreamConsumer-" + System.currentTimeMillis() + '-' + BaseEncoding.base32Hex().encode(random));
                     channel =
                             open(
                                     tempFile,
                                     options,
                                     sfsVertx.getIoPool());
                 } catch (IOException e) {
+                    LOGGER.error("Throwing error", e);
                     throw new RuntimeException(e);
                 }
                 WriteQueueSupport<AsyncFileWriter> writeQueueSupport = new WriteQueueSupport<>(MAX_WRITES);

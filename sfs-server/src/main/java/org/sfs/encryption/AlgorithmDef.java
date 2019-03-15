@@ -16,9 +16,9 @@
 
 package org.sfs.encryption;
 
-import io.vertx.core.Vertx;
 import org.sfs.SfsVertx;
 import org.sfs.encryption.impl.SAES256v01;
+import org.sfs.encryption.impl.SAES256v02;
 import org.sfs.rx.RxHelper;
 import org.sfs.util.PrngRandom;
 import rx.Observable;
@@ -43,6 +43,24 @@ public enum AlgorithmDef {
             PrngRandom.getCurrentInstance().nextBytesBlocking(key);
             return key;
         }
+    }, SALTED_AES256_V02("SAES256v02") {
+        @Override
+        public Algorithm create(byte[] secret, byte[] salt) {
+            return new SAES256v02(secret, salt);
+        }
+
+        @Override
+        public byte[] generateKeyBlocking() {
+            byte[] key = new byte[SAES256v02.KEY_SIZE_BYTES];
+            PrngRandom.getCurrentInstance().nextBytesBlocking(key);
+            return key;
+        }
+
+        public byte[] generateSaltBlocking() {
+            byte[] key = new byte[SAES256v02.NONCE_SIZE_BYTES];
+            PrngRandom.getCurrentInstance().nextBytesBlocking(key);
+            return key;
+        }
     };
 
     private final String algorithmName;
@@ -56,7 +74,7 @@ public enum AlgorithmDef {
     }
 
     public static AlgorithmDef getPreferred() {
-        return SALTED_AES256_V01;
+        return SALTED_AES256_V02;
     }
 
     /**
@@ -82,7 +100,7 @@ public enum AlgorithmDef {
     }
 
     public Observable<byte[]> generateSalt(SfsVertx vertx) {
-        return RxHelper.executeBlocking(vertx.getOrCreateContext(), vertx.getBackgroundPool(),this::generateSaltBlocking);
+        return RxHelper.executeBlocking(vertx.getOrCreateContext(), vertx.getBackgroundPool(), this::generateSaltBlocking);
     }
 
     public static AlgorithmDef fromNameIfExists(String name) {

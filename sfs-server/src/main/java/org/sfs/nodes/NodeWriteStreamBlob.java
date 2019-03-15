@@ -17,8 +17,8 @@
 package org.sfs.nodes;
 
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.streams.ReadStream;
 import org.sfs.filesystem.volume.DigestBlob;
+import org.sfs.io.EndableReadStream;
 import rx.Observable;
 
 public abstract class NodeWriteStreamBlob {
@@ -33,5 +33,5 @@ public abstract class NodeWriteStreamBlob {
         return node;
     }
 
-    public abstract Observable<DigestBlob> consume(ReadStream<Buffer> src);
+    public abstract Observable<DigestBlob> consume(EndableReadStream<Buffer> src);
 }

@@ -130,7 +130,7 @@ public class VolumeManager {
 
     protected Observable<Volume> newVolume0(VertxContext<Server> vertxContext, final int offset) {
         SfsVertx sfsVertx = vertxContext.vertx();
-        return defer(() -> { ;
+        return defer(() -> {
             final Path path = Paths.get(basePath.toString(), valueOf(volumeMap.size() + offset));
             AtomicBoolean exists = new AtomicBoolean(false);
             return RxHelper.executeBlocking(sfsVertx.getOrCreateContext(), sfsVertx.getBackgroundPool(),

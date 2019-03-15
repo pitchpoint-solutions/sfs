@@ -21,7 +21,6 @@ import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
-import io.vertx.ext.unit.junit.RunTestOnContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.junit.After;
 import org.junit.Before;
@@ -37,6 +36,7 @@ import org.sfs.io.AsyncFileWriterImpl;
 import org.sfs.io.AsyncIO;
 import org.sfs.io.MultiEndableWriteStream;
 import org.sfs.io.WriteQueueSupport;
+import org.sfs.rx.RxVertx;
 import org.sfs.rx.ToVoid;
 import org.sfs.thread.NamedCapacityFixedThreadPool;
 import rx.Observable;
@@ -116,7 +116,8 @@ public class MultiWriteStreamTest {
                         AsyncFileWriterImpl w2 = new AsyncFileWriterImpl(0, q2, sfsVertx.getOrCreateContext(), aout2, LOGGER);
                         AsyncFileWriterImpl w3 = new AsyncFileWriterImpl(0, q3, sfsVertx.getOrCreateContext(), aout3, LOGGER);
                         LOGGER.debug("Start Attempt " + integer + ", w1=" + w1 + ", w2=" + w2 + ", w3=" + w3);
-                        MultiEndableWriteStream multiWriteStreamConsumer = new MultiEndableWriteStream(w1, w2, w3);
+                        RxVertx rxVertx = new RxVertx(sfsVertx);
+                        MultiEndableWriteStream multiWriteStreamConsumer = new MultiEndableWriteStream(rxVertx, w1, w2, w3);
                         return AsyncIO.pump(r1, multiWriteStreamConsumer)
                                 .doOnNext(aVoid1 -> {
                                     try {

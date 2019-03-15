@@ -18,6 +18,7 @@ package org.sfs.filesystem.volume;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.streams.ReadStream;
+import org.sfs.io.EndableReadStream;
 import rx.Observable;
 
 public abstract class WriteStreamBlob extends HeaderBlob {
@@ -30,5 +31,5 @@ public abstract class WriteStreamBlob extends HeaderBlob {
         super(headerBlob);
     }
 
-    public abstract Observable<Void> consume(ReadStream<Buffer> src);
+    public abstract Observable<Void> consume(EndableReadStream<Buffer> src);
 }

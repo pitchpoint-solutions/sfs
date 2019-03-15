@@ -61,9 +61,6 @@ public class PostObject implements Handler<SfsRequest> {
 
     @Override
     public void handle(final SfsRequest httpServerRequest) {
-        httpServerRequest.pause();
-
-
         VertxContext<Server> vertxContext = httpServerRequest.vertxContext();
 
         aVoid()

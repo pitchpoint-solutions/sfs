@@ -24,7 +24,6 @@ import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.json.JsonObject;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.elasticsearch.action.get.GetRequestBuilder;
 import org.elasticsearch.action.get.GetResponse;
@@ -51,6 +50,7 @@ import org.sfs.integration.java.func.RefreshIndex;
 import org.sfs.integration.java.func.VerifyRepairAllContainersExecute;
 import org.sfs.io.CountingEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.jobs.VerifyRepairAllContainerObjects;
 import org.sfs.rx.BufferToJsonObject;
@@ -298,19 +298,19 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
             final AsyncFile bigFile3 = vertx().fileSystem().openBlocking(tempFile3.toString(), new OpenOptions());
 
             return prepareContainer(context)
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/0", authNonAdmin, bigFile1)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/0", authNonAdmin, EndableReadStream.from(bigFile1))
                             .setHeader(CONTENT_LENGTH, valueOf(size1))
                             .setHeader(ETAG, base16().lowerCase().encode(md51))
                             .setHeader(X_CONTENT_SHA512, BaseEncoding.base64().encode(sha5121))
                             .setHeader(X_SERVER_SIDE_ENCRYPTION, "true"))
                     .map(new ToVoid<HttpClientResponse>())
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/1", authNonAdmin, bigFile2)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/1", authNonAdmin, EndableReadStream.from(bigFile2))
                             .setHeader(CONTENT_LENGTH, valueOf(size2))
                             .setHeader(ETAG, base16().lowerCase().encode(md52))
                             .setHeader(X_CONTENT_SHA512, BaseEncoding.base64().encode(sha5122))
                             .setHeader(X_SERVER_SIDE_ENCRYPTION, "true"))
                     .map(new ToVoid<HttpClientResponse>())
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/3", authNonAdmin, bigFile3)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/3", authNonAdmin, EndableReadStream.from(bigFile3))
                             .setHeader(CONTENT_LENGTH, valueOf(size3))
                             .setHeader(ETAG, base16().lowerCase().encode(md53))
                             .setHeader(X_CONTENT_SHA512, BaseEncoding.base64().encode(sha5123))
@@ -330,7 +330,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
                         public Observable<HttpClientResponse> call(final HttpClientResponse httpClientResponse) {
                             final DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512, MD5);
                             final CountingEndableWriteStream countingWriteStream = new CountingEndableWriteStream(digestWriteStream);
-                            return pump(httpClientResponse, countingWriteStream)
+                            return pump(EndableReadStream.from(httpClientResponse), countingWriteStream)
                                     .map(new Func1<Void, HttpClientResponse>() {
                                         @Override
                                         public HttpClientResponse call(Void aVoid) {
@@ -421,17 +421,17 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
             final AsyncFile bigFile3 = vertx().fileSystem().openBlocking(tempFile3.toString(), new OpenOptions());
 
             return prepareContainer(context)
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/0", authNonAdmin, bigFile1)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/0", authNonAdmin, EndableReadStream.from(bigFile1))
                             .setHeader(CONTENT_LENGTH, valueOf(size1))
                             .setHeader(X_CONTENT_SHA512, BaseEncoding.base64().encode(sha5121))
                             .setHeader(ETAG, base16().lowerCase().encode(md51)))
                     .map(new ToVoid<HttpClientResponse>())
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/1", authNonAdmin, bigFile2)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/1", authNonAdmin, EndableReadStream.from(bigFile2))
                             .setHeader(CONTENT_LENGTH, valueOf(size2))
                             .setHeader(X_CONTENT_SHA512, BaseEncoding.base64().encode(sha5122))
                             .setHeader(ETAG, base16().lowerCase().encode(md52)))
                     .map(new ToVoid<HttpClientResponse>())
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/3", authNonAdmin, bigFile3)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName + "/segments/3", authNonAdmin, EndableReadStream.from(bigFile3))
                             .setHeader(CONTENT_LENGTH, valueOf(size3))
                             .setHeader(X_CONTENT_SHA512, BaseEncoding.base64().encode(sha5123))
                             .setHeader(ETAG, base16().lowerCase().encode(md53)))
@@ -457,7 +457,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
                         public Observable<HttpClientResponse> call(final HttpClientResponse httpClientResponse) {
                             final DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512, MD5);
                             final CountingEndableWriteStream countingWriteStream = new CountingEndableWriteStream(digestWriteStream);
-                            return pump(httpClientResponse, countingWriteStream)
+                            return pump(EndableReadStream.from(httpClientResponse), countingWriteStream)
                                     .map(new Func1<Void, HttpClientResponse>() {
                                         @Override
                                         public HttpClientResponse call(Void aVoid) {
@@ -498,7 +498,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
             return prepareContainer(context)
 
                     // put an object then get/head the object
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName, authNonAdmin, bigFile)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName, authNonAdmin, EndableReadStream.from(bigFile))
                             .setHeader(CONTENT_LENGTH, valueOf(size))
                             .setHeader(ETAG, base16().lowerCase().encode(md5)))
                     .map(new HttpClientResponseHeaderLogger())
@@ -513,7 +513,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
                         @Override
                         public Observable<HttpClientResponse> call(final HttpClientResponse httpClientResponse) {
                             final DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512, MD5);
-                            return pump(httpClientResponse, digestWriteStream)
+                            return pump(EndableReadStream.from(httpClientResponse), digestWriteStream)
                                     .map(new Func1<Void, HttpClientResponse>() {
                                         @Override
                                         public HttpClientResponse call(Void aVoid) {
@@ -552,7 +552,7 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
 
             return prepareContainer(context)
                     // put an object then get/head the object
-                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName, authNonAdmin, bigFile)
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName, authNonAdmin, EndableReadStream.from(bigFile))
                             .setHeader(CONTENT_LENGTH, valueOf(size))
                             .setHeader(ETAG, base16().lowerCase().encode(md5))
                             .setHeader(X_SERVER_SIDE_ENCRYPTION, "true"))
@@ -568,7 +568,63 @@ public class CreateUpdateDeleteObjectTest extends BaseTestVerticle {
                         @Override
                         public Observable<HttpClientResponse> call(final HttpClientResponse httpClientResponse) {
                             final DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512, MD5);
-                            return pump(httpClientResponse, digestWriteStream)
+                            return pump(EndableReadStream.from(httpClientResponse), digestWriteStream)
+                                    .map(new Func1<Void, HttpClientResponse>() {
+                                        @Override
+                                        public HttpClientResponse call(Void aVoid) {
+                                            assertArrayEquals(context, md5, digestWriteStream.getDigest(MD5).get());
+                                            assertArrayEquals(context, sha512, digestWriteStream.getDigest(SHA512).get());
+                                            return httpClientResponse;
+                                        }
+                                    });
+                        }
+                    })
+                    .map(new ToVoid<HttpClientResponse>());
+        });
+    }
+
+    @Test
+    public void testEncryptedLargeUpload100Continue(TestContext context) throws IOException {
+        runOnServerContext(context, () -> {
+            byte[] data = new byte[256];
+            getCurrentInstance().nextBytesBlocking(data);
+            int dataSize = 256 * 1024;
+
+            Path tempFile = createTempFile(tmpDir(), "", "");
+
+            int bytesWritten = 0;
+            try (OutputStream out = newOutputStream(tempFile)) {
+                while (bytesWritten < dataSize) {
+                    out.write(data);
+                    bytesWritten += data.length;
+                }
+            }
+
+            long size = size(tempFile);
+            final byte[] md5 = hash(tempFile.toFile(), md5()).asBytes();
+            final byte[] sha512 = hash(tempFile.toFile(), sha512()).asBytes();
+            final AsyncFile bigFile = vertx().fileSystem().openBlocking(tempFile.toString(), new OpenOptions());
+
+            return prepareContainer(context)
+                    // put an object then get/head the object
+                    .flatMap(new PutObjectStream(httpClient(), accountName, containerName, objectName, authNonAdmin, EndableReadStream.from(bigFile))
+                            .setHeader(CONTENT_LENGTH, valueOf(size))
+                            .setHeader(ETAG, base16().lowerCase().encode(md5))
+                            .setHeader(X_SERVER_SIDE_ENCRYPTION, "true")
+                            .setContinueHandling(true))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_CREATED))
+                    .map(new AssertObjectHeaders(context, 0, true, 0, md5, sha512, 0))
+                    .map(new ToVoid<HttpClientResponse>())
+                    .flatMap(new GetObject(httpClient(), accountName, containerName, objectName, authNonAdmin))
+                    .map(new HttpClientResponseHeaderLogger())
+                    .map(new AssertHttpClientResponseStatusCode(context, HTTP_OK))
+                    .map(new AssertObjectHeaders(context, 0, true, size, md5, sha512, 1))
+                    .flatMap(new Func1<HttpClientResponse, Observable<HttpClientResponse>>() {
+                        @Override
+                        public Observable<HttpClientResponse> call(final HttpClientResponse httpClientResponse) {
+                            final DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512, MD5);
+                            return pump(EndableReadStream.from(httpClientResponse), digestWriteStream)
                                     .map(new Func1<Void, HttpClientResponse>() {
                                         @Override
                                         public HttpClientResponse call(Void aVoid) {

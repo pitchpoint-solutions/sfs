@@ -36,6 +36,11 @@ public class BufferedEndableWriteStream implements BufferEndableWriteStream {
     }
 
     @Override
+    public boolean isEnded() {
+        return delegate != null && delegate.isEnded();
+    }
+
+    @Override
     public BufferedEndableWriteStream exceptionHandler(Handler<Throwable> handler) {
         delegate.exceptionHandler(handler);
         return this;
@@ -43,13 +48,11 @@ public class BufferedEndableWriteStream implements BufferEndableWriteStream {
 
     @Override
     public BufferedEndableWriteStream write(Buffer data) {
-        if (buffer.length() + data.length() >= size) {
+        buffer.appendBuffer(data);
+        if (buffer.length() >= size) {
             Buffer b = buffer;
             buffer = Buffer.buffer(size);
             delegate.write(b);
-            delegate.write(data);
-        } else {
-            buffer.appendBuffer(data);
         }
         return this;
     }

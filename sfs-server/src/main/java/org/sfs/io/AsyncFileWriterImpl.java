@@ -25,7 +25,6 @@ import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import org.sfs.SfsVertx;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
@@ -40,9 +39,10 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
     private final Context context;
 
     private Handler<Throwable> exceptionHandler;
-    private Handler<Void> endHandler;
 
     private WriteQueueSupport<AsyncFileWriter> writeQueueSupport;
+
+    private Handler<Void> endHandler;
 
     private long startPosition;
     private long writePos;
@@ -64,9 +64,14 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
     }
 
     @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
+    @Override
     public AsyncFileWriterImpl endHandler(Handler<Void> endHandler) {
+        checkNotEnded();
         this.endHandler = endHandler;
-        handleEnd();
         return this;
     }
 
@@ -76,10 +81,10 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
         ended = true;
         int length = buffer.length();
         doWrite(buffer, writePos, event -> {
-            if (event.succeeded()) {
-                handleEnd();
-            } else {
+            if (event.failed()) {
                 handleException(event.cause());
+            } else {
+                handleEnd();
             }
         });
         writePos += length;
@@ -113,10 +118,10 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
         checkNotEnded();
         int length = buffer.length();
         doWrite(buffer, writePos, event -> {
-            if (event.succeeded()) {
-                handleEnd();
-            } else {
+            if (event.failed()) {
                 handleException(event.cause());
+            } else {
+                handleEnd();
             }
         });
         writePos += length;
@@ -175,7 +180,7 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
             handler.handle(Future.succeededFuture());
         } else {
             incrementWritesOutstanding(toWrite);
-            writeInternal(buff, position, handler);
+            writeInternal(buff, position, handler::handle);
         }
     }
 
@@ -230,8 +235,8 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
 
     private void handleEnd() {
         if (ended) {
-            if (endHandler != null) {
-                Handler<Void> h = endHandler;
+            Handler<Void> h = endHandler;
+            if (h != null) {
                 endHandler = null;
                 writeQueueSupport.emptyHandler(this, context, h);
             }
@@ -261,17 +266,17 @@ public class AsyncFileWriterImpl implements AsyncFileWriter {
                 }
 
                 public void failed(Throwable exc, Object attachment) {
-                    removeWritesOutstandingCounter();
-                    if (exc instanceof Exception) {
-                        context.runOnContext((v) -> handler.handle(Future.succeededFuture()));
-                    } else {
-                        log.error("Error occurred", exc);
-                    }
+                    context.runOnContext(v -> {
+                        removeWritesOutstandingCounter();
+                        handler.handle(Future.failedFuture(exc));
+                    });
                 }
             });
         } catch (RuntimeException e) {
-            removeWritesOutstandingCounter();
-            throw e;
+            context.runOnContext(v -> {
+                removeWritesOutstandingCounter();
+                handler.handle(Future.failedFuture(e));
+            });
         }
     }
 }

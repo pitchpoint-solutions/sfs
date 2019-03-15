@@ -48,6 +48,7 @@ import io.vertx.core.spi.VerticleFactory;
 
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 public class SfsVertxImpl implements SfsVertx {
@@ -341,5 +342,10 @@ public class SfsVertxImpl implements SfsVertx {
     @Override
     public boolean isMetricsEnabled() {
         return vertx.isMetricsEnabled();
+    }
+
+    @Override
+    public WorkerExecutor createSharedWorkerExecutor(String name, int poolSize, long maxExecuteTime, TimeUnit maxExecuteTimeUnit) {
+        return vertx.createSharedWorkerExecutor(name, poolSize, maxExecuteTime, maxExecuteTimeUnit);
     }
 }

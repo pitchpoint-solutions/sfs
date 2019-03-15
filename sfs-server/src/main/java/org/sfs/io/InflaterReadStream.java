@@ -28,10 +28,10 @@ import java.util.zip.InflaterOutputStream;
 import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 
-public class InflaterReadStream implements ReadStream<Buffer> {
+public class InflaterReadStream implements EndableReadStream<Buffer> {
 
     private static final Logger LOGGER = getLogger(InflaterReadStream.class);
-    private final ReadStream<Buffer> delegate;
+    private final EndableReadStream<Buffer> delegate;
     private Handler<Void> delegateEndHandler;
     private Handler<Throwable> delegateExceptionHandler;
     private Handler<Buffer> delegateDataHandler;
@@ -42,7 +42,7 @@ public class InflaterReadStream implements ReadStream<Buffer> {
     private Handler<Void> endHandler;
 
 
-    public InflaterReadStream(ReadStream<Buffer> delegate) {
+    public InflaterReadStream(EndableReadStream<Buffer> delegate) {
         this.delegate = delegate;
 
         this.endHandler = event -> {
@@ -78,6 +78,11 @@ public class InflaterReadStream implements ReadStream<Buffer> {
     }
 
     @Override
+    public boolean isEnded() {
+        return delegate.isEnded();
+    }
+
+    @Override
     public InflaterReadStream endHandler(Handler<Void> endHandler) {
         this.delegateEndHandler = endHandler;
         if (endHandler != null) {
@@ -108,6 +113,11 @@ public class InflaterReadStream implements ReadStream<Buffer> {
     @Override
     public InflaterReadStream resume() {
         delegate.resume();
+        return this;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
         return this;
     }
 

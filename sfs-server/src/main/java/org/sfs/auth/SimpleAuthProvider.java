@@ -148,8 +148,8 @@ public class SimpleAuthProvider implements AuthProvider {
                 .map(new HttpBodyLogger())
                 .map(new BufferToJsonObject())
                 .map(jsonObject -> {
-                    JsonObject authJsonObject = jsonObject.getJsonObject("auth");
-                    JsonObject passwordCredentialsJson = authJsonObject.getJsonObject("passwordCredentials");
+                    JsonObject authJsonObject = jsonObject.getJsonObject("auth", new JsonObject());
+                    JsonObject passwordCredentialsJson = authJsonObject.getJsonObject("passwordCredentials", new JsonObject());
                     String username = passwordCredentialsJson.getString("username");
                     String password = passwordCredentialsJson.getString("password");
                     String tenantName = authJsonObject.getString("tenantName");

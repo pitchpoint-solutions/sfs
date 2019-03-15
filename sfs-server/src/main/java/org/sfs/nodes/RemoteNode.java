@@ -26,13 +26,13 @@ import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.filesystem.volume.HeaderBlob;
 import org.sfs.filesystem.volume.ReadStreamBlob;
 import org.sfs.io.BufferEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.HttpClientRequestEndableWriteStream;
 import org.sfs.rx.BufferToJsonObject;
 import org.sfs.rx.Defer;
@@ -42,6 +42,7 @@ import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import org.sfs.util.HttpClientRequestAndResponse;
 import org.sfs.util.MessageDigestFactory;
+import org.sfs.util.SfsHttpHeaders;
 import org.sfs.vo.TransientServiceDef;
 import rx.Observable;
 
@@ -51,10 +52,8 @@ import static com.google.common.base.Optional.absent;
 import static com.google.common.base.Optional.of;
 import static com.google.common.io.BaseEncoding.base64;
 import static com.google.common.net.UrlEscapers.urlFragmentEscaper;
-import static io.vertx.core.http.HttpHeaders.CONTENT_LENGTH;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.String.format;
-import static java.lang.String.valueOf;
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_NOT_MODIFIED;
 import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
@@ -410,7 +409,7 @@ public class RemoteNode extends AbstractNode {
                         ReadStreamBlob readStreamBlob = new ReadStreamBlob(httpClientResponse) {
                             @Override
                             public Observable<Void> produce(BufferEndableWriteStream endableWriteStream) {
-                                return pump(httpClientResponse, endableWriteStream);
+                                return pump(EndableReadStream.from(httpClientResponse), endableWriteStream);
                             }
                         };
                         return just(of(readStreamBlob));
@@ -557,7 +556,6 @@ public class RemoteNode extends AbstractNode {
                                     if (LOGGER.isDebugEnabled()) {
                                         LOGGER.debug("createWriteStream " + url);
                                     }
-                                    LOGGER.debug("Current Thread 3 is {}, http client is {}", Thread.currentThread(), httpClient);
 
                                     ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
 
@@ -568,12 +566,15 @@ public class RemoteNode extends AbstractNode {
                                                         handler.complete(httpClientResponse);
                                                     })
                                                     .exceptionHandler(handler::fail)
+                                                    .putHeader(SfsHttpHeaders.X_CONTENT_LENGTH, String.valueOf(length))
                                                     .putHeader(X_SFS_REMOTE_NODE_TOKEN, remoteNodeSecret)
-                                                    .putHeader(CONTENT_LENGTH, valueOf(length))
-                                                    .setTimeout(responseTimeout);
+                                                    .setTimeout(responseTimeout)
+                                                    .setChunked(true);
                                     httpClientRequest.sendHead();
 
-                                    return handler.map(httpClientResponse -> new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse));
+                                    return handler.map(httpClientResponse -> {
+                                        return new HttpClientRequestAndResponse(httpClientRequest, httpClientResponse);
+                                    });
                                 }))
                 .map(httpClientRequestAndResponse -> {
                     HttpClientRequest httpClientRequest = httpClientRequestAndResponse.getRequest();
@@ -601,7 +602,7 @@ public class RemoteNode extends AbstractNode {
 
                     NodeWriteStreamBlob writeStreamBlob = new NodeWriteStreamBlob(_this) {
                         @Override
-                        public Observable<DigestBlob> consume(ReadStream<Buffer> src) {
+                        public Observable<DigestBlob> consume(EndableReadStream<Buffer> src) {
 
                             return combineSinglesDelayError(
                                     pump(src, new HttpClientRequestEndableWriteStream(httpClientRequest)),

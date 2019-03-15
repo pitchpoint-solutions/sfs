@@ -31,6 +31,7 @@ import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
+import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
@@ -606,7 +607,6 @@ public class SfsSingletonServer extends Server implements Shareable {
         HttpServerOptions httpServerOptions = new HttpServerOptions()
                 .setMaxHeaderSize(httpServerMaxHeaderSize)
                 .setCompressionSupported(false)
-                .setUsePooledBuffers(true)
                 .setAcceptBacklog(10000)
                 .setReuseAddress(true)
                 .setIdleTimeout(httpServerIdleConnectionTimeout)
@@ -622,7 +622,6 @@ public class SfsSingletonServer extends Server implements Shareable {
                 .setConnectTimeout(remoteNodeConnectTimeout)
                 .setMaxPoolSize(remoteNodeMaxPoolSize)
                 .setKeepAlive(true)
-                .setUsePooledBuffers(true)
                 .setPipelining(false)
                 .setMaxWaitQueueSize(200)
                 .setReuseAddress(true)
@@ -638,6 +637,13 @@ public class SfsSingletonServer extends Server implements Shareable {
         Vertx vertx = vertxContext.vertx();
 
         Router router = Router.router(vertx);
+        router.routeWithRegex("\\/sfs\\/(.*)").handler(routingContext -> {
+            // this is here if you decide to run with a context root and a proxy won't
+            // remove the context root
+            routingContext.request().headers().add("X-Context-Root", "sfs");
+            String noContextRoutePath = routingContext.request().getParam("param0");
+            routingContext.reroute("/" + noContextRoutePath);
+        });
 
         router.get("/admin/001/healthcheck").handler(httpServerRequest -> httpServerRequest
                 .response()
@@ -760,7 +766,14 @@ public class SfsSingletonServer extends Server implements Shareable {
 
         @Override
         public void handle(RoutingContext routingContext) {
-            routingContext.addBodyEndHandler(event -> routingContext.request().resume());
+            routingContext.addBodyEndHandler(event -> {
+                HttpServerRequest request = routingContext.request();
+                try {
+                    request.resume();
+                } catch (Throwable e) {
+                    // do nothing
+                }
+            });
             SfsRequest sfsRequest = new SfsRequest(vertxContext, routingContext.request());
             delegate.handle(sfsRequest);
         }

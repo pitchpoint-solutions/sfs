@@ -81,7 +81,6 @@ import static com.google.common.io.BaseEncoding.base64;
 import static com.google.common.primitives.Longs.tryParse;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Boolean.TRUE;
-import static java.lang.Long.parseLong;
 import static java.lang.String.format;
 import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
 import static java.net.HttpURLConnection.HTTP_INTERNAL_ERROR;
@@ -245,7 +244,7 @@ public class ImportContainer implements Handler<SfsRequest> {
                                     if (skipPositions.contains(entry.getHeaderPosition())) {
                                         return just(true);
                                     }
-                                    return entry.getMetadata(sfsVertx)
+                                    Observable<Boolean> oImport = entry.getMetadata(sfsVertx)
                                             .flatMap(buffer -> {
                                                 try {
                                                     Header header = Header.parseFrom(buffer.getBytes());
@@ -291,7 +290,9 @@ public class ImportContainer implements Handler<SfsRequest> {
                                                     String targetObjectId = targetObjectPath.objectPath().get();
                                                     String targetAccountName = targetObjectPath.accountName().get();
                                                     String targetContainerName = targetObjectPath.containerName().get();
-
+                                                    if (LOGGER.isDebugEnabled()) {
+                                                        LOGGER.debug("Importing object {}", exportObject.toString());
+                                                    }
                                                     return just(targetObjectId)
                                                             .flatMap(new LoadObject(vertxContext, targetPersistentContainer))
                                                             .map(oPersistentObject -> {
@@ -328,7 +329,10 @@ public class ImportContainer implements Handler<SfsRequest> {
                                                                                                 .flatMap(new WriteNewSegment(vertxContext, pipedReadStream));
                                                                                 return combineSinglesDelayError(oProducer, oConsumer, (aVoid1, transientSegment) -> transientSegment);
                                                                             })
-                                                                            .map(transientSegment -> transientSegment.getParent());
+                                                                            .map(transientSegment -> transientSegment.getParent())
+                                                                            .doOnNext(xVersion -> {
+                                                                                LOGGER.debug("Finished Segment Write for {}", xVersion.getParent().getId());
+                                                                            });
                                                                 } else {
                                                                     return just(transientVersion);
                                                                 }
@@ -376,6 +380,7 @@ public class ImportContainer implements Handler<SfsRequest> {
                                                 }
                                             })
                                             .onErrorResumeNext(throwable -> error(new IgnorePositionRuntimeException(throwable, entry.getHeaderPosition())));
+                                    return RxHelper.onErrorResumeNextExponential(100, 5, () -> oImport);
                                 });
                             })
                             .doOnNext(aVoid -> LOGGER.info("Done importing into container " + targetPersistentContainer.getId() + " from " + importDirectory))

@@ -23,15 +23,20 @@ import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.streams.ReadStream;
 
-public class LimitedReadStream implements ReadStream<Buffer> {
+public class LimitedReadStream implements EndableReadStream<Buffer> {
 
-    private final ReadStream<Buffer> delegate;
+    private final EndableReadStream<Buffer> delegate;
     private final long length;
     private long bytesRead = 0;
 
-    public LimitedReadStream(ReadStream<Buffer> delegate, long length) {
+    public LimitedReadStream(EndableReadStream<Buffer> delegate, long length) {
         this.delegate = delegate;
         this.length = length;
+    }
+
+    @Override
+    public boolean isEnded() {
+        return delegate.isEnded();
     }
 
     @Override
@@ -64,6 +69,11 @@ public class LimitedReadStream implements ReadStream<Buffer> {
     @Override
     public LimitedReadStream resume() {
         delegate.resume();
+        return this;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
         return this;
     }
 

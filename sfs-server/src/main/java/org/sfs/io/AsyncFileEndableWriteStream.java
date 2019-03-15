@@ -45,6 +45,11 @@ public class AsyncFileEndableWriteStream implements BufferEndableWriteStream {
     }
 
     @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
+    @Override
     public AsyncFileEndableWriteStream write(Buffer data) {
         checkNotEnded();
         delegate.write(data);

@@ -21,7 +21,6 @@ import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
-import io.vertx.ext.unit.junit.RunTestOnContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.junit.After;
 import org.junit.Before;
@@ -35,6 +34,7 @@ import org.sfs.TestSubscriber;
 import org.sfs.io.Block;
 import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.thread.NamedCapacityFixedThreadPool;
 import rx.Observable;
@@ -236,15 +236,15 @@ public class JournalFileTest {
         aVoid()
                 .flatMap(aVoid -> journalFile.open(sfsVertx))
                 .flatMap(aVoid -> journalFile.enableWrites(sfsVertx))
-                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata0", UTF_8.toString()), size, bigFile))
+                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata0", UTF_8.toString()), size, EndableReadStream.from(bigFile)))
                 .doOnNext(aVoid -> bigFile.setReadPos(0))
-                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata1", UTF_8.toString()), size, bigFile))
+                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata1", UTF_8.toString()), size, EndableReadStream.from(bigFile)))
                 .doOnNext(aVoid -> bigFile.setReadPos(0))
-                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata2", UTF_8.toString()), size, bigFile))
+                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata2", UTF_8.toString()), size, EndableReadStream.from(bigFile)))
                 .doOnNext(aVoid -> bigFile.setReadPos(0))
-                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata3", UTF_8.toString()), size, bigFile))
+                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata3", UTF_8.toString()), size, EndableReadStream.from(bigFile)))
                 .doOnNext(aVoid -> bigFile.setReadPos(0))
-                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata4", UTF_8.toString()), size, bigFile))
+                .flatMap(aVoid -> journalFile.append(sfsVertx, buffer("metadata4", UTF_8.toString()), size, EndableReadStream.from(bigFile)))
                 // assert stuff before closing
                 .flatMap(aVoid -> assertScanDataReadStream(context, sfsVertx, journalFile, 5, "metadata", expectedDataSha512))
                 .flatMap(aVoid -> journalFile.disableWrites(sfsVertx))

@@ -16,9 +16,9 @@
 
 package org.sfs.util;
 
-import io.vertx.core.streams.ReadStream;
+import org.sfs.io.EndableReadStream;
 
-public interface StreamProducer<T> extends ReadStream<T> {
+public interface StreamProducer<T> extends EndableReadStream<T> {
 
     void abort();
 }

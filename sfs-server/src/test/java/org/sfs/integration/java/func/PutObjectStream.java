@@ -22,7 +22,7 @@ import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.HttpClientRequestEndableWriteStream;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
@@ -44,12 +44,13 @@ public class PutObjectStream implements Func1<Void, Observable<HttpClientRespons
     private final String containerName;
     private final String objectName;
     private final Producer auth;
-    private final ReadStream<Buffer> data;
+    private final EndableReadStream<Buffer> data;
     private final ListMultimap<String, String> headers;
     private boolean logRequestBody;
     private boolean chunked;
+    private boolean continueHandling;
 
-    public PutObjectStream(HttpClient httpClient, String accountName, String containerName, String objectName, Producer auth, ReadStream<Buffer> data, ListMultimap<String, String> headers) {
+    public PutObjectStream(HttpClient httpClient, String accountName, String containerName, String objectName, Producer auth, EndableReadStream<Buffer> data, ListMultimap<String, String> headers) {
         this.httpClient = httpClient;
         this.accountName = accountName;
         this.containerName = containerName;
@@ -59,7 +60,7 @@ public class PutObjectStream implements Func1<Void, Observable<HttpClientRespons
         this.data = data;
     }
 
-    public PutObjectStream(HttpClient httpClient, String accountName, String containerName, String objectName, Producer auth, ReadStream<Buffer> data) {
+    public PutObjectStream(HttpClient httpClient, String accountName, String containerName, String objectName, Producer auth, EndableReadStream<Buffer> data) {
         this(httpClient, accountName, containerName, objectName, auth, data, create());
     }
 
@@ -87,29 +88,44 @@ public class PutObjectStream implements Func1<Void, Observable<HttpClientRespons
         return this;
     }
 
+    public boolean isContinueHandling() {
+        return continueHandling;
+    }
+
+    public PutObjectStream setContinueHandling(boolean continueHandling) {
+        this.continueHandling = continueHandling;
+        return this;
+    }
+
     @Override
     public Observable<HttpClientResponse> call(Void aVoid) {
         return auth.toHttpAuthorization()
-                .flatMap(new Func1<String, Observable<HttpClientResponse>>() {
-                    @Override
-                    public Observable<HttpClientResponse> call(String s) {
-                        ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
-                        final HttpClientRequest httpClientRequest =
-                                httpClient.put("/openstackswift001/" + accountName + "/" + containerName + "/" + objectName, handler::complete)
-                                        .exceptionHandler(handler::fail)
-                                        .putHeader(AUTHORIZATION, s);
-                        for (String entry : headers.keySet()) {
-                            httpClientRequest.putHeader(entry, headers.get(entry));
-                        }
+                .flatMap(s -> {
+                    ObservableFuture<HttpClientResponse> handler = RxHelper.observableFuture();
+                    final HttpClientRequest httpClientRequest =
+                            httpClient.put("/openstackswift001/" + accountName + "/" + containerName + "/" + objectName, handler::complete)
+                                    .exceptionHandler(handler::fail)
+                                    .putHeader(AUTHORIZATION, s);
+                    for (String entry : headers.keySet()) {
+                        httpClientRequest.putHeader(entry, headers.get(entry));
+                    }
+                    httpClientRequest.setChunked(isChunked());
+                    ObservableFuture<Void> continueHandler = RxHelper.observableFuture();
+                    if (isContinueHandling()) {
+                        httpClientRequest.putHeader("Expect", "100-Continue");
+                        httpClientRequest.continueHandler(event -> continueHandler.complete(null));
+                        httpClientRequest.sendHead();
+                    } else {
+                        continueHandler.complete(null);
+                    }
 
-                        httpClientRequest.setChunked(isChunked());
-
+                    return continueHandler.flatMap(aVoid12 -> {
                         Observable<HttpClientResponse> clientResponse = handler;
 
                         HttpClientRequestEndableWriteStream adapter = new HttpClientRequestEndableWriteStream(httpClientRequest);
 
                         return combineSinglesDelayError(pump(data, adapter), clientResponse, (aVoid1, httpClientResponse) -> httpClientResponse);
-                    }
+                    });
                 });
 
     }

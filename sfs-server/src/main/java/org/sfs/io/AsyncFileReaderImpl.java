@@ -17,6 +17,7 @@
 package org.sfs.io;
 
 
+import com.google.common.base.Preconditions;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Context;
 import io.vertx.core.Future;
@@ -35,14 +36,14 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
     private final Context context;
     private Handler<Throwable> exceptionHandler;
 
-    private boolean paused;
+    private boolean paused = false;
     private Handler<Buffer> dataHandler;
     private Handler<Void> endHandler;
     private long readPos;
-    private boolean readInProgress;
     private final int bufferSize;
     private final long startPosition;
     private long bytesRemaining;
+    private boolean ended = false;
 
     public AsyncFileReaderImpl(Context context, long startPosition, int bufferSize, long length, AsynchronousFileChannel dataFile, Logger log) {
         this.log = log;
@@ -54,6 +55,10 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
         this.context = context;
     }
 
+    @Override
+    public AsyncFileReaderImpl fetch(long amount) {
+        return this;
+    }
 
     @Override
     public long startPosition() {
@@ -84,10 +89,10 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
         }
     }
 
-    private AsyncFileReaderImpl read(Buffer buffer, int offset, long position, int length, Handler<AsyncResult<Buffer>> handler) {
+    private AsyncFileReaderImpl read(Buffer buffer, int offset, long position, int length, Handler<AsyncResult<Result>> handler) {
         try {
             ByteBuffer bb = ByteBuffer.allocate(length);
-            doRead(buffer, offset, bb, position, handler);
+            doRead(buffer, offset, bb, position, position, handler);
             return this;
         } catch (Throwable e) {
             handleException(e);
@@ -96,55 +101,58 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
     }
 
     private void doRead() {
+        checkNotEnded();
         try {
-            if (!readInProgress) {
-                readInProgress = true;
-                int countOfBytesToRead = (int) Math.min(bytesRemaining, bufferSize);
-                final Buffer buff = Buffer.buffer(countOfBytesToRead);
-
-                Handler<AsyncResult<Buffer>> handler = ar -> {
-                    readInProgress = false;
-                    try {
-                        if (ar.succeeded()) {
-
-                            Buffer buffer = ar.result();
-                            int bufferLength = buffer.length();
-                            bytesRemaining -= bufferLength;
-
-                            if (bufferLength <= 0) {
-                                // Empty buffer represents end of file
-                                handleEnd();
-                            } else {
-                                readPos += bufferLength;
-                                handleData(buffer);
-                                if (!paused && dataHandler != null) {
-                                    doRead();
-                                }
-                            }
+            Handler<AsyncResult<Result>> handler = ar -> {
+                try {
+                    if (ar.succeeded()) {
+                        Result result = ar.result();
+                        Buffer buffer = result.buffer;
+                        int bufferLength = buffer.length();
+                        bytesRemaining -= bufferLength;
+                        readPos += bufferLength;
+                        Preconditions.checkState(bytesRemaining >= 0, "bytes remaining was %s, expected >= 0", bytesRemaining);
+                        if (buffer.length() <= 0) {
+                            ended = true;
+                            handleEnd();
                         } else {
-                            handleException(ar.cause());
+                            handleData(buffer);
+                            if (!paused && dataHandler != null) {
+                                doRead();
+                            }
                         }
-                    } catch (Throwable e) {
-                        handleException(e);
+                    } else {
+                        ended = true;
+                        handleException(ar.cause());
                     }
-                };
-                read(buff, 0, readPos, countOfBytesToRead, handler);
-            }
+                } catch (Throwable e) {
+                    ended = true;
+                    handleException(e);
+                }
+            };
+            int countOfBytesToRead = (int) Math.min(bytesRemaining, bufferSize);
+            Buffer buff = Buffer.buffer(countOfBytesToRead);
+            read(buff, 0, readPos, countOfBytesToRead, handler);
         } catch (Throwable e) {
+            ended = true;
             handleException(e);
         }
     }
 
     @Override
     public AsyncFileReaderImpl handler(Handler<Buffer> handler) {
+        checkNotEnded();
         this.dataHandler = handler;
-        doRead();
+        if (!paused && dataHandler != null) {
+            doRead();
+        }
         return this;
     }
 
     @Override
     public AsyncFileReaderImpl endHandler(Handler<Void> handler) {
         this.endHandler = handler;
+        handleEnd();
         return this;
     }
 
@@ -156,57 +164,93 @@ public class AsyncFileReaderImpl implements AsyncFileReader {
 
     @Override
     public AsyncFileReaderImpl resume() {
-        paused = false;
-        doRead();
+        if (!isEnded()) {
+            if (paused && dataHandler != null) {
+                paused = false;
+                doRead();
+            }
+        }
         return this;
     }
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
     private void handleData(Buffer buffer) {
-        if (dataHandler != null) {
-            dataHandler.handle(buffer);
-        }
+        Preconditions.checkState(dataHandler != null, "Handler must be set");
+        dataHandler.handle(buffer);
     }
 
     private void handleEnd() {
-        if (endHandler != null) {
+        if (ended) {
             Handler<Void> h = endHandler;
-            endHandler = null;
-            h.handle(null);
+            if (h != null) {
+                endHandler = null;
+                h.handle(null);
+            }
         }
     }
 
-    private void doRead(final Buffer writeBuff, final int offset, final ByteBuffer buff, final long position, final Handler<AsyncResult<Buffer>> handler) {
+    private void checkNotEnded() {
+        Preconditions.checkState(!ended, "Already ended");
+    }
 
-        ch.read(buff, position, null, new java.nio.channels.CompletionHandler<Integer, Object>() {
+    private void doRead(final Buffer writeBuff, final int offset, final ByteBuffer buff, final long startPosition, long currentPosition, final Handler<AsyncResult<Result>> handler) {
+        try {
+            ch.read(buff, currentPosition, null, new java.nio.channels.CompletionHandler<Integer, Object>() {
 
-            long pos = position;
+                long currentPos = currentPosition;
 
-            private void done(boolean eof) {
-                context.runOnContext(event -> {
-                    buff.flip();
-                    writeBuff.setBytes(offset, buff);
-                    Future.succeededFuture(writeBuff).setHandler(handler);
-                });
-            }
-
-            public void completed(Integer bytesRead, Object attachment) {
-                if (bytesRead == -1) {
-                    //End of file
-                    done(true);
-                } else if (buff.hasRemaining()) {
-                    // partial read
-                    pos += bytesRead;
-                    // resubmit
-                    doRead(writeBuff, offset, buff, pos, handler);
-                } else {
-                    // It's been fully written
-                    done(false);
+                private void done(boolean eof) {
+                    context.runOnContext((v) -> {
+                        buff.flip();
+                        writeBuff.setBytes(offset, buff);
+                        buff.compact();
+                        handler.handle(Future.succeededFuture(new Result(writeBuff, eof, (int) (currentPos - startPosition))));
+                    });
                 }
-            }
 
-            public void failed(final Throwable t, Object attachment) {
-                context.runOnContext(event -> Future.<Buffer>failedFuture(t).setHandler(handler));
-            }
-        });
+                public void completed(Integer bytesRead, Object attachment) {
+                    if (bytesRead == -1) {
+                        //End of file
+                        done(true);
+                    } else if (buff.hasRemaining()) {
+                        // partial read
+                        currentPos += bytesRead;
+                        // resubmit
+                        doRead(writeBuff, offset, buff, startPosition, currentPos, handler);
+                    } else {
+                        // It's been fully written
+                        currentPos += bytesRead;
+                        done(false);
+                    }
+                }
+
+                public void failed(Throwable t, Object attachment) {
+                    context.runOnContext((v) -> {
+                        handler.handle(Future.failedFuture(t));
+                    });
+                }
+            });
+        } catch (Throwable e) {
+            context.runOnContext(event -> {
+                handler.handle(Future.failedFuture(e));
+            });
+        }
+    }
+
+    private static class Result {
+
+        private boolean eof;
+        private final Buffer buffer;
+        private int bytesRead;
+
+        public Result(Buffer buffer, boolean eof, int bytesRead) {
+            this.buffer = buffer;
+            this.eof = eof;
+            this.bytesRead = bytesRead;
+        }
     }
 }

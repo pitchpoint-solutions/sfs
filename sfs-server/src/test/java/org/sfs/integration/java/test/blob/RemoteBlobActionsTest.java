@@ -30,6 +30,7 @@ import org.sfs.filesystem.volume.ReadStreamBlob;
 import org.sfs.integration.java.BaseTestVerticle;
 import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.nodes.Nodes;
 import org.sfs.nodes.RemoteNode;
@@ -406,7 +407,7 @@ public class RemoteBlobActionsTest extends BaseTestVerticle {
                                         return remoteNode.createWriteStream(volumeId, size, SHA512, MD5)
                                                 .flatMap(nodeWriteStream -> {
                                                     out.println("PPPP2");
-                                                    return nodeWriteStream.consume(asyncFile);
+                                                    return nodeWriteStream.consume(EndableReadStream.from(asyncFile));
                                                 })
                                                 .map(blob -> {
                                                     out.println("PPPP3");

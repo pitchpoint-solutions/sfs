@@ -17,6 +17,8 @@
 package org.sfs.io;
 
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.logging.Logger;
+import io.vertx.core.logging.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -25,6 +27,7 @@ import static io.vertx.core.buffer.Buffer.buffer;
 
 public class BufferEndableWriteStreamOutputStream extends OutputStream {
 
+    private static Logger LOGGER = LoggerFactory.getLogger(BufferEndableWriteStream.class);
     private final BufferEndableWriteStream delegate;
 
     public BufferEndableWriteStreamOutputStream(BufferEndableWriteStream delegate) {

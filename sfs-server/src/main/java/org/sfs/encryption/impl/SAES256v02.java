@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 The Simple File Server Authors
+ * Copyright 2019 The Simple File Server Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,48 +18,49 @@ package org.sfs.encryption.impl;
 
 import com.google.common.hash.Hashing;
 import com.google.common.math.LongMath;
+import com.nimbusds.jose.crypto.BouncyCastleProviderSingleton;
 import io.vertx.core.buffer.Buffer;
-import org.bouncycastle.crypto.engines.AESFastEngine;
-import org.bouncycastle.crypto.io.CipherOutputStream;
-import org.bouncycastle.crypto.modes.GCMBlockCipher;
-import org.bouncycastle.crypto.params.AEADParameters;
-import org.bouncycastle.crypto.params.KeyParameter;
 import org.sfs.encryption.Algorithm;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.CipherEndableWriteStream;
 import org.sfs.io.CipherReadStream;
 import org.sfs.io.EndableReadStream;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.util.Arrays;
 
-public class SAES256v01 extends Algorithm {
+public class SAES256v02 extends Algorithm {
 
-    public static final int KEY_SIZE_BYTES = 32;
+    public static final int KEY_SIZE_BITS = 256;
+    public static final int KEY_SIZE_BYTES = KEY_SIZE_BITS / 8;
+    public static final int TAG_LENGTH_BITS = 96;
     public static final int NONCE_SIZE_BYTES = 12;
-    private static final int MAC_SIZE_BITS = 96;
     private byte[] salt;
-    private final GCMBlockCipher encryptor;
-    private final GCMBlockCipher decryptor;
+    private final Cipher encryptor;
+    private final Cipher decryptor;
     private static final long MAX_LONG_BUFFER_SIZE = Long.MAX_VALUE - 12;
-    private static final int MAC_SIZE_BYTES = MAC_SIZE_BITS / 8;
+    private static final int TAG_LENGTH_BYTES = TAG_LENGTH_BITS / 8;
 
-    public SAES256v01(byte[] secretBytes, byte[] salt) {
+    public SAES256v02(byte[] secretBytes, byte[] salt) {
         this.salt = salt.clone();
         secretBytes = secretBytes.clone();
         if (secretBytes.length != KEY_SIZE_BYTES) {
             secretBytes = Hashing.sha256().hashBytes(secretBytes).asBytes();
         }
         try {
-            KeyParameter key = new KeyParameter(secretBytes);
-            AEADParameters params = new AEADParameters(key, MAC_SIZE_BITS, this.salt);
+            SecretKeySpec key = new SecretKeySpec(secretBytes, "AES");
 
-            this.encryptor = new GCMBlockCipher(new AESFastEngine());
-            this.encryptor.init(true, params);
+            GCMParameterSpec spec = new GCMParameterSpec(TAG_LENGTH_BITS, this.salt);
 
-            this.decryptor = new GCMBlockCipher(new AESFastEngine());
-            this.decryptor.init(false, params);
+            this.encryptor = Cipher.getInstance("AES/GCM/NoPadding", BouncyCastleProviderSingleton.getInstance());
+            this.encryptor.init(Cipher.ENCRYPT_MODE, key, spec);
+
+            this.decryptor = Cipher.getInstance("AES/GCM/NoPadding", BouncyCastleProviderSingleton.getInstance());
+            this.decryptor.init(Cipher.DECRYPT_MODE, key, spec);
 
         } catch (Exception e) {
             throw new RuntimeException("could not create cipher for AES256", e);
@@ -75,7 +76,7 @@ public class SAES256v01 extends Algorithm {
     @Override
     public long encryptOutputSize(long size) {
         try {
-            return LongMath.checkedAdd(size, MAC_SIZE_BYTES);
+            return LongMath.checkedAdd(size, TAG_LENGTH_BYTES);
         } catch (ArithmeticException e) {
             // do nothing
         }
@@ -90,24 +91,20 @@ public class SAES256v01 extends Algorithm {
 
     @Override
     public byte[] encrypt(byte[] buffer) {
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        try (CipherOutputStream cipherOutputStream = new CipherOutputStream(byteArrayOutputStream, encryptor)) {
-            cipherOutputStream.write(buffer);
-        } catch (IOException e) {
+        try {
+            return encryptor.doFinal(buffer);
+        } catch (IllegalBlockSizeException | BadPaddingException e) {
             throw new RuntimeException(e);
         }
-        return byteArrayOutputStream.toByteArray();
     }
 
     @Override
     public byte[] decrypt(byte[] buffer) {
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        try (CipherOutputStream cipherOutputStream = new CipherOutputStream(byteArrayOutputStream, decryptor)) {
-            cipherOutputStream.write(buffer);
-        } catch (IOException e) {
+        try {
+            return decryptor.doFinal(buffer);
+        } catch (IllegalBlockSizeException | BadPaddingException e) {
             throw new RuntimeException(e);
         }
-        return byteArrayOutputStream.toByteArray();
     }
 
     @Override

@@ -22,7 +22,6 @@ import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.impl.ConcurrentHashSet;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
 import org.sfs.SfsVertx;
 import org.sfs.block.RangeLock;
 import org.sfs.io.AsyncFileReader;
@@ -31,6 +30,7 @@ import org.sfs.io.AsyncFileWriter;
 import org.sfs.io.AsyncFileWriterImpl;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.BufferedEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.LimitedReadStream;
 import org.sfs.io.LimitedWriteEndableWriteStream;
 import org.sfs.io.WaitForActiveWriters;
@@ -140,8 +140,7 @@ public class BlobFile {
                     });
                 })
                 .doOnNext(aVoid -> {
-                    long id = vertx.setPeriodic(100, event -> cleanupOrphanedWriters());
-                    periodics.add(id);
+                    periodics.add(vertx.setPeriodic(100, event -> cleanupOrphanedWriters()));
                 })
                 .doOnNext(aVoid -> checkState(status.compareAndSet(STARTING, STARTED)))
                 .onErrorResumeNext(throwable -> {
@@ -269,7 +268,7 @@ public class BlobFile {
     }
 
 
-    public Observable<Void> consume(SfsVertx vertx, long position, long length, ReadStream<Buffer> src, boolean assertAlignment) {
+    public Observable<Void> consume(SfsVertx vertx, long position, long length, EndableReadStream<Buffer> src, boolean assertAlignment) {
         return defer(() -> {
             checkOpen();
             checkCanWrite();
@@ -290,14 +289,16 @@ public class BlobFile {
                                 BufferedEndableWriteStream bufferedWriteStream = new BufferedEndableWriteStream(sfsWriteStream);
                                 LimitedWriteEndableWriteStream limitedWriteStream = new LimitedWriteEndableWriteStream(bufferedWriteStream, length);
                                 return pump(src, limitedWriteStream)
-                                        .doOnNext(aVoid1 -> activeWriters.remove(sfsWriteStream));
+                                        .doOnNext(aVoid1 -> {
+                                            activeWriters.remove(sfsWriteStream);
+                                        });
                             },
                             activeWriters::remove
                     ));
         });
     }
 
-    public Observable<Void> consume(SfsVertx vertx, long position, long length, ReadStream<Buffer> src) {
+    public Observable<Void> consume(SfsVertx vertx, long position, long length, EndableReadStream<Buffer> src) {
         return consume(vertx, position, length, src, true);
     }
 
@@ -368,16 +369,20 @@ public class BlobFile {
     }
 
     public Observable<Void> force(SfsVertx vertx, boolean metaData) {
-        Context context = vertx.getOrCreateContext();
-        return RxHelper.executeBlocking(context, vertx.getIoPool(), () -> {
-            checkOpen();
-            try {
-                channel.force(metaData);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return (Void) null;
-        });
+        try {
+            Context context = vertx.getOrCreateContext();
+            return RxHelper.executeBlocking(context, vertx.getIoPool(), () -> {
+                checkOpen();
+                try {
+                    channel.force(metaData);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                return (Void) null;
+            });
+        } catch (Throwable e) {
+            return Observable.error(e);
+        }
     }
 
     protected void checkAligned(long value, int blockSize) {

@@ -20,6 +20,7 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientResponse;
 import org.sfs.io.AsyncIO;
 import org.sfs.io.BufferWriteEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.nodes.HttpClientResponseException;
 import rx.Observable;
 import rx.functions.Func1;
@@ -35,7 +36,7 @@ public class HttpClientResponseBodyBuffer implements Func1<HttpClientResponse, O
     @Override
     public Observable<Buffer> call(HttpClientResponse httpClientResponse) {
         BufferWriteEndableWriteStream bufferWriteEndableWriteStream = new BufferWriteEndableWriteStream();
-        return AsyncIO.pump(httpClientResponse, bufferWriteEndableWriteStream)
+        return AsyncIO.pump(EndableReadStream.from(httpClientResponse), bufferWriteEndableWriteStream)
                 .map(aVoid -> bufferWriteEndableWriteStream.toBuffer())
                 .doOnNext(buffer -> {
                     int statusCode = httpClientResponse.statusCode();

@@ -20,7 +20,6 @@ import com.google.common.base.Optional;
 import com.google.common.net.HostAndPort;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.DigestBlob;
@@ -32,6 +31,7 @@ import org.sfs.filesystem.volume.WriteStreamBlob;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.DigestReadStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.rx.Defer;
 import org.sfs.rx.HandleServerToBusy;
@@ -185,7 +185,7 @@ public class LocalNode extends AbstractNode {
             return volume.putDataStream(vertxContext.vertx(), length)
                     .map((Func1<WriteStreamBlob, NodeWriteStreamBlob>) writeStreamBlob -> new NodeWriteStreamBlob(_this) {
                         @Override
-                        public Observable<DigestBlob> consume(ReadStream<Buffer> src) {
+                        public Observable<DigestBlob> consume(EndableReadStream<Buffer> src) {
                             DigestReadStream digestWriteStream = new DigestReadStream(src, messageDigestFactories);
                             return writeStreamBlob.consume(digestWriteStream)
                                     .map(aVoid -> {

@@ -30,6 +30,7 @@ import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.CipherEndableWriteStream;
 import org.sfs.io.CipherReadStream;
 import org.sfs.io.DigestEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.rx.Holder1;
 import org.sfs.rx.ObservableFuture;
@@ -90,6 +91,10 @@ public class AlgorithmTest extends BaseTestVerticle {
                     })
                     .doOnNext(bytes -> {
                         VertxAssert.assertArrayEquals(context, data, bytes);
+                    })
+                    .map(new ToVoid<>())
+                    .count()
+                    .doOnNext(integer -> {
                         VertxAssert.assertEquals(context, AlgorithmDef.values().length, count.value.intValue());
                     })
                     .map(new ToVoid<>());
@@ -183,6 +188,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                                         });
                             }
                         })
+                        .count()
                         .doOnNext(bytes -> {
                             VertxAssert.assertEquals(context, AlgorithmDef.values().length, count.value.intValue());
                         })
@@ -311,7 +317,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                             Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
                             CipherEndableWriteStream cipherWriteStream = algorithm.decrypt(clearDigestWriteStream);
                             final DigestEndableWriteStream encryptedDigestWriteStream = new DigestEndableWriteStream(cipherWriteStream, MessageDigestFactory.SHA512);
-                            return AsyncIO.pump(asyncFile, encryptedDigestWriteStream)
+                            return AsyncIO.pump(EndableReadStream.from(asyncFile), encryptedDigestWriteStream)
                                     .map(new Func1<Void, Void>() {
                                         @Override
                                         public Void call(Void aVoid) {
@@ -343,7 +349,7 @@ public class AlgorithmTest extends BaseTestVerticle {
                         public Observable<Void> call(AsyncFile asyncFile) {
                             final DigestEndableWriteStream clearDigestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), MessageDigestFactory.SHA512);
                             Algorithm algorithm = AlgorithmDef.SALTED_AES256_V01.create(secret, salt);
-                            CipherReadStream readStream = algorithm.decrypt(asyncFile);
+                            CipherReadStream readStream = algorithm.decrypt(EndableReadStream.from(asyncFile));
                             return AsyncIO.pump(readStream, clearDigestWriteStream)
                                     .map(new Func1<Void, Void>() {
                                         @Override

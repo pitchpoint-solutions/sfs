@@ -21,7 +21,6 @@ import io.vertx.core.file.AsyncFile;
 import io.vertx.core.file.OpenOptions;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
-import io.vertx.ext.unit.junit.RunTestOnContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.junit.After;
 import org.junit.Before;
@@ -34,6 +33,7 @@ import org.sfs.SfsVertxImpl;
 import org.sfs.TestSubscriber;
 import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.DigestEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.io.PipedEndableWriteStream;
 import org.sfs.io.PipedReadStream;
@@ -150,7 +150,7 @@ public class PipedStreamTest {
                     AsyncFile asyncFile = vertx.fileSystem().openBlocking(path.toString(), new OpenOptions());
                     PipedReadStream pipedReadStream = new PipedReadStream();
                     PipedEndableWriteStream pipedEndableWriteStream = new PipedEndableWriteStream(pipedReadStream);
-                    Observable<Void> producer = pump(asyncFile, pipedEndableWriteStream);
+                    Observable<Void> producer = pump(EndableReadStream.from(asyncFile), pipedEndableWriteStream);
                     DigestEndableWriteStream digestWriteStream = new DigestEndableWriteStream(new NullEndableWriteStream(), SHA512);
                     Observable<Void> consumer = pump(pipedReadStream, digestWriteStream);
                     return combineSinglesDelayError(producer, consumer, (aVoid1, aVoid2) -> {

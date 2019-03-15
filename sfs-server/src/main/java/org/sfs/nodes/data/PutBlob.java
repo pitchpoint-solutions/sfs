@@ -18,10 +18,8 @@ package org.sfs.nodes.data;
 
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
-import com.google.common.io.BaseEncoding;
 import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
-import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
@@ -32,15 +30,16 @@ import org.sfs.auth.Authenticate;
 import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.filesystem.volume.Volume;
 import org.sfs.filesystem.volume.VolumeManager;
-import org.sfs.io.BufferWriteEndableWriteStream;
 import org.sfs.io.CountingReadStream;
 import org.sfs.io.DigestReadStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.rx.HandleServerToBusy;
 import org.sfs.rx.Holder2;
 import org.sfs.rx.Terminus;
 import org.sfs.rx.ToVoid;
 import org.sfs.util.HttpStatusCodeException;
 import org.sfs.util.MessageDigestFactory;
+import org.sfs.util.SfsHttpHeaders;
 import org.sfs.validate.ValidateActionAdminOrSystem;
 import org.sfs.validate.ValidateHeaderBetweenLong;
 import org.sfs.validate.ValidateHeaderExists;
@@ -55,7 +54,6 @@ import static com.google.common.base.Optional.absent;
 import static com.google.common.base.Optional.of;
 import static com.google.common.collect.FluentIterable.from;
 import static com.google.common.collect.Iterables.toArray;
-import static com.google.common.net.HttpHeaders.CONTENT_LENGTH;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Long.MAX_VALUE;
 import static java.lang.Long.parseLong;
@@ -85,8 +83,8 @@ public class PutBlob implements Handler<SfsRequest> {
                 .map(new ValidateNodeIsDataNode<>(vertxContext))
                 .map(aVoid -> httpServerRequest)
                 .map(new ValidateParamExists(VOLUME))
-                .map(new ValidateHeaderExists(CONTENT_LENGTH))
-                .map(new ValidateHeaderBetweenLong(CONTENT_LENGTH, 0, MAX_VALUE))
+                .map(new ValidateHeaderExists(SfsHttpHeaders.X_CONTENT_LENGTH))
+                .map(new ValidateHeaderBetweenLong(SfsHttpHeaders.X_CONTENT_LENGTH, 0, MAX_VALUE))
                 .map(new ValidateParamComputedDigest())
                 .map(new ToVoid<>())
                 .map(aVoid -> httpServerRequest)
@@ -129,16 +127,13 @@ public class PutBlob implements Handler<SfsRequest> {
                         throw new HttpStatusCodeException(String.format("Volume %s not started", volumeId), HTTP_UNAVAILABLE);
                     }
 
-                    long length = parseLong(headers.get(CONTENT_LENGTH));
-
+                    long length = parseLong(headers.get(SfsHttpHeaders.X_CONTENT_LENGTH));
 
                     httpServerRequest1.startProxyKeepAlive();
 
-
                     return volume.putDataStream(httpServerRequest1.vertxContext().vertx(), length)
                             .flatMap(writeStreamBlob -> {
-
-                                DigestReadStream digestReadStream = new DigestReadStream(httpServerRequest1, toArray(iterable, MessageDigestFactory.class));
+                                DigestReadStream digestReadStream = new DigestReadStream(EndableReadStream.from(httpServerRequest1), toArray(iterable, MessageDigestFactory.class));
                                 CountingReadStream countingReadStream = new CountingReadStream(digestReadStream);
                                 return writeStreamBlob.consume(countingReadStream)
                                         .map(aVoid1 -> {

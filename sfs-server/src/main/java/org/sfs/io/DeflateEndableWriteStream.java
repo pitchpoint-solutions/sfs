@@ -42,6 +42,11 @@ public class DeflateEndableWriteStream implements BufferEndableWriteStream {
     }
 
     @Override
+    public boolean isEnded() {
+        return delegate != null && delegate.isEnded();
+    }
+
+    @Override
     public DeflateEndableWriteStream drainHandler(Handler<Void> handler) {
         checkNotEnded();
         delegate.drainHandler(handler);

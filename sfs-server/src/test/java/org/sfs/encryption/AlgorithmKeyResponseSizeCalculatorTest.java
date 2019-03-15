@@ -23,12 +23,8 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.sfs.TestSubscriber;
-import org.sfs.util.PrngRandom;
-import rx.Observable;
-import rx.functions.Func1;
 
 import static java.lang.Long.MAX_VALUE;
-import static org.sfs.util.PrngRandom.getCurrentInstance;
 import static org.sfs.util.VertxAssert.assertEquals;
 import static rx.Observable.from;
 import static rx.Observable.range;
@@ -38,15 +34,11 @@ public class AlgorithmKeyResponseSizeCalculatorTest {
 
     @Test
     public void testMaxEncryptInputSize(TestContext context) {
-        final byte[] salt = new byte[64];
-        final byte[] secret = new byte[64];
-
-        PrngRandom random = getCurrentInstance();
-        random.nextBytesBlocking(salt);
-        random.nextBytesBlocking(secret);
-
 
         for (AlgorithmDef algorithmDef : AlgorithmDef.values()) {
+            final byte[] salt = algorithmDef.generateSaltBlocking();
+            final byte[] secret = algorithmDef.generateKeyBlocking();
+
             Algorithm algorithm = algorithmDef.create(secret, salt);
             for (long i = MAX_VALUE; i >= MAX_VALUE - 100; i--) {
                 long encryptedSize = algorithm.encryptOutputSize(i);
@@ -62,33 +54,22 @@ public class AlgorithmKeyResponseSizeCalculatorTest {
 
     @Test
     public void testCalculateEncryptedSize(TestContext context) {
-        final byte[] salt = new byte[64];
-        final byte[] secret = new byte[64];
-
-        PrngRandom random = getCurrentInstance();
-        random.nextBytesBlocking(salt);
-        random.nextBytesBlocking(secret);
 
 
         Async async = context.async();
         from(AlgorithmDef.values())
-                .flatMap(new Func1<AlgorithmDef, Observable<Void>>() {
-                    @Override
-                    public Observable<Void> call(AlgorithmDef algorithmDef) {
-                        Algorithm algorithm = algorithmDef.create(secret, salt);
-                        return range(0, 5 * 1024)
-                                .map(new Func1<Integer, Void>() {
-                                    @Override
-                                    public Void call(Integer bufferSize) {
-                                        byte[] buffer = new byte[bufferSize + 1];
-                                        byte[] encryptedBuffer = algorithm.encrypt(buffer);
-                                        long expectedEncryptedSize = algorithm.encryptOutputSize(buffer.length);
-                                        Assert.assertEquals(expectedEncryptedSize, encryptedBuffer.length);
-                                        return null;
-                                    }
-                                });
-                    }
-                })
+                .flatMap(algorithmDef -> range(0, 5 * 1024)
+                        .map(bufferSize -> {
+                            final byte[] salt = algorithmDef.generateSaltBlocking();
+                            final byte[] secret = algorithmDef.generateKeyBlocking();
+
+                            Algorithm algorithm = algorithmDef.create(secret, salt);
+                            byte[] buffer = new byte[bufferSize + 1];
+                            byte[] encryptedBuffer = algorithm.encrypt(buffer);
+                            long expectedEncryptedSize = algorithm.encryptOutputSize(buffer.length);
+                            Assert.assertEquals(expectedEncryptedSize, encryptedBuffer.length);
+                            return (Void) null;
+                        }))
                 .subscribe(new TestSubscriber(context, async));
     }
 }

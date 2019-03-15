@@ -34,6 +34,7 @@ import org.sfs.block.RecyclingAllocator;
 import org.sfs.filesystem.BlobFile;
 import org.sfs.filesystem.ChecksummedPositional;
 import org.sfs.io.BufferEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.protobuf.XVolume;
 import org.sfs.rx.Defer;
 import org.sfs.rx.ObservableFuture;
@@ -334,7 +335,7 @@ public class VolumeV1 implements Volume {
 
     @Override
     public Observable<Void> open(SfsVertx vertx) {
-        final VolumeV1 _this = this;;
+        final VolumeV1 _this = this;
         return Defer.aVoid()
                 .doOnNext(aVoid -> Preconditions.checkState(volumeState.compareAndSet(Status.STOPPED, Status.STARTING)))
                 .doOnNext(aVoid -> logger.info("Starting volume " + basePath.toString()))
@@ -632,7 +633,7 @@ public class VolumeV1 implements Volume {
                                             WriteStreamBlob writeStreamBlob = new WriteStreamBlob(volumeId, headerPosition, length) {
 
                                                 @Override
-                                                public Observable<Void> consume(ReadStream<Buffer> src) {
+                                                public Observable<Void> consume(EndableReadStream<Buffer> src) {
                                                     return Defer.aVoid()
                                                             .flatMap(aVoid1 -> blobFile.consume(vertx, dataPosition, length, src))
                                                             .flatMap(aVoid1 -> blobFile.force(vertx, false))

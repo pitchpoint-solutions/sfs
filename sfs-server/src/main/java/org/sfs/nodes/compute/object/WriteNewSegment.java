@@ -24,8 +24,10 @@ import org.sfs.VertxContext;
 import org.sfs.encryption.ContainerKeys;
 import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.io.BufferWriteEndableWriteStream;
+import org.sfs.io.CipherReadStream;
 import org.sfs.io.CountingReadStream;
 import org.sfs.io.DigestReadStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.nodes.Nodes;
 import org.sfs.nodes.VolumeReplicaGroup;
 import org.sfs.nodes.XNode;
@@ -48,9 +50,9 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
 
     private static final Logger LOGGER = getLogger(WriteNewSegment.class);
     private final VertxContext<Server> vertxContext;
-    private final ReadStream<Buffer> readStream;
+    private final EndableReadStream<Buffer> readStream;
 
-    public WriteNewSegment(VertxContext<Server> vertxContext, ReadStream<Buffer> readStream) {
+    public WriteNewSegment(VertxContext<Server> vertxContext, EndableReadStream<Buffer> readStream) {
         this.vertxContext = vertxContext;
         this.readStream = readStream;
     }
@@ -82,9 +84,9 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
 
                         final DigestReadStream serverObjectDigestReadStream = new DigestReadStream(clearByteCount, md5Digest, sha512Digest);
 
-                        ReadStream<Buffer> cipherWriteStream = keyResponse.getData().encrypt(serverObjectDigestReadStream);
+                        CipherReadStream cipherReadStream = keyResponse.getData().encrypt(serverObjectDigestReadStream);
 
-                        final CountingReadStream encryptedByteCount = new CountingReadStream(cipherWriteStream);
+                        final CountingReadStream encryptedByteCount = new CountingReadStream(cipherReadStream);
 
                         final DigestReadStream blobDigestReadStream = new DigestReadStream(encryptedByteCount, md5Digest, sha512Digest);
 

@@ -20,7 +20,7 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.streams.ReadStream;
 
 
-public interface AsyncFileReader extends ReadStream<Buffer> {
+public interface AsyncFileReader extends EndableReadStream<Buffer> {
 
     long startPosition();
 

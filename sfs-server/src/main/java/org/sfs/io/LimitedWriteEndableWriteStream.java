@@ -36,6 +36,11 @@ public class LimitedWriteEndableWriteStream implements BufferEndableWriteStream 
     }
 
     @Override
+    public boolean isEnded() {
+        return delegate != null && delegate.isEnded();
+    }
+
+    @Override
     public LimitedWriteEndableWriteStream write(Buffer data) {
         bytesWritten += data.length();
         if (bytesWritten > length) {

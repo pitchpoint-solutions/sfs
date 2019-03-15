@@ -17,10 +17,8 @@
 package org.sfs.integration.java.test.container;
 
 import io.vertx.core.json.JsonObject;
-import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import org.junit.Test;
-import org.sfs.TestSubscriber;
 import org.sfs.elasticsearch.object.LoadAccountAndContainerAndObject;
 import org.sfs.elasticsearch.object.UpdateObject;
 import org.sfs.integration.java.BaseTestVerticle;

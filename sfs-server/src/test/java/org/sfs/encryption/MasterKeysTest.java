@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static com.google.common.base.Charsets.UTF_8;
 import static java.util.Calendar.getInstance;
 import static java.util.concurrent.TimeUnit.DAYS;
-import static org.sfs.encryption.AlgorithmDef.SALTED_AES256_V01;
 import static org.sfs.encryption.MasterKeys.MasterKey;
 import static org.sfs.integration.java.help.AuthorizationFactory.Producer;
 import static org.sfs.integration.java.help.AuthorizationFactory.httpBasic;
@@ -147,7 +146,7 @@ public class MasterKeysTest extends BaseTestVerticle {
                     .flatMap(new RefreshIndex(httpClient(), authAdmin))
                     .flatMap(aVoid -> masterKeys.maintain(vertxContext()))
                     .flatMap(new RefreshIndex(httpClient(), authAdmin))
-                    .flatMap(new GetNewestMasterKey(vertxContext(), SALTED_AES256_V01))
+                    .flatMap(new GetNewestMasterKey(vertxContext(), AlgorithmDef.getPreferred()))
                     .map(Optional::get)
                     .map(pmk -> {
                         assertEquals(context, masterKeys.firstKey(), pmk.getId());
@@ -182,7 +181,7 @@ public class MasterKeysTest extends BaseTestVerticle {
                     .flatMap(new RefreshIndex(httpClient(), authAdmin))
                     .flatMap(aVoid -> masterKeys.maintain(vertxContext()))
                     .flatMap(new RefreshIndex(httpClient(), authAdmin))
-                    .flatMap(new GetNewestMasterKey(vertxContext(), SALTED_AES256_V01))
+                    .flatMap(new GetNewestMasterKey(vertxContext(), AlgorithmDef.getPreferred()))
                     .map(Optional::get)
                     .map(pmk -> {
                         assertEquals(context, masterKeys.firstKey(), pmk.getId());

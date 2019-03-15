@@ -50,6 +50,11 @@ public class SearchHitEndableWriteStreamToJsonLine implements EndableWriteStream
     }
 
     @Override
+    public boolean isEnded() {
+        return bufferStreamConsumer != null && bufferStreamConsumer.isEnded();
+    }
+
+    @Override
     public SearchHitEndableWriteStreamToJsonLine drainHandler(Handler<Void> handler) {
         bufferStreamConsumer.drainHandler(handler);
         return this;

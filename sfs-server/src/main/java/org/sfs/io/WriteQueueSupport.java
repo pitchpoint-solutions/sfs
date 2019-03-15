@@ -19,25 +19,28 @@ package org.sfs.io;
 
 import io.vertx.core.Context;
 import io.vertx.core.Handler;
-import io.vertx.core.Vertx;
+import io.vertx.core.logging.Logger;
 import org.sfs.util.AtomicIntMap;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
+import java.util.LinkedList;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import static io.vertx.core.logging.LoggerFactory.getLogger;
 
 public class WriteQueueSupport<A> {
 
+    private static final Logger LOGGER = getLogger(WriteQueueSupport.class);
     private final long maxWrites;
     private final long lowWater;
     private final AtomicIntMap<A> queues = new AtomicIntMap<>();
-    private final ConcurrentMap<A, ContextHandlerList> writeQueueEmptyHandlers = new ConcurrentHashMap<>();
+    private final ConcurrentMap<A, CopyOnWriteArrayList<ContextHandler>> writeQueueEmptyHandlers = new ConcurrentHashMap<>();
     private final Set<ContextHandler> drainHandlers = Collections.newSetFromMap(new ConcurrentHashMap<>());
-
+    private final Object mutex = new Object();
 
     public WriteQueueSupport(long maxWrites) {
         this.maxWrites = maxWrites;
@@ -53,14 +56,26 @@ public class WriteQueueSupport<A> {
     }
 
     public void drainHandler(Context context, Handler<Void> handler) {
-        drainHandlers.add(new ContextHandler(context, handler));
-        notifyDrainHandlers();
+        LinkedList<ContextHandler> toNotify = new LinkedList<>();
+        synchronized (mutex) {
+            drainHandlers.add(new ContextHandler(context, handler));
+            notifyDrainHandlers(toNotify);
+        }
+        for (ContextHandler contextHandler : toNotify) {
+            contextHandler.dispatch();
+        }
     }
 
-    public WriteQueueSupport<A> remove(A entity) {
-        queues.remove(entity);
-        notifyDrainHandlers();
-        notifyEmptyHandlers(entity);
+    public WriteQueueSupport<A> remove(A writer) {
+        queues.remove(writer);
+        LinkedList<ContextHandler> toNotify = new LinkedList<>();
+        synchronized (mutex) {
+            notifyDrainHandlers(toNotify);
+            notifyEmptyHandlers(writer, toNotify);
+        }
+        for (ContextHandler contextHandler : toNotify) {
+            contextHandler.dispatch();
+        }
         return this;
     }
 
@@ -73,30 +88,36 @@ public class WriteQueueSupport<A> {
     }
 
     public void decrementWritesOutstanding(A writer, int delta) {
+        LinkedList<ContextHandler> toNotify = new LinkedList<>();
         queues.addAndGet(writer, -delta);
         queues.removeIfLteZero(writer);
-        notifyDrainHandlers();
-        notifyEmptyHandlers(writer);
+        synchronized (mutex) {
+            notifyDrainHandlers(toNotify);
+            notifyEmptyHandlers(writer, toNotify);
+        }
+        for (ContextHandler contextHandler : toNotify) {
+            contextHandler.dispatch();
+        }
     }
 
     public void emptyHandler(A writer, Context context, Handler<Void> handler) {
         ContextHandler contextHandler = new ContextHandler(context, handler);
-        while (true) {
-            ContextHandlerList existing = writeQueueEmptyHandlers.get(writer);
-            if (existing != null) {
-                ContextHandlerList updated = new ContextHandlerList(new ArrayList<>(existing.getList()));
-                updated.add(contextHandler);
-                if (writeQueueEmptyHandlers.replace(writer, existing, updated)) {
-                    break;
-                }
-            } else {
-                ContextHandlerList updated = new ContextHandlerList(Collections.singletonList(contextHandler));
-                if (writeQueueEmptyHandlers.putIfAbsent(writer, updated) == null) {
-                    break;
-                }
+        CopyOnWriteArrayList<ContextHandler> existing = writeQueueEmptyHandlers.get(writer);
+        if (existing == null) {
+            existing = new CopyOnWriteArrayList<>();
+            CopyOnWriteArrayList<ContextHandler> current = writeQueueEmptyHandlers.putIfAbsent(writer, existing);
+            if (current != null) {
+                existing = current;
             }
         }
-        notifyEmptyHandlers(writer);
+        existing.add(contextHandler);
+        LinkedList<ContextHandler> toNotify = new LinkedList<>();
+        synchronized (mutex) {
+            notifyEmptyHandlers(writer, toNotify);
+        }
+        for (ContextHandler h : toNotify) {
+            h.dispatch();
+        }
     }
 
     public boolean writeQueueEmpty(A writer) {
@@ -107,25 +128,23 @@ public class WriteQueueSupport<A> {
         return queues.sum();
     }
 
-    protected void notifyEmptyHandlers(A writer) {
+    protected void notifyEmptyHandlers(A writer, LinkedList<ContextHandler> toNotify) {
         if (queues.get(writer) <= 0) {
-            ContextHandlerList contextHandlerList = writeQueueEmptyHandlers.remove(writer);
-            if (contextHandlerList != null) {
-                for (ContextHandler contextHandler : contextHandlerList.getList()) {
-                    contextHandler.dispatch();
-                }
+            CopyOnWriteArrayList<ContextHandler> list = writeQueueEmptyHandlers.remove(writer);
+            if (list != null) {
+                toNotify.addAll(list);
             }
         }
     }
 
-    protected void notifyDrainHandlers() {
+    protected void notifyDrainHandlers(LinkedList<ContextHandler> toNotify) {
         int size = queues.sum();
         if (size <= lowWater) {
             Iterator<ContextHandler> iterator = drainHandlers.iterator();
             while (iterator.hasNext()) {
                 ContextHandler contextHandler = iterator.next();
                 iterator.remove();
-                contextHandler.dispatch();
+                toNotify.add(contextHandler);
             }
         }
     }
@@ -141,24 +160,11 @@ public class WriteQueueSupport<A> {
         }
 
         public void dispatch() {
-            context.runOnContext(event -> handler.handle(null));
-        }
-    }
-
-    private static class ContextHandlerList {
-
-        private final List<ContextHandler> list;
-
-        public ContextHandlerList(List<ContextHandler> list) {
-            this.list = list;
-        }
-
-        public List<ContextHandler> getList() {
-            return list;
-        }
-
-        public void add(ContextHandler contextHandler) {
-            list.add(contextHandler);
+            context.runOnContext(event -> {
+                if (handler != null) {
+                    handler.handle(null);
+                }
+            });
         }
     }
 }

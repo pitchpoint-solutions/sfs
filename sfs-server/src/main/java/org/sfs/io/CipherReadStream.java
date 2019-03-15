@@ -23,18 +23,20 @@ import io.vertx.core.streams.ReadStream;
 import org.bouncycastle.crypto.io.CipherOutputStream;
 import org.bouncycastle.crypto.modes.AEADBlockCipher;
 
+import javax.crypto.Cipher;
 import java.io.IOException;
+import java.io.OutputStream;
 
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 
-public class CipherReadStream implements ReadStream<Buffer> {
+public class CipherReadStream implements EndableReadStream<Buffer> {
 
     private static final Logger LOGGER = getLogger(CipherReadStream.class);
     private ReadStream<Buffer> delegate;
     private Handler<Void> delegateEndHandler;
     private Handler<Throwable> delegateExceptionHandler;
     private Handler<Buffer> delegateDataHandler;
-    private CipherOutputStream cipherOutputStream;
+    private OutputStream cipherOutputStream;
     private ReadStreamDataHandlerOutputStream readStreamDataHandlerOutputStream;
     private boolean ended = false;
     private Handler<Void> endHandler = new Handler<Void>() {
@@ -61,8 +63,8 @@ public class CipherReadStream implements ReadStream<Buffer> {
         @Override
         public void handle(Void event) {
             try {
-                ended = true;
                 cipherOutputStream.close();
+                ended = true;
                 endHandler.handle(null);
             } catch (IOException e) {
                 handleError(e);
@@ -81,11 +83,26 @@ public class CipherReadStream implements ReadStream<Buffer> {
         }
     };
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
+    @Override
+    public ReadStream<Buffer> fetch(long amount) {
+        return this;
+    }
 
     public CipherReadStream(ReadStream<Buffer> delegate, AEADBlockCipher aeadBlockCipher) {
         this.delegate = delegate;
         this.readStreamDataHandlerOutputStream = new ReadStreamDataHandlerOutputStream(dataHandler);
         this.cipherOutputStream = new CipherOutputStream(readStreamDataHandlerOutputStream, aeadBlockCipher);
+    }
+
+    public CipherReadStream(ReadStream<Buffer> delegate, Cipher cipher) {
+        this.delegate = delegate;
+        this.readStreamDataHandlerOutputStream = new ReadStreamDataHandlerOutputStream(dataHandler);
+        this.cipherOutputStream = new javax.crypto.CipherOutputStream(readStreamDataHandlerOutputStream, cipher);
     }
 
 

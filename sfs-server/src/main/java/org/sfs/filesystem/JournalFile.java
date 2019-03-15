@@ -25,6 +25,7 @@ import org.sfs.SfsVertx;
 import org.sfs.io.Block;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.BufferWriteEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.rx.Defer;
 import org.sfs.rx.ToVoid;
 import rx.Observable;
@@ -255,7 +256,7 @@ public class JournalFile {
                 });
     }
 
-    public Observable<Long> append(SfsVertx vertx, Buffer metadata, long dataLength, ReadStream<Buffer> data) {
+    public Observable<Long> append(SfsVertx vertx, Buffer metadata, long dataLength, EndableReadStream<Buffer> data) {
         return append0(vertx, metadata, dataLength)
                 .flatMap(writePosition -> {
                     if (dataLength > 0) {

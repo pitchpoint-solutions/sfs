@@ -29,6 +29,10 @@ public class NullEndableWriteStream implements BufferEndableWriteStream {
     public NullEndableWriteStream() {
     }
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
 
     @Override
     public NullEndableWriteStream write(Buffer data) {

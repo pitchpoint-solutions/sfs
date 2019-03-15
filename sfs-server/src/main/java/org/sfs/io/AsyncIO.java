@@ -19,17 +19,23 @@ package org.sfs.io;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.file.AsyncFile;
-import io.vertx.core.streams.ReadStream;
+import io.vertx.core.http.HttpClientResponse;
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.core.logging.Logger;
 import io.vertx.core.streams.WriteStream;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
 import rx.Observable;
 
+import static io.vertx.core.logging.LoggerFactory.getLogger;
+
 
 public class AsyncIO {
 
+    private static final Logger LOGGER = getLogger(AsyncIO.class);
+
     public static Observable<Void> append(Buffer buffer, final WriteStream<Buffer> ws) {
-        return Observable.defer(() -> {
+        try {
 
             ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
             ws.exceptionHandler(drainHandler::fail);
@@ -50,11 +56,14 @@ public class AsyncIO {
                 }
                 return writeHandler;
             });
-        });
+        } catch (Throwable e) {
+            return Observable.error(e);
+        }
+
     }
 
     public static Observable<Void> end(Buffer buffer, final BufferEndableWriteStream ws) {
-        return Observable.defer(() -> {
+        try {
             ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
             ws.exceptionHandler(drainHandler::fail);
             if (ws.writeQueueFull()) {
@@ -69,11 +78,13 @@ public class AsyncIO {
                 ws.end(buffer);
                 return endHandler;
             });
-        });
+        } catch (Throwable e) {
+            return Observable.error(e);
+        }
     }
 
     public static Observable<Void> append(Buffer buffer, final BufferEndableWriteStream ws) {
-        return Observable.defer(() -> {
+        try {
             ObservableFuture<Void> drainHandler = RxHelper.observableFuture();
             ws.exceptionHandler(drainHandler::fail);
             if (ws.writeQueueFull()) {
@@ -93,69 +104,60 @@ public class AsyncIO {
                 }
                 return writeHandler;
             });
-        });
+        } catch (Throwable e) {
+            return Observable.error(e);
+        }
     }
 
-    public static <M> Observable<Void> pump(final ReadStream<M> rs, final EndableWriteStream<M> ws) {
-        rs.pause();
-        return Observable.defer(() -> {
+    public static Observable<Void> pump(final HttpClientResponse rs, final EndableWriteStream<Buffer> ws) {
+        return pump(EndableReadStream.from(rs), ws);
+    }
+
+    public static Observable<Void> pump(final HttpServerRequest rs, final EndableWriteStream<Buffer> ws) {
+        return pump(EndableReadStream.from(rs), ws);
+    }
+
+    public static <M> Observable<Void> pump(final EndableReadStream<M> rs, final EndableWriteStream<M> ws) {
+        try {
+            rs.pause();
             ObservableFuture<Void> observableFuture = RxHelper.observableFuture();
-            Handler<Throwable> exceptionHandler = throwable -> {
-                try {
-                    ws.drainHandler(null);
-                    rs.handler(null);
-                } catch (Throwable e) {
-                    observableFuture.fail(e);
-                    return;
-                }
-                observableFuture.fail(throwable);
-            };
+
+            Handler<Throwable> exceptionHandler = observableFuture::fail;
+
             rs.exceptionHandler(exceptionHandler);
             ws.exceptionHandler(exceptionHandler);
-            Handler<Void> drainHandler = event -> {
-                try {
-                    rs.resume();
-                } catch (Throwable e) {
-                    exceptionHandler.handle(e);
-                }
-            };
+
+            Handler<Void> drainHandler = event -> rs.resume();
 
             Handler<M> dataHandler = data -> {
-                try {
-                    ws.write(data);
-                    if (ws.writeQueueFull()) {
-                        rs.pause();
-                        ws.drainHandler(drainHandler);
-                    }
-                } catch (Throwable e) {
-                    exceptionHandler.handle(e);
+                ws.write(data);
+                if (ws.writeQueueFull()) {
+                    rs.pause();
+                    ws.drainHandler(drainHandler);
                 }
             };
             ws.endHandler(observableFuture::complete);
-            rs.endHandler(event -> {
-                try {
-                    ws.end();
-                } catch (Throwable e) {
-                    exceptionHandler.handle(e);
-                }
-            });
-            try {
+            if (rs.isEnded()) {
+                rs.resume();
+                ws.end();
+            } else {
+                rs.endHandler(event -> ws.end());
                 rs.handler(dataHandler);
                 rs.resume();
-            } catch (Throwable e) {
-                exceptionHandler.handle(e);
             }
             return observableFuture;
-        });
+        } catch (Throwable e) {
+            return Observable.error(e);
+        }
     }
 
-
     public static Observable<Void> close(AsyncFile asyncFile) {
-        return Observable.defer(() -> {
+        try {
             ObservableFuture<Void> rh = RxHelper.observableFuture();
             asyncFile.close(rh.toHandler());
             return rh;
-        });
+        } catch (Throwable e) {
+            return Observable.error(e);
+        }
     }
-
 }

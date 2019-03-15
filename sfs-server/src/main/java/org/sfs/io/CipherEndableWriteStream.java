@@ -22,7 +22,9 @@ import io.vertx.core.logging.Logger;
 import org.bouncycastle.crypto.io.CipherOutputStream;
 import org.bouncycastle.crypto.modes.AEADBlockCipher;
 
+import javax.crypto.Cipher;
 import java.io.IOException;
+import java.io.OutputStream;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
@@ -32,7 +34,7 @@ public class CipherEndableWriteStream implements BufferEndableWriteStream {
     private static final Logger LOGGER = getLogger(CipherEndableWriteStream.class);
     private final BufferEndableWriteStream delegate;
     private Handler<Throwable> delegateExceptionHandler;
-    private CipherOutputStream outputStream;
+    private OutputStream outputStream;
     private BufferEndableWriteStreamOutputStream bufferEndableWriteStreamOutputStream;
     private boolean ended = false;
 
@@ -40,6 +42,17 @@ public class CipherEndableWriteStream implements BufferEndableWriteStream {
         this.delegate = delegate;
         this.bufferEndableWriteStreamOutputStream = new BufferEndableWriteStreamOutputStream(delegate);
         this.outputStream = new CipherOutputStream(bufferEndableWriteStreamOutputStream, cipher);
+    }
+
+    public CipherEndableWriteStream(BufferEndableWriteStream delegate, Cipher cipher) {
+        this.delegate = delegate;
+        this.bufferEndableWriteStreamOutputStream = new BufferEndableWriteStreamOutputStream(delegate);
+        this.outputStream = new javax.crypto.CipherOutputStream(bufferEndableWriteStreamOutputStream, cipher);
+    }
+
+    @Override
+    public boolean isEnded() {
+        return delegate.isEnded();
     }
 
     @Override

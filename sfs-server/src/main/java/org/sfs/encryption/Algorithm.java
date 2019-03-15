@@ -21,6 +21,7 @@ import io.vertx.core.streams.ReadStream;
 import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.CipherEndableWriteStream;
 import org.sfs.io.CipherReadStream;
+import org.sfs.io.EndableReadStream;
 
 public abstract class Algorithm {
 
@@ -42,7 +43,7 @@ public abstract class Algorithm {
 
     public abstract <T extends CipherEndableWriteStream> T decrypt(BufferEndableWriteStream writeStream);
 
-    public abstract <T extends CipherReadStream> T encrypt(ReadStream<Buffer> readStream);
+    public abstract <T extends CipherReadStream> T encrypt(EndableReadStream<Buffer> readStream);
 
-    public abstract <T extends CipherReadStream> T decrypt(ReadStream<Buffer> readStream);
+    public abstract <T extends CipherReadStream> T decrypt(EndableReadStream<Buffer> readStream);
 }

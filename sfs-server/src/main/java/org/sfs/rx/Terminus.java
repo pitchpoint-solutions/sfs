@@ -64,9 +64,12 @@ public abstract class Terminus<T> extends Subscriber<T> {
             HttpServerResponse response = httpServerRequest.response();
             response.end();
         } finally {
-            httpServerRequest.resume();
+            try {
+                httpServerRequest.resume();
+            } catch (Throwable e) {
+                // do nothing
+            }
         }
-
     }
 
     @Override
@@ -163,7 +166,11 @@ public abstract class Terminus<T> extends Subscriber<T> {
 
             }
         } finally {
-            httpServerRequest.resume();
+            try {
+                httpServerRequest.resume();
+            } catch (Throwable ex) {
+                // do nothing
+            }
         }
     }
 }

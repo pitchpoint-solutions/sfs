@@ -39,6 +39,7 @@ import org.sfs.io.BufferEndableWriteStream;
 import org.sfs.io.CountingReadStream;
 import org.sfs.io.DigestEndableWriteStream;
 import org.sfs.io.DigestReadStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.NullEndableWriteStream;
 import org.sfs.io.ReplayReadStream;
 import org.sfs.rx.ToVoid;
@@ -128,7 +129,7 @@ public class VolumeV1HugeTest {
 
         return volumeV1.open(sfsVertx)
                 .flatMap(aVoid -> {
-                    final ReadStream<Buffer> replayReadStream = new ReplayReadStream(expectedBuffer, howManyTimesToProviderTheBufferInTheReadStream);
+                    final EndableReadStream<Buffer> replayReadStream = new ReplayReadStream(expectedBuffer, howManyTimesToProviderTheBufferInTheReadStream);
                     return volumeV1.putDataStream(sfsVertx, streamLength)
                             .flatMap(writeStreamBlob -> {
                                 final DigestReadStream digestWriteStream = new DigestReadStream(replayReadStream, MessageDigestFactory.SHA512);

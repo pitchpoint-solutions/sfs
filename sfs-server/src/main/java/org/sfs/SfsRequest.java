@@ -30,6 +30,7 @@ import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.core.http.ServerWebSocket;
+import io.vertx.core.http.StreamPriority;
 import io.vertx.core.net.NetSocket;
 import io.vertx.core.net.SocketAddress;
 import org.sfs.auth.UserAndRole;
@@ -57,6 +58,7 @@ public class SfsRequest implements HttpServerRequest {
     private KeepAliveHttpServerResponse keepAliveHttpServerResponse;
     private ResponseWrapper responseWrapper;
     private UserAndRole userAndRole;
+    private boolean paused;
 
     public SfsRequest(VertxContext<Server> vertxContext, HttpServerRequest httpServerRequest) {
         this.vertxContext = vertxContext;
@@ -87,6 +89,10 @@ public class SfsRequest implements HttpServerRequest {
         } else {
             return Observable.just(null);
         }
+    }
+
+    public boolean isPaused() {
+        return paused;
     }
 
     public UserAndRole getUserAndRole() {
@@ -295,7 +301,25 @@ public class SfsRequest implements HttpServerRequest {
 
     @Override
     public HttpServerRequest customFrameHandler(Handler<HttpFrame> handler) {
-        return httpServerRequest.customFrameHandler(handler);
+        httpServerRequest.customFrameHandler(handler);
+        return this;
+    }
+
+    @Override
+    public HttpServerRequest fetch(long amount) {
+        httpServerRequest.fetch(amount);
+        return this;
+    }
+
+    @Override
+    public long bytesRead() {
+        return httpServerRequest.bytesRead();
+    }
+
+    @Override
+    public HttpServerRequest streamPriorityHandler(Handler<StreamPriority> handler) {
+        httpServerRequest.streamPriorityHandler(handler);
+        return this;
     }
 
     @Override

@@ -17,7 +17,6 @@
 package org.sfs.elasticsearch;
 
 import com.google.common.base.Optional;
-import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.logging.Logger;
 import org.elasticsearch.action.search.ClearScrollRequestBuilder;
@@ -137,6 +136,11 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
     }
 
     @Override
+    public ScanAndScrollStreamProducer fetch(long amount) {
+        return this;
+    }
+
+    @Override
     public ScanAndScrollStreamProducer exceptionHandler(Handler<Throwable> handler) {
         this.exceptionHandler = handler;
         return this;
@@ -147,6 +151,11 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
         this.endHandler = endHandler;
         handleEnd();
         return this;
+    }
+
+    @Override
+    public boolean isEnded() {
+        return ended;
     }
 
     protected void handleEnd() {
@@ -234,9 +243,7 @@ public class ScanAndScrollStreamProducer implements StreamProducer<SearchHit> {
             } finally {
                 emitting = false;
             }
-        } else
-
-        {
+        } else {
             if (!queried) {
                 emitting = true;
                 query().subscribe(

@@ -21,14 +21,15 @@ import com.google.common.collect.Iterables;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.filesystem.volume.DigestBlob;
 import org.sfs.io.BufferEndableWriteStream;
+import org.sfs.io.EndableReadStream;
 import org.sfs.io.MultiEndableWriteStream;
 import org.sfs.io.PipedEndableWriteStream;
 import org.sfs.io.PipedReadStream;
+import org.sfs.rx.ContextScheduler;
 import org.sfs.rx.Defer;
 import org.sfs.rx.RxHelper;
 import org.sfs.util.MessageDigestFactory;
@@ -99,11 +100,11 @@ public class VolumeReplicaGroup {
         return numberOfObjectCopies > 0 ? Math.max(getQuorumNumber(), 1) : 1;
     }
 
-    public Observable<List<DigestBlob>> consume(final long length, final MessageDigestFactory messageDigestFactories, ReadStream<Buffer> src) {
+    public Observable<List<DigestBlob>> consume(final long length, final MessageDigestFactory messageDigestFactories, EndableReadStream<Buffer> src) {
         return consume(length, singletonList(messageDigestFactories), src);
     }
 
-    public Observable<List<DigestBlob>> consume(final long length, final Iterable<MessageDigestFactory> messageDigestFactories, ReadStream<Buffer> src) {
+    public Observable<List<DigestBlob>> consume(final long length, final Iterable<MessageDigestFactory> messageDigestFactories, EndableReadStream<Buffer> src) {
         return calculateNodeWriteStreamBlobs(length, toArray(messageDigestFactories, MessageDigestFactory.class))
                 .flatMap(nodeWriteStreamBlobs -> {
                     int size = nodeWriteStreamBlobs.size();
@@ -117,10 +118,12 @@ public class VolumeReplicaGroup {
                         writeStreams.add(writeStream);
                     }
 
-                    MultiEndableWriteStream multiWriteStream = new MultiEndableWriteStream(writeStreams);
+                    ContextScheduler scheduler = vertxContext.rxVertx().contextScheduler();
+                    MultiEndableWriteStream multiWriteStream = new MultiEndableWriteStream(vertxContext.rxVertx(), writeStreams);
                     Observable<Void> producer = pump(src, multiWriteStream).single();
                     Observable<List<DigestBlob>> consumer =
                             Observable.mergeDelayError(oDigests)
+                                    .observeOn(scheduler, true)
                                     .toList()
                                     .single();
                     // the zip operator will not work here
@@ -133,26 +136,28 @@ public class VolumeReplicaGroup {
                 });
     }
 
-    public Observable<List<ConnectedVolume>> getReplicaVolumesForWrite(List<ConnectedVolume> toIgnore, long requiredSpace, int numberOfReplicas, boolean allowSameNode, MessageDigestFactory... messageDigestFactories) {
+    public Observable<List<ConnectedVolume>> getReplicaVolumesForWrite(NavigableMap<Long, Set<String>> volumesBySpace, List<ConnectedVolume> toIgnore, long requiredSpace, int numberOfReplicas, boolean allowSameNode, MessageDigestFactory... messageDigestFactories) {
         if (numberOfReplicas > 0) {
-            return getVolumesForWrite(clusterInfo.getStartedVolumeIdByUseableSpace(), toIgnore, requiredSpace, numberOfReplicas, allowSameNode, messageDigestFactories);
+            return getVolumesForWrite(volumesBySpace, toIgnore, requiredSpace, numberOfReplicas, allowSameNode, messageDigestFactories);
         }
         return Defer.just(Collections.emptyList());
     }
 
     protected Observable<List<NodeWriteStreamBlob>> calculateNodeWriteStreamBlobs(final long length, final MessageDigestFactory... messageDigestFactories) {
         int replicaQuorumNumber = getQuorumMinNumberOfCopies();
-        return getReplicaVolumesForWrite(Collections.emptyList(), length, numberOfObjectCopies, allowSameNode, messageDigestFactories)
-                .doOnNext(targetReplicaVolumes -> checkFoundSufficientVolumes(targetReplicaVolumes.size(), replicaQuorumNumber, false))
+        NavigableMap<Long, Set<String>> volumesBySpace = clusterInfo.getStartedVolumeIdByUseableSpace();
+        return getReplicaVolumesForWrite(volumesBySpace, Collections.emptyList(), length, numberOfObjectCopies, allowSameNode, messageDigestFactories)
+                .doOnNext(connectedVolumes -> checkFoundSufficientVolumes(connectedVolumes, replicaQuorumNumber, length, volumesBySpace))
                 .flatMap(Observable::from)
                 .map(ConnectedVolume::getNodeWriteStreamBlob)
                 .toList();
 
     }
 
-    protected void checkFoundSufficientVolumes(int actualMatches, int expectedMatches, boolean primary) {
+    protected void checkFoundSufficientVolumes(List<ConnectedVolume> connectedVolumes, int expectedMatches, long requiredSpace, NavigableMap<Long, Set<String>> volumesBySpace) {
+        int actualMatches = connectedVolumes.size();
         if (actualMatches < expectedMatches) {
-            throw new InsufficientReplicaVolumesAvailableException(expectedMatches, actualMatches);
+            throw new InsufficientReplicaVolumesAvailableException(expectedMatches, requiredSpace, connectedVolumes, volumesBySpace);
         }
     }
 
@@ -271,6 +276,16 @@ public class VolumeReplicaGroup {
 
         public String getVolumeId() {
             return volumeId;
+        }
+
+        @Override
+        public String toString() {
+            return "ConnectedVolume{" +
+                    "nodeId='" + nodeId + '\'' +
+                    ", xNode=" + xNode +
+                    ", volumeId='" + volumeId + '\'' +
+                    ", nodeWriteStreamBlob=" + nodeWriteStreamBlob +
+                    '}';
         }
     }
 

@@ -64,17 +64,17 @@
             <dependency>
                 <groupId>io.vertx</groupId>
                 <artifactId>vertx-core</artifactId>
-                <version>3.5.1</version>
+                <version>3.6.3</version>
             </dependency>
             <dependency>
                 <groupId>io.vertx</groupId>
                 <artifactId>vertx-web</artifactId>
-                <version>3.5.1</version>
+                <version>3.6.3</version>
             </dependency>
             <dependency>
                 <groupId>io.vertx</groupId>
                 <artifactId>vertx-unit</artifactId>
-                <version>3.5.1</version>
+                <version>3.6.3</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
@@ -95,7 +95,7 @@
             <dependency>
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-ext-jdk15on</artifactId>
-                <version>1.55</version>
+                <version>1.61</version>
             </dependency>
             <dependency>
                 <groupId>ch.qos.logback</groupId>

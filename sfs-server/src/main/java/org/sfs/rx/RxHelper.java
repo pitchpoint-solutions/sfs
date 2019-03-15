@@ -59,6 +59,17 @@ public class RxHelper {
         return base;
     }
 
+    public static <T> Observable<T> onErrorResumeNextExponential(int delay, int retry, Func0<Observable<T>> func0) {
+        Observable<T> base = func0.call();
+        for (int i = 1; i <= retry; i++) {
+            long d = 2 ^ i * delay;
+            base = base.onErrorResumeNext(throwable -> Defer.aVoid()
+                    .delay(d, TimeUnit.MILLISECONDS)
+                    .flatMap(aVoid -> func0.call()));
+        }
+        return base;
+    }
+
     @SuppressWarnings("unchecked")
     public static final <T1, T2, R> Observable<R> combineSinglesDelayError(Observable<? extends T1> o1, Observable<? extends T2> o2, Func2<? super T1, ? super T2, ? extends R> combineFunction) {
         return combineSinglesDelayError(asList(o1.single(), o2.single()), fromFunc(combineFunction));
@@ -112,19 +123,20 @@ public class RxHelper {
     }
 
     public static <T> Observable<T> executeBlocking(Context context, ExecutorService executorService, Func0<T> func0) {
-        return Defer.aVoid()
-                .flatMap(aVoid -> {
-                    ObservableFuture<T> observableFuture = RxHelper.observableFuture();
-                    executorService.execute(() -> {
-                        try {
-                            T result = func0.call();
-                            context.runOnContext(event -> observableFuture.complete(result));
-                        } catch (Throwable e) {
-                            context.runOnContext(event -> observableFuture.fail(e));
-                        }
-                    });
-                    return observableFuture;
-                });
+        try {
+            ObservableFuture<T> observableFuture = RxHelper.observableFuture();
+            executorService.execute(() -> {
+                try {
+                    T result = func0.call();
+                    context.runOnContext(event -> observableFuture.complete(result));
+                } catch (Throwable e) {
+                    context.runOnContext(event -> observableFuture.fail(e));
+                }
+            });
+            return observableFuture;
+        } catch (Throwable e) {
+            return Observable.error(e);
+        }
     }
 
     private static final <T, R> Observable<R> combineSinglesDelayError(List<? extends Observable<? extends T>> sources, FuncN<? extends R> combineFunction) {
@@ -200,7 +212,6 @@ public class RxHelper {
         observable.subscribe(onNext, onError, onComplete);
         return observable.toHandler();
     }
-
 
     public static Scheduler scheduler(Context context) {
         return new ContextScheduler(context, false);

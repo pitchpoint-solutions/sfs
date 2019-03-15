@@ -35,6 +35,11 @@ public class CountingEndableWriteStream implements BufferEndableWriteStream {
     }
 
     @Override
+    public boolean isEnded() {
+        return delegate != null && delegate.isEnded();
+    }
+
+    @Override
     public CountingEndableWriteStream write(Buffer data) {
         count = checkedAdd(count, data.length());
         delegate.write(data);

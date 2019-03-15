@@ -16,17 +16,21 @@
 
 package org.sfs.io;
 
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
 import org.sfs.rx.ObservableFuture;
 import org.sfs.rx.RxHelper;
+import org.sfs.rx.RxVertx;
 import rx.Observable;
+import rx.Scheduler;
 import rx.Subscriber;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.RandomAccess;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
@@ -42,30 +46,24 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
     private Handler<Void> delegateDrainHandler;
     private Handler<Throwable> delegateErrorHandler;
     private boolean ended = false;
+    private Scheduler scheduler;
 
-    public MultiEndableWriteStream(List<BufferEndableWriteStream> writeStreams) {
-        this.size = writeStreams.size();
-        this.drainHandlers = new ArrayList<>(size);
-        this.endHandlers = new ArrayList<>(size);
+    public MultiEndableWriteStream(RxVertx vertx, List<BufferEndableWriteStream> writeStreams) {
+        Preconditions.checkArgument(writeStreams instanceof RandomAccess, "writeStreams must support RandomAccess");
+        this.scheduler = vertx.contextScheduler();
         this.delegateWriteStreams = writeStreams;
-    }
-
-    public MultiEndableWriteStream(BufferEndableWriteStream[] writeStreams) {
-        this.delegateWriteStreams = new ArrayList<>(writeStreams.length);
-        Collections.addAll(this.delegateWriteStreams, writeStreams);
-        this.drainHandlers = new ArrayList<>(writeStreams.length);
-        this.endHandlers = new ArrayList<>(writeStreams.length);
-        this.size = delegateWriteStreams.size();
-    }
-
-
-    public MultiEndableWriteStream(BufferEndableWriteStream writeStream, BufferEndableWriteStream... writeStreams) {
-        this.delegateWriteStreams = new ArrayList<>(1 + writeStreams.length);
-        this.drainHandlers = new ArrayList<>(1 + writeStreams.length);
-        this.endHandlers = new ArrayList<>(1 + writeStreams.length);
-        this.delegateWriteStreams.add(writeStream);
-        Collections.addAll(this.delegateWriteStreams, writeStreams);
+        this.drainHandlers = new ArrayList<>(1 + writeStreams.size());
+        this.endHandlers = new ArrayList<>(1 + writeStreams.size());
         this.size = this.delegateWriteStreams.size();
+    }
+
+    public MultiEndableWriteStream(RxVertx vertx, BufferEndableWriteStream... writeStreams) {
+        this(vertx, Lists.newArrayList(writeStreams));
+    }
+
+    @Override
+    public boolean isEnded() {
+        return ended;
     }
 
     @Override
@@ -162,6 +160,7 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
             Handler<Void> handler = delegateDrainHandler;
             delegateDrainHandler = null;
             Observable.mergeDelayError(drainHandlers)
+                    .observeOn(scheduler, true)
                     .count()
                     .subscribe(new Subscriber<Integer>() {
                         @Override
@@ -186,6 +185,7 @@ public class MultiEndableWriteStream implements BufferEndableWriteStream {
         if (ended && handler != null) {
             delegateEndHandler = null;
             Observable.mergeDelayError(endHandlers)
+                    .observeOn(scheduler, true)
                     .count()
                     .subscribe(new Subscriber<Integer>() {
                         @Override

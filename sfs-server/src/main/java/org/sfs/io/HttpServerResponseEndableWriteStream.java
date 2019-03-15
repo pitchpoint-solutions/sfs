@@ -33,6 +33,11 @@ public class HttpServerResponseEndableWriteStream implements BufferEndableWriteS
     }
 
     @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
+    @Override
     public HttpServerResponseEndableWriteStream write(Buffer data) {
         checkNotEnded();
         httpServerResponse.write(data);

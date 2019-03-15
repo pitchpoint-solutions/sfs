@@ -36,6 +36,11 @@ public class BufferWriteEndableWriteStream implements BufferEndableWriteStream {
         this(Buffer.buffer());
     }
 
+    @Override
+    public boolean isEnded() {
+        return ended;
+    }
+
     public Buffer toBuffer() {
         return buffer;
     }

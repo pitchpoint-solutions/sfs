@@ -16,11 +16,15 @@
 
 package org.sfs.nodes;
 
+import java.util.List;
+import java.util.NavigableMap;
+import java.util.Set;
+
 import static java.lang.String.format;
 
 public class InsufficientReplicaVolumesAvailableException extends RuntimeException {
 
-    public InsufficientReplicaVolumesAvailableException(int expected, int available) {
-        super(format("Expected %s, available %d", expected, available));
+    public InsufficientReplicaVolumesAvailableException(int expected, long requiredSpace, List<VolumeReplicaGroup.ConnectedVolume> connectedVolumes, NavigableMap<Long, Set<String>> volumesBySpace) {
+        super(format("Expected: %s, Available: %d, Required space: %d, Connected Volumes: %s, Available Volumes %s", expected, connectedVolumes.size(), requiredSpace, connectedVolumes, volumesBySpace));
     }
 }
