@@ -1,14 +1,15 @@
 FROM phusion/baseimage:latest
 
-RUN \
-  echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | debconf-set-selections && \
-  add-apt-repository -y ppa:webupd8team/java && \
-  apt-get update && \
-  apt-get install -y oracle-java8-installer && \
-  rm -rf /var/lib/apt/lists/* && \
-  rm -rf /var/cache/oracle-jdk8-installer
+# Install basic software support
+RUN apt-get update && \
+    apt-get install --yes software-properties-common && \
+    mkdir -p /usr/lib/jvm
 
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+ADD jdk-8u202-linux-x64.tar.gz /usr/lib/jvm
+
+RUN mv /usr/lib/jvm/jdk1.8.0_202 /usr/lib/jvm/java-8-oracle
 
 ENV JAVA_HOME /usr/lib/jvm/java-8-oracle
 ENV HEAP_SIZE 512m
