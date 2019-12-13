@@ -18,7 +18,6 @@ package org.sfs.nodes.compute.object;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
-import io.vertx.core.streams.ReadStream;
 import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.encryption.ContainerKeys;
@@ -30,8 +29,6 @@ import org.sfs.io.DigestReadStream;
 import org.sfs.io.EndableReadStream;
 import org.sfs.nodes.Nodes;
 import org.sfs.nodes.VolumeReplicaGroup;
-import org.sfs.nodes.XNode;
-import org.sfs.rx.Holder2;
 import org.sfs.util.MessageDigestFactory;
 import org.sfs.vo.PersistentContainer;
 import org.sfs.vo.TransientSegment;
@@ -75,8 +72,11 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
             return containerKeys.preferredAlgorithm(vertxContext, persistentContainer)
                     .flatMap(keyResponse -> {
 
-                        VolumeReplicaGroup volumeReplicaGroup = new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectCopies())
-                                .setAllowSameNode(nodes.isAllowSameNode());
+                        VolumeReplicaGroup volumeReplicaGroup =
+                                new VolumeReplicaGroup(vertxContext,
+                                        persistentContainer.computeNumberOfObjectCopies(nodes),
+                                        persistentContainer.computeWriteConsistency(nodes))
+                                        .setAllowSameNode(nodes.isAllowSameNode());
 
                         long encryptedLength = keyResponse.getData().encryptOutputSize(contentLength);
 
@@ -142,7 +142,9 @@ public class WriteNewSegment implements Func1<TransientVersion, Observable<Trans
         } else {
 
             VolumeReplicaGroup volumeReplicaGroup =
-                    new VolumeReplicaGroup(vertxContext, nodes.getNumberOfObjectCopies())
+                    new VolumeReplicaGroup(vertxContext,
+                            persistentContainer.computeNumberOfObjectCopies(nodes),
+                            persistentContainer.computeWriteConsistency(nodes))
                             .setAllowSameNode(nodes.isAllowSameNode());
 
             final CountingReadStream clearByteCount = new CountingReadStream(readStream);

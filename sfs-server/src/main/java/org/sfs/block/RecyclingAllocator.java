@@ -24,17 +24,17 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
-import java.util.TreeMap;
-import java.util.TreeSet;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class RecyclingAllocator {
 
     private final Object mutex = new Object();
-    private final NavigableMap<Long, Range> byPosition = new TreeMap<>();
-    private final NavigableMap<Long, NavigableSet<Range>> bySize = new TreeMap<>();
+    private AtomicLong numberOfFreeRanges = new AtomicLong(0);
+    private final NavigableMap<Long, Range> byPosition = new ConcurrentSkipListMap<>();
+    private final NavigableMap<Long, NavigableSet<Range>> bySize = new ConcurrentSkipListMap<>();
     private final Comparator<Range> byPositionComparator = (o1, o2) -> Long.compare(o1.getFirst(), o2.getFirst());
-    private final AtomicLong bytesFree = new AtomicLong(0);
     private final int blockSize;
 
     public RecyclingAllocator(int blockSize) {
@@ -42,33 +42,6 @@ public class RecyclingAllocator {
         this.blockSize = blockSize;
         Range toMerge = new Range(0, computeLast(0, Rounding.down(Long.MAX_VALUE, blockSize)));
         free0(toMerge);
-    }
-
-    public long allocFromLastRange(long length) {
-        synchronized (mutex) {
-            Map.Entry<Long, Range> lastEntry = byPosition.pollLastEntry();
-            Preconditions.checkNotNull(lastEntry);
-            Range range = lastEntry.getValue();
-            Preconditions.checkNotNull(lastEntry);
-
-            long blockCount = range.getBlockCount();
-            NavigableSet<Range> sortedByPosition = bySize.get(blockCount);
-            Preconditions.checkNotNull(sortedByPosition);
-            Preconditions.checkState(sortedByPosition.remove(range));
-            if (sortedByPosition.isEmpty()) {
-                Preconditions.checkState(sortedByPosition == bySize.remove(blockCount));
-            }
-            Preconditions.checkState(range == byPosition.remove(range.getFirst()));
-            bytesFree.addAndGet(-blockCount);
-
-            Preconditions.checkNotNull(range);
-            long position = range.getFirst();
-            Range[] updated = range.remove(position, computeLast(position, length));
-            for (Range update : updated) {
-                putRange(update);
-            }
-            return position;
-        }
     }
 
     public long allocNextAvailable(long length) {
@@ -85,7 +58,7 @@ public class RecyclingAllocator {
                     Preconditions.checkState(sortedByPosition == bySize.remove(numberOfBlocks));
                 }
                 Preconditions.checkState(match == byPosition.remove(match.getFirst()));
-                bytesFree.addAndGet(-numberOfBlocks);
+                numberOfFreeRanges.decrementAndGet();
             }
             Preconditions.checkNotNull(match);
             long position = match.getFirst();
@@ -136,7 +109,7 @@ public class RecyclingAllocator {
             Preconditions.checkState(sortedByPosition == bySize.remove(blockCount));
         }
         Preconditions.checkState(range == byPosition.remove(range.getFirst()));
-        bytesFree.addAndGet(-blockCount);
+        numberOfFreeRanges.decrementAndGet();
     }
 
     private void putRange(Range range) {
@@ -148,11 +121,11 @@ public class RecyclingAllocator {
         }
         Preconditions.checkState(sortedBySize.add(range));
         Preconditions.checkState(byPosition.put(range.getFirst(), range) == null);
-        bytesFree.addAndGet(blockCount);
+        numberOfFreeRanges.incrementAndGet();
     }
 
     private NavigableSet<Range> newSortedByPosition() {
-        return new TreeSet<>(byPositionComparator);
+        return new ConcurrentSkipListSet<>(byPositionComparator);
     }
 
 
@@ -203,24 +176,31 @@ public class RecyclingAllocator {
     }
 
     public int getNumberOfFreeRanges() {
-        return byPosition.size();
+        long num = numberOfFreeRanges.get();
+        if (num > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        return (int) num;
     }
 
     public long getBytesFree(long useableSpace) {
-        long free = bytesFree.get();
         synchronized (mutex) {
-            for (Range range : byPosition.descendingMap().values()) {
-                long first = range.getFirst();
-                if (first >= useableSpace) {
-                    free -= range.getBlockCount();
+            useableSpace = Math.max(0, useableSpace);
+            long free = 0;
+            Range last = byPosition.lastEntry().getValue();
+            for (Range range : byPosition.values()) {
+                if (range == last) {
+                    long firstPosition = range.getFirst();
+                    long length = Rounding.down(useableSpace, blockSize);
+                    long lastPosition = computeLast(firstPosition, length - firstPosition);
+                    Range adjustedLast = new Range(firstPosition, lastPosition);
+                    free = LongMath.checkedAdd(free, adjustedLast.getBlockCount());
                 } else {
-                    free -= range.getBlockCount();
-                    free += (useableSpace - first);
-                    break;
+                    free = LongMath.checkedAdd(free, range.getBlockCount());
                 }
             }
+            return free;
         }
-        return free;
     }
 
     protected long computeLast(long first, long length) {

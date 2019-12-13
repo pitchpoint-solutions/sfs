@@ -27,7 +27,6 @@ import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
-import io.vertx.core.streams.ReadStream;
 import org.sfs.SfsVertx;
 import org.sfs.block.RangeLock;
 import org.sfs.block.RecyclingAllocator;
@@ -150,7 +149,7 @@ public class VolumeV1 implements Volume {
                         try {
                             FileStore fileStore = Files.getFileStore(basePath);
 
-                            long usableSpace = fileStore.getUsableSpace();
+                            long usableSpace = Math.max(0, fileStore.getUsableSpace());
                             long actualUsableSpace;
                             try {
                                 actualUsableSpace = LongMath.checkedAdd(indexFileAllocator.getBytesFree(usableSpace), dataFileAllocator.getBytesFree(usableSpace));

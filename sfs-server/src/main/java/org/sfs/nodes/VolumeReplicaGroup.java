@@ -57,11 +57,17 @@ public class VolumeReplicaGroup {
     private boolean allowSameNode = false;
     private Set<String> excludeVolumes;
     private ClusterInfo clusterInfo;
+    private WriteConsistency writeConsistency;
 
-    public VolumeReplicaGroup(VertxContext<Server> vertxContext, int numberOfObjectCopies) {
+    public VolumeReplicaGroup(VertxContext<Server> vertxContext, int numberOfObjectCopies, WriteConsistency writeConsistency) {
         this.vertxContext = vertxContext;
         this.numberOfObjectCopies = numberOfObjectCopies;
+        this.writeConsistency = writeConsistency;
         this.clusterInfo = vertxContext.verticle().getClusterInfo();
+    }
+
+    public VolumeReplicaGroup(VertxContext<Server> vertxContext, int numberOfObjectCopies) {
+        this(vertxContext, numberOfObjectCopies, WriteConsistency.QUORUM);
     }
 
     public boolean isAllowSameNode() {
@@ -70,6 +76,15 @@ public class VolumeReplicaGroup {
 
     public int getNumberOfObjectCopies() {
         return numberOfObjectCopies;
+    }
+
+    public WriteConsistency getWriteConsistency() {
+        return writeConsistency;
+    }
+
+    public VolumeReplicaGroup setWriteConsistency(WriteConsistency writeConsistency) {
+        this.writeConsistency = writeConsistency;
+        return this;
     }
 
     public VolumeReplicaGroup setNumberOfObjectCopies(int numberOfObjectCopies) {
@@ -98,6 +113,10 @@ public class VolumeReplicaGroup {
 
     public int getQuorumMinNumberOfCopies() {
         return numberOfObjectCopies > 0 ? Math.max(getQuorumNumber(), 1) : 1;
+    }
+
+    public int getMinNumberOfCopies() {
+        return WriteConsistency.QUORUM.equals(writeConsistency) ? getQuorumMinNumberOfCopies() : 1;
     }
 
     public Observable<List<DigestBlob>> consume(final long length, final MessageDigestFactory messageDigestFactories, EndableReadStream<Buffer> src) {
@@ -144,10 +163,10 @@ public class VolumeReplicaGroup {
     }
 
     protected Observable<List<NodeWriteStreamBlob>> calculateNodeWriteStreamBlobs(final long length, final MessageDigestFactory... messageDigestFactories) {
-        int replicaQuorumNumber = getQuorumMinNumberOfCopies();
+        int minNumberOfCopies = getMinNumberOfCopies();
         NavigableMap<Long, Set<String>> volumesBySpace = clusterInfo.getStartedVolumeIdByUseableSpace();
         return getReplicaVolumesForWrite(volumesBySpace, Collections.emptyList(), length, numberOfObjectCopies, allowSameNode, messageDigestFactories)
-                .doOnNext(connectedVolumes -> checkFoundSufficientVolumes(connectedVolumes, replicaQuorumNumber, length, volumesBySpace))
+                .doOnNext(connectedVolumes -> checkFoundSufficientVolumes(connectedVolumes, minNumberOfCopies, length, volumesBySpace))
                 .flatMap(Observable::from)
                 .map(ConnectedVolume::getNodeWriteStreamBlob)
                 .toList();

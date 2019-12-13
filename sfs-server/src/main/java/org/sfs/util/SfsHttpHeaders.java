@@ -69,5 +69,6 @@ public class SfsHttpHeaders {
     public static final String X_SFS_OBJECT_INDEX_SHARDS = "x-sfs-object-index-shards";
     public static final String X_SFS_OBJECT_INDEX_REPLICAS = "x-sfs-object-index-replicas";
     public static final String X_SFS_OBJECT_REPLICAS = "x-sfs-object-replicas";
+    public static final String X_SFS_OBJECT_WRITE_CONSISTENCY = "x-sfs-object-write-consistency";
 
 }

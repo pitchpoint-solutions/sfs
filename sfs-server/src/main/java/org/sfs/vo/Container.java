@@ -17,11 +17,15 @@
 package org.sfs.vo;
 
 import com.google.common.base.Optional;
+import com.google.common.base.Preconditions;
 import io.vertx.core.MultiMap;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import org.apache.commons.lang.StringUtils;
 import org.sfs.SfsRequest;
 import org.sfs.metadata.Metadata;
+import org.sfs.nodes.Nodes;
+import org.sfs.nodes.WriteConsistency;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -44,6 +48,7 @@ import static org.sfs.util.Limits.MAX_OBJECT_REVISIONS;
 import static org.sfs.util.Limits.NOT_SET;
 import static org.sfs.util.NullSafeAscii.equalsIgnoreCase;
 import static org.sfs.util.SfsHttpHeaders.X_SFS_OBJECT_REPLICAS;
+import static org.sfs.util.SfsHttpHeaders.X_SFS_OBJECT_WRITE_CONSISTENCY;
 import static org.sfs.vo.ObjectPath.fromPaths;
 
 public abstract class Container<T extends Container> {
@@ -57,6 +62,7 @@ public abstract class Container<T extends Container> {
     private Calendar createTs;
     private Calendar updateTs;
     private Integer objectReplicas;
+    private WriteConsistency objectWriteConsistency;
 
     public Container(PersistentAccount parent, String id) {
         this.parent = parent;
@@ -158,6 +164,15 @@ public abstract class Container<T extends Container> {
         return false;
     }
 
+    public WriteConsistency getObjectWriteConsistency() {
+        return objectWriteConsistency;
+    }
+
+    public T setObjectWriteConsistency(WriteConsistency objectWriteConsistency) {
+        this.objectWriteConsistency = objectWriteConsistency;
+        return (T) this;
+    }
+
     public int getObjectReplicas() {
         return objectReplicas != null ? NOT_SET : objectReplicas;
     }
@@ -165,6 +180,32 @@ public abstract class Container<T extends Container> {
     public T setObjectReplicas(int objectReplicas) {
         this.objectReplicas = objectReplicas;
         return (T) this;
+    }
+
+    public int computeObjectReplicas(Nodes nodes) {
+        if (objectReplicas != null && objectReplicas >= 0) {
+            return objectReplicas;
+        } else {
+            int numberOfObjectReplicas = nodes.getNumberOfObjectReplicas();
+            Preconditions.checkArgument(numberOfObjectReplicas >= 0, "numberOfObjectReplicas must be >= 0 but was %s", numberOfObjectReplicas);
+            return numberOfObjectReplicas;
+        }
+    }
+
+    public int computeNumberOfObjectCopies(Nodes nodes) {
+        return computeObjectReplicas(nodes) + 1;
+    }
+
+    public WriteConsistency computeWriteConsistency(Nodes nodes) {
+        if (objectWriteConsistency != null) {
+            return objectWriteConsistency;
+        } else {
+            WriteConsistency writeConsistency = nodes.getObjectWriteConsistency();
+            if (writeConsistency == null) {
+                writeConsistency = WriteConsistency.QUORUM;
+            }
+            return writeConsistency;
+        }
     }
 
     public T merge(JsonObject document) {
@@ -190,6 +231,15 @@ public abstract class Container<T extends Container> {
 
         setObjectReplicas(document.containsKey("object_replicas") ? document.getInteger("object_replicas") : NOT_SET);
 
+        if (document.containsKey("object_write_consistency")) {
+            WriteConsistency writeConsistency = WriteConsistency.fromValueIfExists(document.getString("object_write_consistency"));
+            // null is node default
+            setObjectWriteConsistency(writeConsistency);
+        } else {
+            // null is node default
+            setObjectWriteConsistency(null);
+        }
+
         return (T) this;
     }
 
@@ -201,6 +251,19 @@ public abstract class Container<T extends Container> {
             setObjectReplicas(parseInt(headers.get(X_SFS_OBJECT_REPLICAS)));
         } else {
             setObjectReplicas(NOT_SET);
+        }
+
+        if (headers.contains(X_SFS_OBJECT_WRITE_CONSISTENCY)) {
+            String str = headers.get(X_SFS_OBJECT_WRITE_CONSISTENCY);
+            if (StringUtils.isBlank(str)) {
+                // if it's blank set consistency to use node settings
+                setObjectWriteConsistency(null);
+            } else {
+                WriteConsistency writeConsistency = WriteConsistency.fromValueIfExists(headers.get(X_SFS_OBJECT_WRITE_CONSISTENCY));
+                if (writeConsistency != null) {
+                    setObjectWriteConsistency(writeConsistency);
+                }
+            }
         }
 
         getMetadata().withHttpHeaders(headers);
@@ -224,6 +287,10 @@ public abstract class Container<T extends Container> {
         document.put("update_ts", toDateTimeString(getUpdateTs()));
 
         document.put("object_replicas", objectReplicas);
+
+        if (objectWriteConsistency != null) {
+            document.put("object_write_consistency", objectWriteConsistency.getValue());
+        }
 
         return document;
     }

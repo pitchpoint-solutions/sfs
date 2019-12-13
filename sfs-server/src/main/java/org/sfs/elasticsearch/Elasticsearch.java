@@ -425,13 +425,13 @@ public class Elasticsearch {
                         SearchResponse searchResponse = (SearchResponse) response;
                         int totalShards = searchResponse.getTotalShards();
                         int successfulShards = searchResponse.getSuccessfulShards();
-                        Preconditions.checkState(totalShards == successfulShards, "%s shards succeeded, expected %s", successfulShards, totalShards);
+                        Preconditions.checkState(successfulShards > 0, "%s shards succeeded, expected %s", successfulShards, totalShards);
                     } else if (response instanceof ActionWriteResponse) {
                         ActionWriteResponse actionWriteResponse = (ActionWriteResponse) response;
                         ActionWriteResponse.ShardInfo shardInfo = actionWriteResponse.getShardInfo();
                         int totalShards = shardInfo.getTotal();
                         int successfulShards = shardInfo.getSuccessful();
-                        Preconditions.checkState(totalShards == successfulShards, "%s shards succeeded, expected %s", successfulShards, totalShards);
+                        Preconditions.checkState(successfulShards > 0, "%s shards succeeded, expected %s", successfulShards, totalShards);
                     } else if (response instanceof AcknowledgedResponse) {
                         AcknowledgedResponse acknowledgedResponse = (AcknowledgedResponse) response;
                         Preconditions.checkState(acknowledgedResponse.isAcknowledged(), "request not ack'd");

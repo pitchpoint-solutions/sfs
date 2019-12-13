@@ -31,7 +31,6 @@ import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.util.Arrays;
 
 public class SAES256v02 extends Algorithm {
 
@@ -39,9 +38,8 @@ public class SAES256v02 extends Algorithm {
     public static final int KEY_SIZE_BYTES = KEY_SIZE_BITS / 8;
     public static final int TAG_LENGTH_BITS = 96;
     public static final int NONCE_SIZE_BYTES = 12;
-    private byte[] salt;
-    private final Cipher encryptor;
-    private final Cipher decryptor;
+    private final byte[] salt;
+    private final byte[] secret;
     private static final long MAX_LONG_BUFFER_SIZE = Long.MAX_VALUE - 12;
     private static final int TAG_LENGTH_BYTES = TAG_LENGTH_BITS / 8;
 
@@ -49,23 +47,9 @@ public class SAES256v02 extends Algorithm {
         this.salt = salt.clone();
         secretBytes = secretBytes.clone();
         if (secretBytes.length != KEY_SIZE_BYTES) {
-            secretBytes = Hashing.sha256().hashBytes(secretBytes).asBytes();
-        }
-        try {
-            SecretKeySpec key = new SecretKeySpec(secretBytes, "AES");
-
-            GCMParameterSpec spec = new GCMParameterSpec(TAG_LENGTH_BITS, this.salt);
-
-            this.encryptor = Cipher.getInstance("AES/GCM/NoPadding", BouncyCastleProviderSingleton.getInstance());
-            this.encryptor.init(Cipher.ENCRYPT_MODE, key, spec);
-
-            this.decryptor = Cipher.getInstance("AES/GCM/NoPadding", BouncyCastleProviderSingleton.getInstance());
-            this.decryptor.init(Cipher.DECRYPT_MODE, key, spec);
-
-        } catch (Exception e) {
-            throw new RuntimeException("could not create cipher for AES256", e);
-        } finally {
-            Arrays.fill(secretBytes, (byte) 0);
+            this.secret = Hashing.sha256().hashBytes(secretBytes).asBytes();
+        } else {
+            this.secret = secretBytes;
         }
     }
 
@@ -92,7 +76,7 @@ public class SAES256v02 extends Algorithm {
     @Override
     public byte[] encrypt(byte[] buffer) {
         try {
-            return encryptor.doFinal(buffer);
+            return forEncryption().doFinal(buffer);
         } catch (IllegalBlockSizeException | BadPaddingException e) {
             throw new RuntimeException(e);
         }
@@ -101,7 +85,7 @@ public class SAES256v02 extends Algorithm {
     @Override
     public byte[] decrypt(byte[] buffer) {
         try {
-            return decryptor.doFinal(buffer);
+            return forDecryption().doFinal(buffer);
         } catch (IllegalBlockSizeException | BadPaddingException e) {
             throw new RuntimeException(e);
         }
@@ -119,21 +103,49 @@ public class SAES256v02 extends Algorithm {
 
     @Override
     public <T extends CipherEndableWriteStream> T decrypt(BufferEndableWriteStream writeStream) {
-        return (T) new CipherEndableWriteStream(writeStream, decryptor);
+        return (T) new CipherEndableWriteStream(writeStream, forDecryption());
     }
 
     @Override
     public <T extends CipherEndableWriteStream> T encrypt(BufferEndableWriteStream writeStream) {
-        return (T) new CipherEndableWriteStream(writeStream, encryptor);
+        return (T) new CipherEndableWriteStream(writeStream, forEncryption());
     }
 
     @Override
     public <T extends CipherReadStream> T encrypt(EndableReadStream<Buffer> readStream) {
-        return (T) new CipherReadStream(readStream, encryptor);
+        return (T) new CipherReadStream(readStream, forEncryption());
     }
 
     @Override
     public <T extends CipherReadStream> T decrypt(EndableReadStream<Buffer> readStream) {
-        return (T) new CipherReadStream(readStream, decryptor);
+        return (T) new CipherReadStream(readStream, forDecryption());
+    }
+
+    protected Cipher forEncryption() {
+        try {
+            SecretKeySpec key = new SecretKeySpec(secret, "AES");
+
+            GCMParameterSpec spec = new GCMParameterSpec(TAG_LENGTH_BITS, this.salt);
+
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding", BouncyCastleProviderSingleton.getInstance());
+            cipher.init(Cipher.ENCRYPT_MODE, key, spec);
+            return cipher;
+        } catch (Exception e) {
+            throw new RuntimeException("could not create cipher for AES256", e);
+        }
+    }
+
+    protected Cipher forDecryption() {
+        try {
+            SecretKeySpec key = new SecretKeySpec(secret, "AES");
+
+            GCMParameterSpec spec = new GCMParameterSpec(TAG_LENGTH_BITS, this.salt);
+
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding", BouncyCastleProviderSingleton.getInstance());
+            cipher.init(Cipher.DECRYPT_MODE, key, spec);
+            return cipher;
+        } catch (Exception e) {
+            throw new RuntimeException("could not create cipher for AES256", e);
+        }
     }
 }

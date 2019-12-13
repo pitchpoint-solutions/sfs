@@ -49,6 +49,7 @@ import org.sfs.jobs.Jobs;
 import org.sfs.nodes.ClusterInfo;
 import org.sfs.nodes.NodeStats;
 import org.sfs.nodes.Nodes;
+import org.sfs.nodes.WriteConsistency;
 import org.sfs.nodes.all.elasticsearch.RefreshIndex;
 import org.sfs.nodes.all.stats.GetClusterStats;
 import org.sfs.nodes.all.stats.GetNodeStats;
@@ -154,6 +155,7 @@ public class SfsSingletonServer extends Server implements Shareable {
     private AuthProviderService authProviderService = new AuthProviderService();
     private boolean testMode;
     private byte[] remoteNodeSecret;
+    private WriteConsistency objectWriteConsistency;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SfsSingletonServer.class);
 
@@ -250,11 +252,16 @@ public class SfsSingletonServer extends Server implements Shareable {
         int numberOfObjectReplicas = new Integer(ConfigHelper.getFieldOrEnv(config, "number_of_object_replicas", "0"));
         Preconditions.checkArgument(numberOfObjectReplicas >= 0, "number_of_object_replicas must be greater or equal to 0");
 
+        String writeModeStr = ConfigHelper.getFieldOrEnv(config, "object_write_consistency", WriteConsistency.QUORUM.getValue());
+        this.objectWriteConsistency = WriteConsistency.fromValueIfExists(writeModeStr);
+        Preconditions.checkArgument(objectWriteConsistency != null, "object_write_consistency must be one of [%s,%s]", WriteConsistency.QUORUM.getValue(), WriteConsistency.ANY.getValue());
+
         int tempFileTtl = new Integer(ConfigHelper.getFieldOrEnv(config, "temp_file_ttl", "86400000"));
         Preconditions.checkArgument(tempFileTtl >= 0, "temp_file_ttl must be greater or equal to 0");
 
         final boolean dataNode = Boolean.valueOf(ConfigHelper.getFieldOrEnv(config, "node.data", "true"));
         final boolean masterNode = Boolean.valueOf(ConfigHelper.getFieldOrEnv(config, "node.master", "true"));
+
 
         this.httpsClient = createHttpClient(vertx, true);
         this.httpClient = createHttpClient(vertx, false);
@@ -277,7 +284,8 @@ public class SfsSingletonServer extends Server implements Shareable {
                                 numberOfObjectReplicas,
                                 nodeStatsRefreshInterval,
                                 dataNode,
-                                masterNode))
+                                masterNode,
+                                objectWriteConsistency))
                 .flatMap(aVoid -> nodeStats.open(vertxContext))
                 .flatMap(aVoid -> clusterInfo.open(vertxContext))
                 .flatMap(aVoid -> masterKeys.start(vertxContext))

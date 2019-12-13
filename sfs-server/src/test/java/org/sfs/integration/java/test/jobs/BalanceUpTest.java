@@ -124,7 +124,7 @@ public class BalanceUpTest extends BaseTestVerticle {
                     })
                     .map(aVoid -> {
                         Nodes nodes = vertxContext().verticle().nodes();
-                        nodes.setNumberOfObjectCopies(4)
+                        nodes.setNumberOfObjectReplicas(3)
                                 .setAllowSameNode(true);
                         return (Void) null;
                     })
@@ -218,7 +218,7 @@ public class BalanceUpTest extends BaseTestVerticle {
                     .map(new ToVoid<>())
                     .map(aVoid -> {
                         Nodes nodes = vertxContext().verticle().nodes();
-                        nodes.setNumberOfObjectCopies(1)
+                        nodes.setNumberOfObjectReplicas(0)
                                 .setAllowSameNode(true);
                         return (Void) null;
                     })
@@ -320,7 +320,7 @@ public class BalanceUpTest extends BaseTestVerticle {
                     })
                     .map(aVoid -> {
                         Nodes nodes = vertxContext().verticle().nodes();
-                        nodes.setNumberOfObjectCopies(4)
+                        nodes.setNumberOfObjectReplicas(3)
                                 .setAllowSameNode(true);
                         return (Void) null;
                     })

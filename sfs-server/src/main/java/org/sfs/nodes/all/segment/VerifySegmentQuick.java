@@ -21,6 +21,7 @@ import org.sfs.Server;
 import org.sfs.VertxContext;
 import org.sfs.nodes.Nodes;
 import org.sfs.nodes.VolumeReplicaGroup;
+import org.sfs.vo.PersistentContainer;
 import org.sfs.vo.TransientSegment;
 import rx.Observable;
 import rx.functions.Func1;
@@ -51,14 +52,17 @@ public class VerifySegmentQuick implements Func1<TransientSegment, Observable<Bo
             }
             return just(true);
         } else {
-            int replicas = nodes.getNumberOfObjectCopies();
+
+            PersistentContainer container = transientSegment.getParent().getParent().getParent();
+
+            int numberOfObjectCopies = container.computeNumberOfObjectCopies(nodes);
             boolean allowSameNode = nodes.isAllowSameNode();
 
             VolumeReplicaGroup volumeReplicaGroup =
-                    new VolumeReplicaGroup(vertxContext, replicas)
+                    new VolumeReplicaGroup(vertxContext, numberOfObjectCopies, container.computeWriteConsistency(nodes))
                             .setAllowSameNode(allowSameNode);
 
-            boolean verified = size(transientSegment.verifiedAckdBlobs()) >= volumeReplicaGroup.getQuorumMinNumberOfCopies();
+            boolean verified = size(transientSegment.verifiedAckdBlobs()) >= volumeReplicaGroup.getMinNumberOfCopies();
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("end verifysegmentquick object=" + transientSegment.getParent().getParent().getId() + ", version=" + transientSegment.getParent().getId() + ", segment=" + transientSegment.getId() + ", verified=" + verified);
             }

@@ -59,7 +59,7 @@ import static org.sfs.rx.Defer.aVoid;
 public class Nodes {
 
     private static final Logger LOGGER = getLogger(Nodes.class);
-    private int numberOfObjectCopies = 1;
+    private int numberOfObjectReplicas = 0;
     // if true a primary and replica copies of volume data
     // can exist on the same node
     private boolean allowSameNode = false;
@@ -74,6 +74,7 @@ public class Nodes {
     private long nodeStatsRefreshInterval;
     private ImmutableList<HostAndPort> clusterHosts;
     private ImmutableList<HostAndPort> publishAddresses;
+    private WriteConsistency objectWriteConsistency;
 
     public Nodes() {
     }
@@ -88,16 +89,16 @@ public class Nodes {
             final int numberOfObjectReplicas,
             final long nodeStatsRefreshInterval,
             final boolean dataNode,
-            final boolean masterNode) {
+            final boolean masterNode,
+            WriteConsistency writeConsistency) {
 
         checkArgument(numberOfObjectReplicas >= 0, "Replicas must be > 0");
         checkArgument(nodeStatsRefreshInterval >= 1000, "RefreshInterval must be greater than 1000");
 
         this.dataNode = dataNode;
         this.masterNode = masterNode;
-        // add one since the parameter asks for the number of replicas and since one copy
-        // always needs to exist the total number of objects copies is 1 + numberOfObjectReplicas
-        this.numberOfObjectCopies = numberOfObjectReplicas + 1;
+        this.numberOfObjectReplicas = numberOfObjectReplicas;
+        this.objectWriteConsistency = writeConsistency;
         this.maxPoolSize = maxPoolSize;
         this.connectTimeout = connectTimeout;
         this.responseTimeout = responseTimeout;
@@ -137,12 +138,12 @@ public class Nodes {
         return clusterHosts;
     }
 
-    public int getNumberOfObjectCopies() {
-        return numberOfObjectCopies;
+    public int getNumberOfObjectReplicas() {
+        return numberOfObjectReplicas;
     }
 
-    public Nodes setNumberOfObjectCopies(int numberOfObjectCopies) {
-        this.numberOfObjectCopies = numberOfObjectCopies;
+    public Nodes setNumberOfObjectReplicas(int numberOfObjectReplicas) {
+        this.numberOfObjectReplicas = numberOfObjectReplicas;
         return this;
     }
 
@@ -193,6 +194,9 @@ public class Nodes {
         return publishAddresses.get(0);
     }
 
+    public WriteConsistency getObjectWriteConsistency() {
+        return objectWriteConsistency;
+    }
 
     public int getMaxPoolSize() {
         return maxPoolSize;

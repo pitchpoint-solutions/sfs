@@ -36,6 +36,10 @@
       "type": "integer",
       "index": "not_analyzed"
     },
+    "object_write_consistency": {
+      "type": "string",
+      "index": "not_analyzed"
+    },
     "metadata": {
       "dynamic": "strict",
       "type": "nested",

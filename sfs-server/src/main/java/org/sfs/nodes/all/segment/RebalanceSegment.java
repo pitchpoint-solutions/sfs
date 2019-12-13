@@ -29,6 +29,7 @@ import org.sfs.nodes.Nodes;
 import org.sfs.nodes.VolumeReplicaGroup;
 import org.sfs.nodes.all.blobreference.DeleteBlobReference;
 import org.sfs.rx.Defer;
+import org.sfs.vo.PersistentContainer;
 import org.sfs.vo.TransientBlobReference;
 import org.sfs.vo.TransientSegment;
 import org.sfs.vo.TransientServiceDef;
@@ -46,7 +47,6 @@ import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Math.abs;
 import static org.sfs.rx.RxHelper.combineSinglesDelayError;
 import static org.sfs.rx.RxHelper.iterate;
-import static org.sfs.util.Limits.NOT_SET;
 import static org.sfs.util.MessageDigestFactory.SHA512;
 import static rx.Observable.just;
 
@@ -85,9 +85,9 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
                         })
                         .toList();
 
-        int numberOfObjectReplicasRequestedOnContainer = transientSegment.getParent().getParent().getParent().getObjectReplicas();
+        PersistentContainer container = transientSegment.getParent().getParent().getParent();
 
-        int numberOfExpectedCopies = NOT_SET == numberOfObjectReplicasRequestedOnContainer ? nodes.getNumberOfObjectCopies() : numberOfObjectReplicasRequestedOnContainer + 1;
+        int numberOfExpectedCopies = container.computeNumberOfObjectCopies(nodes);
 
         checkState(numberOfExpectedCopies >= 1, "Number of object copies must be greater >= 1");
 
@@ -154,9 +154,10 @@ public class RebalanceSegment implements Func1<TransientSegment, Observable<Bool
                 .flatMap(holder -> {
                     ReadStreamBlob readStreamBlob = holder.value1();
 
+                    PersistentContainer container = transientSegment.getParent().getParent().getParent();
 
                     VolumeReplicaGroup volumeReplicaGroup =
-                            new VolumeReplicaGroup(vertxContext, numberOfCopiesNeeded)
+                            new VolumeReplicaGroup(vertxContext, numberOfCopiesNeeded, container.computeWriteConsistency(nodes))
                                     .setAllowSameNode(nodes.isAllowSameNode())
                                     .setExcludeVolumeIds(usedVolumeIds);
 

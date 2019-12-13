@@ -23,7 +23,7 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.sfs.TestSubscriber;
-import rx.functions.Func1;
+import org.sfs.math.Rounding;
 
 import static com.google.common.collect.Iterables.toArray;
 import static java.lang.System.out;
@@ -41,18 +41,29 @@ public class RecyclingAllocatorTest {
 
         Async async = context.async();
         just((Void) null)
-                .map(new Func1<Void, Void>() {
-                    @Override
-                    public Void call(Void aVoid) {
-                        allocator.allocNextAvailable(1);
-                        long position = allocator.allocNextAvailable(1);
-                        allocator.allocNextAvailable(1);
-                        allocator.free(position, 1);
-                        int size = 100000;
-                        long free = allocator.getBytesFree(size);
-                        assertEquals(context, 100000 - (blockSize * 2), free);
-                        return null;
-                    }
+                .map(aVoid -> {
+                    allocator.allocNextAvailable(1);
+                    long position = allocator.allocNextAvailable(1);
+                    allocator.allocNextAvailable(1);
+                    allocator.free(position, 1);
+                    int size = 100000;
+                    long roundedSize = Rounding.down(size, blockSize);
+                    long free = allocator.getBytesFree(size);
+                    assertEquals(context, roundedSize - (blockSize * 2), free);
+                    assertEquals(context, 2, allocator.getNumberOfFreeRanges());
+                    return (Void) null;
+                })
+                .map(aVoid -> {
+                    int size = 0;
+                    long free = allocator.getBytesFree(size);
+                    assertEquals(context, (blockSize * 2), free);
+                    return (Void) null;
+                })
+                .map(aVoid -> {
+                    int size = -10;
+                    long free = allocator.getBytesFree(size);
+                    assertEquals(context, (blockSize * 2), free);
+                    return (Void) null;
                 })
                 .subscribe(new TestSubscriber(context, async));
     }
@@ -68,6 +79,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, 0L, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -79,6 +91,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -90,6 +103,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize * 2, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -113,6 +127,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, 0, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -125,6 +140,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -137,6 +153,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize * 2, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -149,6 +166,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize * 3, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -161,6 +179,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize * 6, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -175,6 +194,7 @@ public class RecyclingAllocatorTest {
                 })
                 .map(position -> {
                     print(allocator);
+                    assertEquals(context, 2, allocator.getNumberOfFreeRanges());
                     Assert.assertArrayEquals(
                             new Range[]{
                                     new Range(blockSize, 16383),
@@ -187,6 +207,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -199,6 +220,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize * 7, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -211,6 +233,7 @@ public class RecyclingAllocatorTest {
                 .map(position -> {
                     print(allocator);
                     assertEquals(context, blockSize * 8, position.longValue());
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -310,6 +333,7 @@ public class RecyclingAllocatorTest {
                 .map(aVoid -> allocator.allocNextAvailable(100000000))
                 .map(position -> {
                     print(allocator);
+                    assertEquals(context, 1, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{new Range(100007936, 9223372036854767615L)},
@@ -322,6 +346,7 @@ public class RecyclingAllocatorTest {
                 })
                 .map(position -> {
                     print(allocator);
+                    assertEquals(context, 2, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -336,6 +361,7 @@ public class RecyclingAllocatorTest {
                 })
                 .map(position -> {
                     print(allocator);
+                    assertEquals(context, 3, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
@@ -351,6 +377,7 @@ public class RecyclingAllocatorTest {
                 })
                 .map(position -> {
                     print(allocator);
+                    assertEquals(context, 2, allocator.getNumberOfFreeRanges());
                     assertArrayEquals(
                             context,
                             new Range[]{
